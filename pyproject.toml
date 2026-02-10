@@ -28,5 +28,6 @@ dependencies = [
     "crossref",
     "backoff", 
     "tiktoken", 
-    "pyarrow"
+    "pyarrow", 
+    "habanero"
 ]

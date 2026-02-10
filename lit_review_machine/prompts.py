@@ -3,7 +3,7 @@ class Prompts:
     def __init__(self):
         pass
 
-    def question_make_sys_prompt(self, num_prompts, search_engine='Semantic Scholar'):
+    def question_make_sys_prompt(self, num_prompts, search_engine='CrossRef and OpenAlex'):
         return (
             f'You are an assistant whose task is to generate search prompts for use in {search_engine}, '
             'based on a provided research question. Each input will be in the format:\n'
@@ -24,14 +24,14 @@ class Prompts:
             'Do not include any explanatory text, headers, or formatting outside of the JSON.\n\n'
 
             'Guidelines for generating prompts:\n'
-            '- Focus on topics, entities, and document types likely to exist (e.g., "industrial policy reports", '
+            '- Focus on topics, entities, and document types likely to exist (e.g., "reports", '
             '"policy space constraints", "working papers", "technical notes").\n'
             '- Include synonyms and variations of key terms.\n'
             '- Do not simply copy the question verbatim; abstract it to make it discoverable in existing literature.\n'
             '- Ensure the prompts are concise, actionable, and suitable for use in a search engine or literature database.\n'
         )
 
-    def grey_lit_retrieve(self, questions: list) -> str:
+    def grey_lit_retrieve(self, questions: list, example_grey_literature_sources: str) -> str:
         """
         System prompt for retrieving grey literature relevant to research questions.
         Maintains strict JSON object structure with a "results" array.
@@ -46,10 +46,7 @@ class Prompts:
             'that relate to the following research questions:\n'
             f'{question_string}\n\n'
 
-            'Grey literature includes outputs from organizations such as major think tanks, '
-            'multilateral organizations, and policy research institutes (for example: '
-            'The Center for Global Development, The Brookings Institution, The Overseas Development Institute, '
-            'UNCTAD, UNIDO, The World Bank, or regional development banks). '
+            f'Grey literature includes outputs from organizations such as {example_grey_literature_sources}. '
             'This list is indicative, not exhaustive.\n'
             'Instructions for Search and Retrieval:\n'
             '- Use your available web search tools to find relevant documents for each research question.\n'
@@ -58,14 +55,15 @@ class Prompts:
             '- For each document identified, extract the following metadata fields:\n'
             '  - "question_id": The canonical unique identifier for the research question (e.g., "question_1").\n'
             '  - "paper_title": The title of the document.\n'
-            '  - "paper_author": The author(s) or organization(s) responsible, always as a JSON array.\n'
+            '  - "paper_author": The author(s) or organization(s) responsible, always as a string (names separated by semicolons).\n'
             '  - "paper_date": The publication year (YYYY format), or null if unknown.\n'
-            '  - "doi": The DOI string if available, else null.\n'
-            '  - "download_link": The direct link to the document PDF or landing page.\n'
+            '  - "doi": The DOI string if available, else None.\n\n'
+
             'Critical rules about identifiers and linkage:\n'
             '- Each grey literature item must be associated with at least one research question.\n'
             '- Use the provided canonical "question_id" to indicate which question(s) it is relevant to.\n'
-            '- If an item is relevant to multiple questions, duplicate it under each canonical "question_id".\n'
+            '- If an item is relevant to multiple questions, duplicate it under each canonical "question_id".\n\n'
+
             'Output Format (STRICT JSON OBJECT):\n'
             '- Return ONLY a JSON object with a single key "results" containing an array of documents.\n'
             '- Each element of the array must include all keys listed above.\n'
@@ -77,15 +75,14 @@ class Prompts:
             '    {\n'
             '      "question_id": "question_1",\n'
             '      "paper_title": "Renewable Energy Policy Frameworks: Lessons from Emerging Economies",\n'
-            '      "paper_author": ["Energy Policy Institute"],\n'
+            '      "paper_author": "Energy Policy Institute; World Resources Institute",\n'
             '      "paper_date": "2023",\n'
-            '      "doi": null,\n'
-            '      "download_link": "https://example.org/policy_frameworks.pdf"\n'
+            '      "doi": None\n'
             '    }\n'
             '  ]\n'
             '}\n'
             'Ensure that the output is valid JSON, with the "results" array containing all found documents, '
-            'and that "paper_author" is always an array.'
+            'and with "paper_author" is always a string (names separated by semicolons).'
         )
 
 
@@ -104,10 +101,10 @@ class Prompts:
             'Requirements:\n'
             "- The input may have formatting errors including misplaced quotes, escaped characters, missing commas, or extra whitespace. Correct all errors.\n"
             "- Preserve the canonical `question_id` for each document.\n"
-            "- All keys must appear in every object: 'question_id', 'paper_title', 'paper_author', 'paper_date', 'doi', 'download_link'.\n"
+            "- All keys must appear in every object: 'question_id', 'paper_title', 'paper_author', 'paper_date', 'doi'.\n"
             "- Your response must include all the documents contained in the content submitted by the user.\n"
             "- Ensure string values are enclosed in double quotes.\n"
-            "- 'paper_author' must always be a JSON array, even if there is only one author.\n"
+            "- 'paper_author' must always be a string (names separated by semicolons).\n"
             "- If a field is unknown, set it explicitly to null.\n"
             "- Return only valid JSON, no explanations, comments, or code blocks.\n"
             "- Example output:\n"
@@ -116,10 +113,9 @@ class Prompts:
             '    {\n'
             '      "question_id": "question_1",\n'
             '      "paper_title": "Renewable Energy Policy Frameworks: Lessons from Emerging Economies",\n'
-            '      "paper_author": ["Energy Policy Institute"],\n'
+            '      "paper_author": "Energy Policy Institute; World Resources Institute",\n'
             '      "paper_date": "2023",\n'
-            '      "doi": null,\n'
-            '      "download_link": "https://example.org/policy_frameworks.pdf"\n'
+            '      "doi": null\n'
             '    }\n'
             '  ]\n'
             '}\n'
@@ -145,8 +141,8 @@ class Prompts:
             '    "question_id": "research_question_1",\n'
             '    "question_text": "How does X affect Y?",\n'
             '    "papers": [\n'
-            '      {"paper_id": "paper_1", "paper_author": ["Author A", "Author B"], "paper_year": 2003, "paper_title": "Example Title"},\n'
-            '      {"paper_id": "paper_2", "paper_author": ["Author C"], "paper_year": 2023, "paper_title": "Another Example"}\n'
+            '      {"paper_id": "paper_1", "paper_author": "Author A; Author B", "paper_year": 2003, "paper_title": "Example Title"},\n'
+            '      {"paper_id": "paper_2", "paper_author": "Author C", "paper_year": 2023, "paper_title": "Another Example"}\n'
             '    ]\n'
             '  }\n'
             ']\n\n'
@@ -154,24 +150,24 @@ class Prompts:
             '### Output format (STRICT JSON OBJECT):\n'
             '- Return ONLY a JSON object with a single key "results" containing an array of documents.\n'
             '- Do NOT return a bare JSON array.\n'
-            '- Each element of "results" must include all keys: "question_id", "paper_title", "paper_author", "paper_date", "doi", "download_link".\n'
-            '- "paper_author" must always be a JSON array, even for a single author.\n'
-            '- If a field is unknown, set it explicitly to null.\n'
+            '- Each element of "results" must include all keys: "question_id", "paper_title", "paper_author", "paper_date", "doi".\n'
+            '- "paper_author" must always be a string (names separated by semicolons).\n'
+            '- If a field is unknown, set it explicitly to None.\n'
             '- If no missing documents exist, return: {"results": []}\n'
             '- Use double quotes for all JSON strings.\n'
             '- Do NOT include comments, explanations, or code blocks.\n\n'
 
             '### Instructions for Search and Retrieval:\n'
-            '- Use your available web search tools to find relevant documents for each research question.\n'
+            '- Use knowledge contained in your base model to identify major existing documents relevant to each research question that are missing from the proposed literature.\n'
+            '- Use your available web search tools to confirm the documents identified from your base model. Also use web search to identify any relevant lists of major papers to compare with the proposed literature.\n'
             '- Construct search queries combining keywords from each research question with organization names '
             'and terms like PDF, report, policy brief, or working paper.\n'
             '- For each document identified, extract the following metadata fields:\n'
             '  - "question_id": The canonical unique identifier for the research question (e.g., "question_1").\n'
             '  - "paper_title": The title of the document.\n'
-            '  - "paper_author": The author(s) or organization(s) responsible, always as a JSON array.\n'
+            '  - "paper_author": The author(s) or organization(s) responsible, always as a string (names separated by semicolons).\n'
             '  - "paper_date": The publication year (YYYY format), or null if unknown.\n'
             '  - "doi": The DOI string if available, else null.\n'
-            '  - "download_link": The direct link to the document PDF or landing page.\n'
             '- Each piece of literature must be associated with at least one research question.\n'
             '- Use the provided canonical "question_id" to indicate which question(s) it is relevant to.\n'
             '- If an item is relevant to multiple questions, duplicate it under each canonical "question_id".\n'
@@ -184,14 +180,13 @@ class Prompts:
             '    {\n'
             '      "question_id": "question_1",\n'
             '      "paper_title": "Renewable Energy Policy Frameworks: Lessons from Emerging Economies",\n'
-            '      "paper_author": ["Energy Policy Institute"],\n'
+            '      "paper_author": "Energy Policy Institute; World Resources Institute",\n'
             '      "paper_date": "2023",\n'
-            '      "doi": null,\n'
-            '      "download_link": "https://example.org/policy_frameworks.pdf"\n'
+            '      "doi": None\n'
             '    }\n'
             '  ]\n'
             '}\n'
-            'Return strictly valid JSON only. "paper_author" must always be an array.\n\n'
+            'Return strictly valid JSON only. "paper_author" must always be a string (names separated by semicolons).\n\n'
             '### QUESTIONS AND PROPOSED LITERATURE'
             f'{questions_papers_json}'
         )
@@ -212,10 +207,10 @@ class Prompts:
             'Requirements:\n'
             "- The input may have formatting errors including misplaced quotes, escaped characters, missing commas, or extra whitespace. Correct all errors.\n"
             "- Preserve the canonical `question_id` for each document.\n"
-            "- All keys must appear in every object: 'question_id', 'paper_title', 'paper_author', 'paper_date', 'doi', 'download_link'.\n"
+            "- All keys must appear in every object: 'question_id', 'paper_title', 'paper_author', 'paper_date', 'doi'.\n"
             "- Your response must include all the documents contained in the content submitted by the user.\n"
             "- Ensure string values are enclosed in double quotes.\n"
-            "- 'paper_author' must always be a JSON array, even if there is only one author.\n"
+            "- 'paper_author' must always be a string (names separated by semicolons).\n"
             "- If a field is unknown, set it explicitly to null.\n"
             "- Return only valid JSON, no explanations, comments, or code blocks.\n"
             "- Example output:\n"
@@ -224,10 +219,9 @@ class Prompts:
             '    {\n'
             '      "question_id": "question_1",\n'
             '      "paper_title": "Renewable Energy Policy Frameworks: Lessons from Emerging Economies",\n'
-            '      "paper_author": ["Energy Policy Institute"],\n'
+            '      "paper_author": "Energy Policy Institute; World Resources Institute",\n'
             '      "paper_date": "2023",\n'
-            '      "doi": null,\n'
-            '      "download_link": "https://example.org/policy_frameworks.pdf"\n'
+            '      "doi": null\n'
             '    }\n'
             '  ]\n'
             '}\n'
@@ -271,106 +265,92 @@ class Prompts:
             'You are a specialized metadata extraction tool. Your SOLE function is to parse the provided text '
             'and return a JSON object containing the paper\'s metadata.\n\n'
             '### INSTRUCTIONS ###\n'
-            '1. **Input:** You will be given the first three pages of an academic or grey literature paper.\n'
+            '1. **Input:** You will be given the first five thousand characters of an academic or grey literature paper.\n'
             '2. **Output Format Enforcement:** You MUST ONLY output a single, complete JSON object. Do not include '
             'any conversational text, explanations, or code fencing (e.g., `json`).\n'
             '3. **Metadata Fields:** Extract the paper\'s **Title**, **Author(s)**, and **Date**.\n\n'
             '### FIELD RULES ###\n'
-            '* **paper_author:** This MUST be a JSON array. Each individual author\'s name should be a separate string element in the array (e.g., ["Smith, J.", "Jones, A."]). '
-            'If the author is an institution (common for grey literature), the institutional name should be the single string element in the array (e.g., ["World Bank Group"]).\n'
+            '* **paper_author:** This must be a string with author names separated by semicolons (e.g., "Smith, J.; Jones, A."). '
+            'If the author is an institution (common for grey literature), the institutional name should be the single string (e.g., "World Bank Group").\n'
             '* **paper_date:** Extract the full year (YYYY).\n'
             '* **Error Handling:** If any piece of metadata (title, author, or date) cannot be confidently found in the text, its corresponding value MUST be the string "NA". '
-            'For the **paper_author** field in this case, the value should be ["NA"].\n\n'
+            'For the **paper_author** field in this case, the value should be "NA".\n\n'
             '### USER INPUT FORMAT ###\n'
             'The user\'s input will always conform to the following structure:\n'
-            'questionid: [question id]\n'
             'paper_id: [paper id]\n'
             'TEXT:\n'
             '[text of first three pages]\n\n'
             '### REQUIRED JSON OUTPUT ###\n'
-            'The final output MUST strictly use this structure, substituting bracketed values with the extracted data or "NA":\n'
+            'The final output MUST strictly use this structure:\n'
             '{\n'
-            '    "question_id": "[question id]",\n'
-            '    "paper_id": "[paper id]",\n'
-            '    "paper_title": "[title]",\n'
-            '    "paper_author": ["[author 1]", "[author 2]", "..."],\n'
-            '    "paper_date": "[date or YYYY]"\n'
-            '}'
-        )
-
-
-    def gen_chunk_insights(self):
-        paper_specific_context = (
-            'The purpose of this literature review, conducted by Oxfam America, is to articulate advocacy priorities to ensure that the industrial policy '
-            'strategies of industrialized nations—particularly the United States—do not unduly constrain the policy options available to less industrialized countries. '
-            'The underlying hypothesis is that the recent resurgence of industrial policy risks impoverishing low-income countries, as wealthy countries are better positioned '
-            'to dominate global markets due to their superior financial and political resources.\n\n'
-        )
-
-        return (
-            'You are an agent in a human-in-the-loop, LLM-assisted literature review pipeline.\n'
-            'Your task is to extract relevant, traceable arguments from text chunks of academic papers and grey literature.\n\n'
-            f'{paper_specific_context}'
-            'You will always receive inputs in the following format:\n\n'
-            'CURRENT RESEARCH QUESTION:\n'
-            '[One research question you must focus on]\n\n'
-            'TEXT CHUNK (chunk_id: [text_chunk_id]):\n'
-            '[Chunk of text from a paper, including citations in the form (Author Date)]\n\n'
-            'OTHER RESEARCH QUESTIONS (for context only):\n'
-            '- [RQ1]\n'
-            '- [RQ2]\n'
-            '- [RQ3]\n'
-            '...\n\n'
-            'Your instructions:\n\n'
-            '1. **Extract and summarize any specific arguments, findings, or claims** that directly address the CURRENT RESEARCH QUESTION.\n'
-            '2. Use OTHER RESEARCH QUESTIONS only as background context to help interpret relevance, '
-            'but do not extract insights for them directly.\n'
-            '3. Each extracted item must be **concise (ideally one sentence or a short phrase)**, independent, preserve the original wording as much as possible, '
-            'and **must retain its citation (Author Date) at the end**.\n'
-            '4. Return output strictly in **valid JSON** that conforms exactly to the following schema:\n\n'
-            '```json\n'
-            '{\n'
-            '   "chunk_id": "text_chunk_id",\n'
-            '   "insight": [\n'
-            '       "claim1 (Author Date)",\n'
-            '       "claim2 (Author Date)"\n'
-            '   ]\n'
+            '    "paper_id": "<paper id>",\n'
+            '    "paper_title": "<title>",\n'
+            '    "paper_author": "<author 1>; <author 2>; ...",\n'
+            '    "paper_date": "<date or YYYY>"\n'
             '}\n'
-            '```\n\n'
-            '5. The value of "insight" **must always be a JSON array (list)** — even if there is only one insight or none.\n'
-            '   - If no relevant claims are found, return an empty list: `"insight": []`.\n'
-            '   - Never return a string, null, or omitted field for "insight".\n'
-            '6. Do not return explanations, markdown, comments, or text outside the JSON object.'
         )
 
 
-    def gen_meta_insights(self):
+    def gen_structured_chunk_insights(self, paper_context):
+        
+        return (
+            "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
+            "Your job is to extract traceable claims from a text chunk and assign each claim to the relevant research question(s).\n"
+            "Do NOT add new information or general knowledge. Only extract what is explicitly stated in the text chunk.\n\n"
+            f"{paper_context}\n\n"
+            "Input format:\n\n"
+            "RESEARCH QUESTIONS:\n"
+            "<rq_id>: <rq_text>\n"
+            "<rq_id>: <rq_text>\n"
+            "...\n\n"
+            "TEXT CHUNK:\n"
+            "<text chunk, including citations like (Author Date)>\n\n"
+            "Instructions:\n"
+            "1) For each research question, extract any explicit arguments/findings/claims in the text that answer or bear directly on that question.\n"
+            "2) Each extracted item must be concise (one sentence or short phrase), standalone, and preserve wording as much as possible.\n"
+            "3) Each extracted item MUST end with the citation exactly as it appears in the chunk (e.g., '(Author Date)'). If the chunk provides no citation for that item, omit the item.\n"
+            "4) Output MUST be valid JSON only, matching this schema:\n\n"
+            "{\n"
+            '  "results": {\n'
+            '    "<rq_id>": ["<claim ... (Author Date)>", "<claim ... (Author Date)>"],\n'
+            '    "<rq_id>": ["<claim ... (Author Date)>"]\n'
+            "  }\n"
+            "}\n\n"
+            "5) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate claims within the same question.\n"
+            "6) You can have multiple claims for the same research question, but each claim must be distinct and explicitly supported by a citation in the text chunk.\n"
+            "7) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return an empty results object: {\"results\": {}}.\n"
+            "8) Do not output markdown, explanations, or any text outside the JSON."
+            )
+
+
+    def gen_meta_insights(self, paper_context):
         """
         Generate a system prompt for extracting higher-level 'meta-insights' 
         from entire papers, focusing on cross-chunk reasoning.
         """
-        paper_specific_context = (
-            'The purpose of this literature review, conducted by Oxfam America, is to articulate advocacy priorities to ensure that the industrial policy '
-            'strategies of industrialized nations—particularly the United States—do not unduly constrain the policy options available to less industrialized countries. '
-            'The underlying hypothesis is that the recent resurgence of industrial policy risks impoverishing low-income countries, as wealthy countries are better positioned '
-            'to dominate global markets due to their superior financial and political resources.\n\n'
-        )
 
         return (
-            'You are an agent in a human-in-the-loop, LLM-assisted literature review pipeline.\n'
-            'Your task is to extract **meta-insights** — higher-level, traceable arguments or conclusions that span across multiple chunks or sections of a paper.\n'
-            'These meta-insights should complement (not repeat) the insights already extracted at the chunk level.\n\n'
-            f'{paper_specific_context}'
-            'You will always receive user input in the following format:\n\n'
+            "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
+            'Your task is to extract **meta-insights (including: claims/arguments/findings etc.)** — higher-level, traceable arguments or conclusions that span across multiple chunks or sections of a piece of text.\n'
+            "Do NOT add new information or general knowledge. Only extract what is explicitly stated in the text.\n\n"
+            "Note this process is a complement to chunk-level insight extraction pass (already conducted). "
+            "While chunk-level insights focus on claims explicitly supported by citations within individual chunks, your task is to identify broader insights that emerge from synthesizing information across the entire paper. "
+            "These meta-insights should therefore complement (not repeat) the insights already extracted at the chunk level.\n"
+            
+            f'{paper_context}'
+
+            'Input format:\n\n'
             'SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n'
-            '[question_id]: [question_text]\n\n'
-            'PAPER CONTENT ([paper_id]):\n'
-            'Metadata: [paper_metadata - author, date, title]\n'
-            '[paper_content]\n\n'
-            'CHUNK INSIGHTS:\n'
-            '[chunk_insight1]\n[chunk_insight2]\n...\n[chunk_insightN]\n\n'
+            '<question_id>: <question_text>\n\n'
+            'PAPER ID: <paper_id>:\n'
+            'PAPER METADATA:\n'
+            '<paper_metadata - author, date, title>\n'
+            'PAPER TEXT:\n'
+            '<paper_content>\n\n'
+            'EXISTING CHUNK INSIGHTS:\n'
+            '<chunk_insight_1>\n<chunk_insight_2>\n...\n<chunk_insight_n>\n\n'
             'OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n'
-            '[question_id1]: [question_text1]\n[question_id2]: [question_text2]\n...\n\n'
+            '<question_id1>: <question_text1>\n<question_id2>: <question_text2>\n...\n\n'
             '---\n\n'
             'OUTPUT REQUIREMENTS:\n'
             'Return a **valid JSON object** matching this exact schema:\n\n'
@@ -387,9 +367,11 @@ class Prompts:
             '- The value of "insight" **must always be a JSON array (list)** — even if empty or containing only one insight.\n'
             '- Return `"insight": []` if no new meta-insights are found.\n'
             '- Do **not** return strings, null, or omit the "insight" key.\n'
-            '- Derive insights that pertain only to the specified research question.\n'
+            '- Derive insights that pertain ONLY to the specified research question.\n'
+            '- Use the "OTHER RESEARCH QUESTIONS IN THE REVIEW" section for broader context to ground your understanding of what a relevant insight to the current research question might be, but ensure the insights you return are focused on the specific research question only.\n'
             '- Use the provided paper metadata to append citations to each insight.\n'
-            '- Keep insights concise (ideally 1–3 sentences each).\n'
+            '- Keep insights concise (ideally 1-3 sentences each).\n'
+            '- Note that if full text exceeds the context window it will be broken into parts. You should treat the text you recieve as the entire content even if it is only a portion of the full paper. Focus on extracting meta-insights from the text you receive, without assuming access to the full paper.\n'
             '- Do not repeat insights already found in chunks.\n'
             '- Do not output explanations, markdown, or any text outside the JSON object.'
         )
@@ -397,9 +379,9 @@ class Prompts:
 
     def summarize(self, summary_length):
         return (
-            "You are an agent specialized in summarizing insights from academic and grey literature. "
+            "You are an agent specialized in summarizing insights from different corpuses (academic and grey literature, internal memos, emails, reports, etc.). "
             f"Your task is to generate a single, coherent summary of approximately {summary_length} words. "
-            "The insights you will summarize have been generated by an LLM reading recursively chunked passages (~600 words) from larger research reports. "
+            "The insights you will summarize have been generated by an LLM reading recursively chunked passages (~600 words) from larger documents. "
             "In addition to parsing chunks for insights, each whole paper has also been parsed for 'meta-insights'—i.e., insights that span larger portions of the document and that might otherwise be lost in the process of chunking. "
             "These insights have been organized into clusters based on topic similarity, determined by embedding similarity, via the application of UMAP and HDBSCAN. "
             "The clusters have been further analyzed to identify the shortest path through them, optimizing the order in which they will be presented in the final summary. "
@@ -414,6 +396,7 @@ class Prompts:
 
             "SUMMARY REQUIREMENTS:\n"
             "- When summarizing the insights, focus primarily on answering the specific research question.\n"
+            "- There may be duplicate (or close duplicate claims) across insights. Do not weight identical claims more heavily, unless they are supported by distinct citations. Otherwise, treat duplicates as a single point.\n"
             "- Use other research questions for context and to identify conceptual or thematic connections, but ensure your primary focus remains on the specific research question.\n"
             "- Use the cluster summaries already created as context to increase overall coherence and to help identify cross-cutting themes across clusters. "
             "Explicitly note thematic linkages or contrasts when they help to situate the current cluster within the broader literature. "
@@ -461,69 +444,69 @@ class Prompts:
         )
     
 
-    def llm_sliding_window(self):
-        return (
-            "You reorganize text for clarity and coherence. Do not summarize or invent. Preserve all facts and citations verbatim. "
-            "Context: You are part of a human-in-the-loop literature review workflow. You rewrite generated summaries to improve coherence and readability "
-            "using a sliding window process.\n\n"
+    # def llm_sliding_window(self):
+    #     return (
+    #         "You reorganize text for clarity and coherence. Do not summarize or invent. Preserve all facts and citations verbatim. "
+    #         "Context: You are part of a human-in-the-loop literature review workflow. You rewrite generated summaries to improve coherence and readability "
+    #         "using a sliding window process.\n\n"
 
-            "You receive the following text:\n"
-            "- FROZEN: all finalized paragraphs (read-only)\n"
-            "- EDITABLE TAIL: the last paragraph of the frozen text, which you may revise if necessary\n"
-            "- LEFTOVERS: unused text from the prior pass that must be integrated or carried forward\n"
-            "- SUMMARY TO CLEAN: new text to be integrated this round\n\n"
+    #         "You receive the following text:\n"
+    #         "- FROZEN: all finalized paragraphs (read-only)\n"
+    #         "- EDITABLE TAIL: the last paragraph of the frozen text, which you may revise if necessary\n"
+    #         "- LEFTOVERS: unused text from the prior pass that must be integrated or carried forward\n"
+    #         "- SUMMARY TO CLEAN: new text to be integrated this round\n\n"
 
-            "Goal per pass:\n"
-            "- Produce exactly one coherent paragraph that either (1) follows the FROZEN text or (2) revises the EDITABLE TAIL.\n"
-            "- Return updated leftovers containing all remaining content from the current LEFTOVERS and SUMMARY TO CLEAN that was not incorporated.\n\n"
+    #         "Goal per pass:\n"
+    #         "- Produce exactly one coherent paragraph that either (1) follows the FROZEN text or (2) revises the EDITABLE TAIL.\n"
+    #         "- Return updated leftovers containing all remaining content from the current LEFTOVERS and SUMMARY TO CLEAN that was not incorporated.\n\n"
 
-            "Constraints:\n"
-            "- Preserve all details and citations exactly; do not invent new facts.\n"
-            "- You may omit information only if it is clearly redundant with FROZEN content.\n"
-            "- When omitting due to redundancy, refer briefly instead of repeating (e.g., 'As discussed above...').\n"
-            "- You may rewrite for flow, reorder ideas, and merge or split sentences, but do not change meaning.\n"
-            "- You may revise the EDITABLE TAIL to integrate overlap and improve coherence, but do not modify earlier frozen paragraphs.\n"
-            "- For each pass, choose one action only: revise_tail or append. Do not perform both.\n"
-            "- Prefer revise_tail when the EDITABLE TAIL already covers the same drivers and only needs minor integration; "
-            "prefer append when introducing new, distinct drivers.\n"
-            "- Prefer merging adjacent fragments over splitting them.\n"
-            "- Write 3-6 sentences in a formal academic tone.\n"
-            "- If FROZEN is blank (and thus EDITABLE TAIL is blank), start naturally.\n"
-            "- If SUMMARY TO CLEAN is blank, work from LEFTOVERS; if LEFTOVERS is blank, work from SUMMARY TO CLEAN.\n"
-            "- Coverage must be lossless: (revised_tail or clean_text) plus left_overs together must contain all information from "
-            "(LEFTOVERS + SUMMARY TO CLEAN) except content already clearly present in FROZEN. No duplication across outputs.\n"
-            "- Do not repeat FROZEN content.\n"
-            '- If information in LEFTOVERS or SUMMARY TO CLEAN is already expressed in FROZEN, exclude it from left_overs. You may refer to it briefly without repeating.\n'
-            '- If you revise the tail, you must integrate at least one nontrivial claim from LEFTOVERS and remove it from left_overs.\n'
-            '- If you cannot reduce LEFTOVERS by revising the tail, you must append a new paragraph built from LEFTOVERS. Never return identical LEFTOVERS twice.\n'
-            "- Return valid a valid JSON object only, no extra text.\n\n"
+    #         "Constraints:\n"
+    #         "- Preserve all details and citations exactly; do not invent new facts.\n"
+    #         "- You may omit information only if it is clearly redundant with FROZEN content.\n"
+    #         "- When omitting due to redundancy, refer briefly instead of repeating (e.g., 'As discussed above...').\n"
+    #         "- You may rewrite for flow, reorder ideas, and merge or split sentences, but do not change meaning.\n"
+    #         "- You may revise the EDITABLE TAIL to integrate overlap and improve coherence, but do not modify earlier frozen paragraphs.\n"
+    #         "- For each pass, choose one action only: revise_tail or append. Do not perform both.\n"
+    #         "- Prefer revise_tail when the EDITABLE TAIL already covers the same drivers and only needs minor integration; "
+    #         "prefer append when introducing new, distinct drivers.\n"
+    #         "- Prefer merging adjacent fragments over splitting them.\n"
+    #         "- Write 3-6 sentences in a formal academic tone.\n"
+    #         "- If FROZEN is blank (and thus EDITABLE TAIL is blank), start naturally.\n"
+    #         "- If SUMMARY TO CLEAN is blank, work from LEFTOVERS; if LEFTOVERS is blank, work from SUMMARY TO CLEAN.\n"
+    #         "- Coverage must be lossless: (revised_tail or clean_text) plus left_overs together must contain all information from "
+    #         "(LEFTOVERS + SUMMARY TO CLEAN) except content already clearly present in FROZEN. No duplication across outputs.\n"
+    #         "- Do not repeat FROZEN content.\n"
+    #         '- If information in LEFTOVERS or SUMMARY TO CLEAN is already expressed in FROZEN, exclude it from left_overs. You may refer to it briefly without repeating.\n'
+    #         '- If you revise the tail, you must integrate at least one nontrivial claim from LEFTOVERS and remove it from left_overs.\n'
+    #         '- If you cannot reduce LEFTOVERS by revising the tail, you must append a new paragraph built from LEFTOVERS. Never return identical LEFTOVERS twice.\n'
+    #         "- Return valid a valid JSON object only, no extra text.\n\n"
 
-            "INPUT FORMAT\n"
-            "Research question id: <question_id>\n"
-            "Research question text: <question_text>\n"
-            "FROZEN SUMMARY TEXT (read-only):\n"
-            "<para_1>\n"
-            "<para_2>\n"
-            "...\n"
-            "EDITABLE TAIL (may be revised):\n"
-            "<tail_para>\n"
-            "LEFTOVERS:\n"
-            "<leftover_text>\n"
-            "SUMMARY TO CLEAN:\n"
-            "<summary_para_1>\n"
-            "<summary_para_2>\n"
-            "...\n\n"
+    #         "INPUT FORMAT\n"
+    #         "Research question id: <question_id>\n"
+    #         "Research question text: <question_text>\n"
+    #         "FROZEN SUMMARY TEXT (read-only):\n"
+    #         "<para_1>\n"
+    #         "<para_2>\n"
+    #         "...\n"
+    #         "EDITABLE TAIL (may be revised):\n"
+    #         "<tail_para>\n"
+    #         "LEFTOVERS:\n"
+    #         "<leftover_text>\n"
+    #         "SUMMARY TO CLEAN:\n"
+    #         "<summary_para_1>\n"
+    #         "<summary_para_2>\n"
+    #         "...\n\n"
 
-            "OUTPUT FORMAT\n"
-            "{\n"
-            '  "question_id": "<question_id>",\n'
-            '  "question_text": "<question_text>",\n'
-            '  "action": "append" | "revise_tail",\n'
-            '  "clean_text": "<new paragraph, required if action=append>",\n'
-            '  "revised_tail": "<revised tail paragraph, required if action=revise_tail>",\n'
-            '  "left_overs": "<updated leftover text>"\n'
-            "}\n"
-        )
+    #         "OUTPUT FORMAT\n"
+    #         "{\n"
+    #         '  "question_id": "<question_id>",\n'
+    #         '  "question_text": "<question_text>",\n'
+    #         '  "action": "append" | "revise_tail",\n'
+    #         '  "clean_text": "<new paragraph, required if action=append>",\n'
+    #         '  "revised_tail": "<revised tail paragraph, required if action=revise_tail>",\n'
+    #         '  "left_overs": "<updated leftover text>"\n'
+    #         "}\n"
+    #     )
     
     def llm_theme_id(self):
         return(
@@ -625,7 +608,8 @@ class Prompts:
 
     def exec_summary(self, token_length: int):
         return (
-            "You synthesize literature into an executive summary. Do not invent facts. Use only information present in the input.\n\n"
+            "You synthesize literature into an executive summary and suggest paper titles. Do not invent facts. Use only information present in the input. "
+            "You are part of a process generating a literature review, specifically generating an executive summary and suggesting a paper title.\n\n"
 
             "## INPUT FORMAT\n"
             "You will receive a single string containing the review content organized by research question. It may include theme labels and citations.\n\n"
@@ -633,6 +617,7 @@ class Prompts:
             "## OUTPUT FORMAT\n"
             '{\n'
             '  "executive_summary": "<final text only>"\n'
+            '  "title": "<one concise, descriptive title>"\n'
             '}\n\n'
 
             "## INSTRUCTIONS\n"
@@ -676,70 +661,104 @@ class Prompts:
         )
     
 
+    def ai_peer_review(self, paper_context, lit_review: str, output_length, max_tokens, themed = True) -> str:
 
-
-
-
-
-
-
-
-
-
-
-    def ai_peer_review(self, lit_review: str, output_length, max_tokens) -> str:
-        paper_specific_context = (
-            'The purpose of this literature review, conducted by Oxfam America, is to articulate advocacy priorities to ensure that the industrial policy '
-            'strategies of industrialized nations—particularly the United States—do not unduly constrain the policy options available to less industrialized countries. '
-            'The underlying hypothesis is that the recent resurgence of industrial policy risks impoverishing low-income countries, as wealthy countries are better positioned '
-            'to dominate global markets due to their superior financial and political resources.\n\n'
-        )
+        if themed: 
+            workflow = (
+                'It loosely follows the workflow: paper retrieval → paper chunking → insight retrieval → insight embedding → '
+                'insight clustering → cluster summary generation -> theme identification -> theme population. You are reviewing these populated themes.\n\n'
+            )
+        else:
+            workflow = (
+                'It loosely follows the workflow: paper retrieval → paper chunking → insight retrieval → insight embedding → '
+                'insight clustering → cluster summary generation. You are reviewing these cluster summaries.\n\n'
+            )
 
         return (
             'You are a deep research enabled AI. Your task is to validate a literature review. '
             'Specifically, explore the completeness of the review and provide feedback identifying any gaps or errors. '
-            'Gaps should focus on missing arguments, prominent inputs or points of view. '
+            'Gaps should focus on missing arguments, prominent inputs or points of view. If you identify gaps, '
+            'you should also state sources of literature that can address these gaps. These should be actual sources or authors, not just themes to look into.'
             'If all salient arguments are made in the existing literature review, and it is only missing papers that '
-            'repeat already made arguments, do not highlight them unless they are canonical. '
+            'repeat already made arguments, do not highlight them unless your base model understands them to be canonical. '
             'For errors, highlight any points in the literature review that are substantively false or incorrect. '
             'Provide a substantive peer review.\n\n'
             'The literature review has been conducted by a human-in-the-loop AI/LLM assisted process. '
-            'It loosely follows the workflow: paper retrieval → paper chunking → insight retrieval → insight embedding → '
-            'insight clustering → cluster summary generation. You are reviewing those summaries.\n\n'
-            f'{paper_specific_context}'
-            'Below (under LIT REVIEW TEXT), you will receive the full literature review in the following form '
-            '(repeating for each research question):\n'
-            'Research question id: [question_id]\n'
-            'Research question text: [question_text]\n'
-            'Review:\n'
-            '[summaries of clusters]\n\n'
+            f'{workflow}'
+            f'{paper_context}'
+            'You are reviewing the specific output for a single research question, which will be provided below under "CURRENT RESEARCH QUESTION" and "LIT REVIEW TEXT".\n\n'
+            'In addition, as context you will receive the executive summary for the paper, the other research questions that were posed as well as a summary of the findings for the other research questions. '
+            'These will be organized under EXEC SUMMARY, OTHER RESEARCH QUESTIONS and SUMMARIES\n\n'
             'STRICT OUTPUT RULES:\n'
-            'You may ONLY output one of the following two options:\n\n'
-            '1) A JSON object if the complete review fits within the token budget. The JSON MUST have the following format:\n'
+            'You should only output JSON in the following format:\n\n'
             '{\n'
-            '   "overall_comment": "Your overall comments on the review",\n'
-            '   "[question_id]_comment": "Your review comments for that question",\n'
-            '   "[question_id]_comment": "...",\n'
-            '   ...\n'
-            '}\n\n'
-            '2) A JSON object indicating more tokens are needed if the review cannot fit the allocated token budget:\n'
-            '{\n'
-            '   "error": "needs_more_tokens",\n'
-            '   "message": "The review cannot be fully explained within the allocated token budget. Please resubmit with a higher token limit.",\n'
-            '   "predicted_tokens_needed": X\n'
+            '   "overall_comment": <Your overall comments on the review>,\n'
+            '   "resubmit": <True|False>,\n'
+            '   "specific_comments": [\n'
+            '       {\n'
+            '           "comment_id": <comment_id>,\n'
+            '           "comment": <comment>,\n'
+            '           "severity": "<Low|Medium|High>",\n'
+            '           "location": "<if possible, indicate where in the text the comment applies>"\n'    
+            '       },\n'
+            '       {\n'
+            '           "comment_id": <comment_id>,\n'
+            '           "comment": <comment>,\n'
+            '           "severity": "<Low|Medium|High>",\n'
+            '           "location": "<if possible, indicate where in the text the comment applies>"\n'
+            '       },\n'
+            '       ...\n'
+            '   ]\n'
             '}\n\n'
             'Do NOT include any text outside the specified JSON object.\n\n'
             'INSTRUCTIONS:\n'
-            f'- Aim to provide your review in less than {output_length} words. Use fewer words if possible; do NOT generate exactly {output_length} words if unnecessary.\n'
-            f'- If your complete review requires more than {output_length} words, you may expand up to {max_tokens} tokens.\n'
-            '- If review fits within {max_tokens} tokens, return only the review JSON as specified above.\n'
-            '- If review exceeds token budget, return only the "needs_more_tokens" JSON; do NOT produce any partial review.\n'
-            '- If the literature review is completely inadequate, indicate the need for full resubmission either in the JSON overall_comment or the "needs_more_tokens" JSON.\n'
+            f'- Aim to provide your complete review in less than {output_length} words. Use fewer words if possible; do NOT generate exactly {output_length} words if unnecessary.\n'
+            f'- If your complete review requires more than {output_length} words, you may expand up to {max_tokens} tokens but end the text in a coherent manner.\n'
+            '- If the literature review is completely inadequate, indicate the need for full resubmission in the "resubmit" field.\n'
             '- Focus on substantive review. Note missing perspectives, points, or arguments. Do not highlight missing papers unless extremely prominent or canonical.\n'
             '- Highlight any points in the literature review that are false or incorrect.\n'
+            '- If the result of the literature review is robust, state that no major gaps or errors were found in the overall comment - do not comment for the sake of commenting. In this case leave specific_comments as an empty list.\n'
             '- You may use information from your base model and available search tools (e.g., web_search_preview) to check for content relevant to the research questions.\n'
-            '- Keep the overall motivation for the literature review in mind.\n\n'
-            'FINAL REMINDER: Only output either the full review JSON (with exact question_id keys) or the "needs_more_tokens" JSON. Absolutely no additional text.\n\n'
-            'LIT REVIEW TEXT:\n'
-            f'{lit_review}'
+            '- Focus on answering the current research question only, but keep the overall motivation for the literature review in mind as well as the other research questions and their summaries. \n\n'
+            f'{lit_review}\n'
+        )
+    
+    def peer_review_format_check(self):
+        """
+        System prompt for correcting mis-formatted JSON describing peer review.
+        """
+
+        return (
+            'You are an agent specialized in formatting strings to be valid JSON. '
+            'The user will provide text that is an approximation of valid JSON describing a formal peer review.\n\n'
+
+            'Your task is to correct it so it can be parsed with `json.loads()`.\n\n'
+
+            'Requirements:\n'
+            "- The input may have formatting errors including misplaced quotes, escaped characters, missing commas, or extra whitespace. Correct all errors.\n"
+            "- Preserve all the core data, only amend to ensure valid JSON.\n"
+            "- Your response must include all the documents contained in the content submitted by the user.\n"
+            "- Ensure string values are enclosed in double quotes.\n"
+            "- Example output:\n"
+            '{\n'
+            '   "overall_comment": <Your overall comments on the review>,\n'
+            '   "resubmit": <True|False>,\n'
+            '   "specific_comments": [\n'
+            '       {\n'
+            '           "comment_id": <comment_id>,\n'
+            '           "comment": <comment>,\n'
+            '           "severity": "<Low|Medium|High>",\n'
+            '           "location": "<if possible, indicate where in the text the comment applies>"\n'    
+            '       },\n'
+            '       {\n'
+            '           "comment_id": <comment_id>,\n'
+            '           "comment": <comment>,\n'
+            '           "severity": "<Low|Medium|High>",\n'
+            '           "location": "<if possible, indicate where in the text the comment applies>"\n'
+            '       },\n'
+            '       ...\n'
+            '   ]\n'
+            '}\n\n'
+            ' - Specific comments may be empty if overall comment indicates no issues found.\n'
+            "Return strictly valid JSON."
         )

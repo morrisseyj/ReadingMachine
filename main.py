@@ -11,7 +11,6 @@ from lit_review_machine import processing, outputs, prompts, utils
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
-from unpywall import Unpywall
 import os
 
 
@@ -44,6 +43,26 @@ questions = [
     "What key recommendations can Oxfam make to rich countries to advance reforms among different transnational institutions, so as to increase the policy space available to less-industrialized countries, to a point that it is, at least, comparable with the policy space afforded to industrialized nations?"
 ]
 
+
+example_grey_literature_sources = (
+    "The Center for Global Development, The Brookings Institution, The Overseas Development Institute, UNCTAD, UNIDO, The World Bank, or regional development banks"
+)
+
+
+paper_context = (
+    'The purpose of this literature review, conducted by Oxfam America, is to articulate advocacy priorities to ensure that the industrial policy '
+    'strategies of industrialized nations—particularly the United States—do not unduly constrain the policy options available to less industrialized countries. '
+    'The underlying hypothesis is that the recent resurgence of industrial policy risks impoverishing low-income countries, as wealthy countries are better positioned '
+    'to dominate global markets due to their superior financial and political resources.'
+    )
+
+
+############
+#Restart the pipeline if you want
+############
+utils.restart_pipeline()
+
+
 #############
 # Get Search terms
 #############
@@ -51,11 +70,10 @@ questions = [
 # Initialize the ScholarSearchString class that we will use to generate search terms
 search_terms = processing.ScholarSearchString(questions=questions, 
                                               llm_client=llm_client,
-                                              num_prompts=2)
+                                              num_prompts=5)
 
 # Call the LLM to populate the search terms
 search_terms.searchstring_maker()
-
 # Examine the results
 search_terms.state.insights
 
@@ -63,34 +81,49 @@ search_terms.state.insights
 # Identify academic literature 
 #############
 
-# Initialize the AcademicLit class with the state from the ScholarSearchString class 
-# You can optionally pass your semantic scholar API key via param 'semantic_scholar_api_key'. You will get a warning if you don't
+# Initialize the AcademicLit class with the state from the ScholarSearchString class
+# You should set your EMAIL_DOMAIN in your environment variables before running this - to make for polite API usage
 academic_lit = processing.AcademicLit(state = search_terms.state)
 
 # Get the papers from semantic search based on the search terms contained in state
-# num_results (default 20) is the number of search results for each search term so total results for the project will be: num_prompts * num_results * number_of_questions (though note this may include duplicates - that will be handled later)
+# num_results (default 10) is the number of search results for each search term so total results for the project will be: num_prompts * num_results * number_of_questions (though note this may include duplicates - that will be handled later)
+academic_lit.search_crossref()
+academic_lit.search_openalex()
 
-##### THIS IS NOT WORKING DUE TO THE NEED FOR AN API KEY
-papers = academic_lit.get_papers(num_results = 5)
-# SO I MANUALLY DOWNLOAD THE CSV, INSERT SOME PAPERS BASED ON THE SEARCHES AND NOW LOAD THE CSV TO KEEP TESTING
-#academic_lit.state.write_to_csv(os.path.join(os.getcwd(), "outputs"))
-papers_state = outputs.QuestionState.from_csv(os.path.join(os.getcwd(), "outputs"), encoding = 'cp1252')
-#NOW I KEEP TESTING BY PUSHING THIS INTO THE NEXT CLASS
+# ###########
+# # Get DOI for as many papers as possible
+# ###########
 
-# Instantiate the DOI class witht the question state that would have come from acacdemic lit
-doi = processing.DOI(state = papers_state)
-# Get the DOI for all papers - needed to try and identify open source versions
-doi.get_doi()
-# We want to use unpaywall to get the download links so we create the environment variable here
-os.environ["UNPAYWALL_EMAIL"] ="james.morrissey@oxfam.org"
-doi.get_download_link()
+# #Instantiate the DOI class with the question state that would have come from academic lit
+# doi = processing.DOI(state = academic_lit.state)
+# # Get the DOI for all papers - needed to try and identify open source versions
+# doi.get_doi()
+# # We want to use unpaywall to get the download links so we create the environment variable here
+# os.environ["UNPAYWALL_EMAIL"] ="james.morrissey@oxfam.org"
+# doi.get_download_link()
 
-# Instantiate grey literature class with the state from doi
-grey_literature = processing.GreyLiterature(state=doi.state, llm_client=llm_client)
+#############
+# Acquire grey literature
+#############
+
+# Instantiate grey literature class with the state from AcademicLit class
+grey_literature = processing.GreyLiterature(state=academic_lit.state, llm_client=llm_client)
+
+# To get the grey literature we also have to pass some example sources of grey literature for the research model to look at:
+example_grey_literature_sources = (
+    "The Center for Global Development, The Brookings Institution, The Overseas Development Institute, UNCTAD, UNIDO, The World Bank, or regional development banks"
+)
+
 # Undertake the deep research search for grey literature
-grey_literature.get_grey_lit()
+grey_literature.get_grey_lit(example_grey_literature_sources=example_grey_literature_sources)
+# You can inspect the grey literature dataframe here:
+grey_literature.grey_lit
 
-# Instantiate the Literature class to handle duplicates
+
+######## 
+# Handle duplicates
+#########
+# Instantiate the Literature class with the state from the grey literature class
 literature = processing.Literature(grey_literature.state)
 # Drop the exact duplicates - will return a dataframe for each question with unique papers. 
 literature.drop_exact_duplicates()
@@ -99,25 +132,23 @@ literature.get_fuzzy_matches()
 # Now we edit the csv to drop all approximate matches, and update the state with that csv
 literature.update_state()
 
+###########
+# Use an AI agent to check the literature  
+############
 # Instantiate the AiLiteratureCheck class
 ai_literature = processing.AiLiteratureCheck(state = literature.state, llm_client=llm_client)
 # Undertake the ai_literature check
 ai_literature.ai_literature_check()
 
-# To make sure we get all the papers we want from the LLM we don't encourage it to address 
-# duplicates - in case this stopped it duplicating papers across questions which is what we want. As such
-# more duplicates can be introduced. Lets hanlde them again with the literature class:
-# First we instantiate
-de_dup_lit = processing.Literature(state = ai_literature.state)
+############
+# Set up the system for file downloads
+############
 
-# Then dedup as above:
-de_dup_lit.drop_exact_duplicates()
-de_dup_lit.get_fuzzy_matches()
-de_dup_lit.update_state()
+latest_state = outputs.QuestionState.load(filepath = 'C:\\Users\\jmorrissey\\Documents\\python_projects\\lit_review_machine\\data\\runs\\05_ai_lit_check')
+downloads = processing.DownloadManager(state=latest_state)
 
-# Proceed with downloading the files
 # Instantiate the downloader
-downloads = processing.DownloadManager(state=de_dup_lit.state)
+downloads = processing.DownloadManager(state=ai_literature.state)
 # After manually undertaking the downloads
 downloads.update()
 
@@ -256,7 +287,24 @@ summary.gen_executive_summary()
 # Generate the question summaries
 summary.gen_question_summaries()
 # Generate the final document
-summary.summary_to_doc(paper_title="Industrial Policy: What a resurgence means for Oxfam")
+summary.summary_to_doc()
+# generate the peer review
+summary.get_ai_peer_review()
+# Save the peer review to a Word document
+summary.peer_review_to_doc()
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

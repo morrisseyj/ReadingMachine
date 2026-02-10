@@ -1,13 +1,13 @@
 # Import the two projevct modules
 from lit_review_machine.outputs import QuestionState, Summaries, SUMMARY_SAVE_LOCATION
 from lit_review_machine.prompts import Prompts
-from lit_review_machine.utils import ensure_list_of_strings, populate_dict_recursively, call_chat_completion, call_reasoning_model
+from lit_review_machine.utils import call_chat_completion, call_reasoning_model
 
 # Import other libraries
 import json
 import os
 import pickle
-from scholarly import scholarly, ProxyGenerator
+from habanero import Crossref
 from collections import defaultdict
 import time
 import random
@@ -34,7 +34,6 @@ from copy import deepcopy
 import ast
 from bs4 import BeautifulSoup
 from pathlib import Path
-#from crossref.restful import Works
 from requests.exceptions import HTTPError
 import tiktoken
 import itertools
@@ -113,9 +112,7 @@ def validate_format(
             )
 
         return state
-
-
-   
+  
 class ScholarSearchString:
     """
     Generate search prompts and search strings for research questions using an LLM.
@@ -275,6 +272,10 @@ class ScholarSearchString:
         return self.state.insights["search_string"].to_list()
 
 class AcademicLit:
+
+    OPENALEX_BASE = "https://api.openalex.org/works"
+    OPENALEX_TIMEOUT = 30
+
     def __init__(self, 
                  state: Optional["QuestionState"] = None, 
                  search_strings: Optional[pd.DataFrame] = None) -> None:
@@ -294,320 +295,374 @@ class AcademicLit:
                 injected_required_cols=["question_id", "question_text", "search_string", "search_string_id"]
             )
         )
-
-    def search_crossref(self, num_results: int = 20) -> pd.DataFrame:
-        """
-        Search CrossRef for each search string in state and update the state.
-
-        Args:
-            num_results (int): Maximum number of papers to retrieve per search string.
-
-        Returns:
-            pd.DataFrame: Updated state.insights with CrossRef results.
-        """
-        works: Works = Works()
-        output: Dict[str, List] = {
-            "search_string": [],
-            "paper_title": [],
-            "paper_author": [],
-            "paper_date": [],
-            "paper_doi": []
-        }
-
-        for search_string in self.state.search_strings['search_string']:
-            try:
-                results = works.query(search_string).sort('relevance').rows(num_results)
-            except HTTPError as e:
-                if e.response.status_code == 503:
-                    print("Received 503 from CrossRef API, retrying after a short delay...")
-                    time.sleep(5 + random() * 5)  # Wait between 5-10 seconds before retrying
-                    results = works.query(search_string).sort('relevance').rows(num_results)
-   
-            for item in results:
-                # Paper title
-                output["paper_title"].append(item['title'][0] if 'title' in item else 'No title found')
-
-                # Paper authors, safely handling missing given/family names
-                output["paper_author"].append(
-                    [i["family"] + ", " + (i["given"][0] if i.get("given") else "") 
-                     for i in item.get("author", [])] or ['No author found']
-                )
-
-                # Publication year, prefer print then online, pd.NA if missing
-                if 'published-print' in item and 'date-parts' in item['published-print']:
-                    year: Optional[int] = item['published-print']['date-parts'][0][0]
-                elif 'published-online' in item and 'date-parts' in item['published-online']:
-                    year = item['published-online']['date-parts'][0][0]
-                else:
-                    year = pd.NA
-                output["paper_date"].append(year)
-
-                # DOI, pd.NA if missing
-                output["paper_doi"].append(item['DOI'] if 'DOI' in item else pd.NA)
-
-                output["search_string"].append(search_string)
-
-        output_df: pd.DataFrame = pd.DataFrame(output)
-        output_df["search_engine"] = "CrossRef"
-        output_df["paper_id"] = [f"crossref_paper_{i + 1}" for i in range(output_df.shape[0])]
-
-        # Merge results into state
-        self.state.insights = self._merge_search_results_with_state(output_df)
-        self.state.save(STATE_FILE_LOCATION)
-
-        return self.state.insights
-
-    def search_CORE(self, num_results: int = 20) -> pd.DataFrame:
-        """
-        Search CORE API for each search string in state and update the state.
-
-        Args:
-            num_results (int): Maximum number of papers to retrieve per search string.
-
-        Returns:
-            pd.DataFrame: Updated state.insights with CORE results.
-        """
-        core: OACore = OACore(api_key=os.getenv("CORE_API_KEY"))
-        output: Dict[str, List] = {
-            "search_string": [],
-            "paper_title": [],
-            "paper_author": [],
-            "paper_date": [],
-            "paper_doi": []
-        }
-
-        for search_string in self.state.search_strings['search_string']:
-            results: dict = core.search(query=search_string, page_size=num_results)
-
-            for item in results.get('results', []):
-                # Paper title
-                output["paper_title"].append(item.get('title', 'No title found'))
-
-                # Authors, safely handling missing family/given names
-                output["paper_author"].append(
-                    [i["familyName"] + ", " + (i["givenName"][0] if i.get("givenName") else "") 
-                     for i in item.get("authors", [])] or ['No author found']
-                )
-
-                # Publication year (first 4 chars of published_date)
-                year: Optional[int] = int(item['published_date'][:4]) if 'published_date' in item else pd.NA
-                output["paper_date"].append(year)
-
-                # DOI, pd.NA if missing
-                output["paper_doi"].append(item.get('doi', pd.NA))
-                output["search_string"].append(search_string)
-                time.sleep(0.6) # To respect CORE API rate limits
-
-        output_df: pd.DataFrame = pd.DataFrame(output)
-        output_df["search_engine"] = "CORE"
-        output_df["paper_id"] = [f"core_paper_{i + 1}" for i in range(output_df.shape[0])]
-
-        # Merge results into state
-        self.state.insights = self._merge_search_results_with_state(output_df)
-        self.state.save(STATE_FILE_LOCATION)
-
-        return self.state.insights
-
+    
+    # CLASS UTILS ------------
     def _merge_search_results_with_state(self, search_results: pd.DataFrame) -> pd.DataFrame:
         """
-        Merge search results with the question information in state.
+        Merge search results with the existing state.insights DataFrame.
 
-        Args:
-            search_results (pd.DataFrame): DataFrame containing search results.
-
-        Returns:
-            pd.DataFrame: Merged DataFrame with duplicates removed.
+        - Adds question metadata (question_id, question_text, search_string_id, search_string).
+        - Deduplicates across engines.
+        - Returns the merged DataFrame (not written to disk).
         """
-        if "search_engine" in self.state.insights:
+        if "search_engine" in getattr(self.state, "insights", pd.DataFrame()).columns:
             # Merge to bring in question info and concatenate with existing results
-            output_df: pd.DataFrame = search_results.merge(
+            enriched = search_results.merge(
                 self.state.insights[["question_id", "question_text", "search_string_id", "search_string"]],
-                how="left",
-                on="search_string"
+                on="search_string",
+                how="left"
             )
-            merged_output: pd.DataFrame = pd.concat([self.state.insights, output_df], ignore_index=True)
+            merged = pd.concat([self.state.insights, enriched], ignore_index=True)
         else:
-            # If first engine, just merge to add question info
-            merged_output = search_results.merge(
-                self.state.insights, how="left", on="search_string"
+            # First engine call — merge just to add question info
+            merged = search_results.merge(
+                self.state.insights,
+                on="search_string",
+                how="left"
             )
 
-        merged_output = merged_output.drop_duplicates().reset_index(drop=True)
-        return merged_output
+        merged = merged.drop_duplicates(
+            subset=["paper_title", "paper_date", "search_engine", "search_string"]
+        ).reset_index(drop=True)
+
+        return merged
     
-class DOI:
-    """
-    Retrieve DOIs and open-access download links for papers stored in a QuestionState
-    object or provided as a DataFrame.
-    """
+        # END CLASS UTILS ---------------
 
-    def __init__(
-        self, 
-        state: Optional["QuestionState"] = None, 
-        papers: Optional[pd.DataFrame] = None
-    ) -> None:
+    def search_crossref(self, num_results: int = 10) -> pd.DataFrame:
         """
-        Initialize DOI retriever.
-
-        Args:
-            state: A pre-existing QuestionState object containing paper metadata.
-            papers: A DataFrame containing paper metadata (used if state is None).
+        Search Crossref for each search string in state and update the state.
+        Returns self.state.insights (DataFrame).
         """
-        # Validate and set up state
-        self.state = deepcopy(
-            validate_format(
-            state=state,
-            injected_value=papers,
-            state_required_cols=[
-                "question_id", "question_text", "search_string_id", "search_string", 
-                "search_engine", "doi", "paper_id", "paper_title", "paper_author", "paper_date"
-            ],
-            injected_required_cols=[
-                "question_id", "question_text", "paper_id", 
-                "paper_title", "paper_author", "paper_date"
-            ]
-            )
-            )
+        # Must be a full email address
+        mailto = os.getenv("EMAIL_DOMAIN")
+        cr = Crossref(mailto=mailto)
 
-        # Ensure folder exists for pickle
-        os.makedirs(os.path.dirname(STATE_FILE_LOCATION), exist_ok=True)
+        output: Dict[str, List] = {
+            "search_string": [],
+            "paper_title": [],
+            "paper_author": [],
+            "paper_date": [],
+            "doi": []
+        }
 
-        # Store search strings for DOI lookup
-        self.search_string: List[str] = self._create_search_string()
-
-    def _create_search_string(self) -> List[str]:
-        """
-        Concatenates paper title, authors, and year into search strings for DOI lookups.
-
-        Returns:
-            List[str]: A list of search strings for each paper.
-        """
-        if self.state.insights.empty:
-            return []
-
-        df = self.state.insights[["paper_title", "paper_author", "paper_date"]].copy()
-        df["search_string"] = (
-        df["paper_title"].astype(str) + " " +
-        df["paper_author"].astype(str) + " " +
-        df["paper_date"].astype(str)
-        )
-
-        search_string = df["search_string"].tolist()
-        return search_string
-
-    @staticmethod
-    def call_alex(search_string: str) -> Optional[str]:
-        """
-        Queries the OpenAlex API with a search string to retrieve a DOI.
-
-        Args:
-            search_string: A string composed of title, author(s), and year.
-
-        Returns:
-            Optional[str]: The DOI string if found, otherwise None.
-        """
-        url = "https://api.openalex.org/works"
-        params = {"search": search_string, "per-page": 1}
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                items = response.json().get("results", [])
-                if items:
-                    doi_url = items[0].get("doi")
-                    if doi_url:
-                        return doi_url.removeprefix("https://doi.org/")
-        except requests.exceptions.RequestException:
-            pass
-
-        time.sleep(1)  # Prevent hitting API rate limits
-        return None
-
-    def get_doi(self) -> List[Optional[str]]:
-        """
-        Retrieves DOIs for all papers in the current state using OpenAlex.
-
-        Returns:
-            List[Optional[str]]: A list of DOIs corresponding to papers.
-        """
-        dois = self.state.insights["doi"]
-
-        if not self.search_string:
-            print("No papers available to retrieve DOIs.")
-            self.state.insights["doi"] = []
-            return []
-
-        for idx, (string, doi) in enumerate(zip(self.search_string, dois), start=1):
-            print(f"Retrieving DOI {idx} of {len(self.search_string)}")
-            if not pd.isna(doi):
-                continue  # Skip if DOI already exists from the AcademicLit search
-            else:
-                doi_result = self.call_alex(string)
-                dois[idx - 1] = doi_result
-
-        self.state.insights["doi"] = dois
-
-        return dois
-
-    def get_download_link(self) -> List[Optional[str]]:
-        """
-        Retrieves open-access PDF download links for each paper via Unpywall.
-
-        Returns:
-            List[Optional[str]]: A list of open-access PDF download links (or None if unavailable).
-        """
-        # Ensure DOI column exists
-        self.state = validate_format(
-            state=self.state,
-            injected_value=self.state.insights,
-            state_required_cols=[
-                "question_id", "question_text", "search_string_id", "search_string",
-                "search_engine","paper_id", "paper_title", "paper_author", "paper_date", "doi"
-            ],
-            injected_required_cols=[
-                "question_id", "question_text", "paper_id",
-                "paper_title", "paper_author", "paper_date", "doi"
-            ]
-        )
-
-        download_links: List[Optional[str]] = []
-
-        for idx, doi in enumerate(self.state.insights.get("doi", []), start=1):
-            print(f"Retrieving downlod link for paper {idx} of {self.state.insights.shape[0]}")
-
-            if not doi:
-                download_links.append(None)
-                continue
-
-            try:
-                unpay = Unpywall.get_json(doi)
-                oa_locations = unpay.get("oa_locations", [])
-                if not oa_locations:
-                    download_links.append(None)
-                    continue
-            except Exception as e:
-                download_links.append(f"Error: {e}")
-                continue
-
-            for loc in oa_locations:
-                url = loc.get("url_for_pdf")
-                if url:
-                    try:
-                        response = requests.head(url, allow_redirects=True, timeout=10)
-                        if (
-                            response.status_code == 200
-                            and "application/pdf" in response.headers.get("Content-Type", "")
-                        ):
-                            download_links.append(url)
-                            break
-                    except requests.exceptions.RequestException:
+        for search_string in self.state.insights["search_string"]:
+            # one request; optionally retry once on 503/429
+            for attempt in (1, 2):
+                try:
+                    res = cr.works(query=search_string, limit=num_results)
+                    break
+                except HTTPError as e:
+                    code = getattr(e.response, "status_code", None)
+                    if code in (503, 429) and attempt == 1:
+                        delay = 5 + random.random() * 5
+                        print(f"Crossref {code}; retrying in {delay:.1f}s…")
+                        time.sleep(delay)
                         continue
-            else:
-                download_links.append(None)
+                    raise
 
-        self.state.insights["download_link"] = download_links
-        self.state.save(STATE_SAVE_LOCATION)
+            items = res.get("message", {}).get("items", []) if res else []
 
-        return download_links
+            for item in items:
+                # Title (list -> first string)
+                title = (item.get("title") or ["No title found"])[0]
+                output["paper_title"].append(title)
+
+                # Authors (safe formatting)
+                authors = []
+                for a in item.get("author", []) or []:
+                    fam = a.get("family", "")
+                    giv = a.get("given", "")
+                    if fam or giv:
+                        initials = (giv[:1] + ".") if giv else ""
+                        authors.append(f"{fam}, {initials}".strip(", "))
+                output["paper_author"].append(authors or None)
+
+                # Year (print -> online -> issued -> NA)
+                def _year(parts):
+                    try:
+                        return parts[0][0]
+                    except Exception:
+                        return None
+                year = None
+                if "published-print" in item:
+                    year = _year(item["published-print"].get("date-parts", []))
+                if year is None and "published-online" in item:
+                    year = _year(item["published-online"].get("date-parts", []))
+                if year is None and "issued" in item:
+                    year = _year(item["issued"].get("date-parts", []))
+                output["paper_date"].append(year if year is not None else pd.NA)
+
+                # DOI
+                output["doi"].append(item.get("DOI", pd.NA))
+
+                output["search_string"].append(search_string)
+
+        output_df = pd.DataFrame(output)
+        output_df["search_engine"] = "Crossref"
+        output_df["paper_id"] = [f"crossref_paper_{i+1}" for i in range(len(output_df))]
+        output_df["paper_author"] = [";".join(authors) if isinstance(authors, list) else authors for authors in output["paper_author"]]
+
+        # Merge results into state
+        self.state.insights = self._merge_search_results_with_state(output_df)
+        return self.state.insights
+    
+    @staticmethod
+    def _openalex_authors(authorships) -> List[str]:
+        if not authorships:
+            return ["No author found"]
+        names = []
+        for a in authorships:
+            author = a.get("author", {}) or {}
+            display = author.get("display_name")
+            if display:
+                names.append(display)
+        return names or None
+
+    def search_openalex(self, num_results: int = 10) -> pd.DataFrame:
+        """
+        Search OpenAlex for each search string in state and merge with existing state.
+        Each query returns up to 200 results (one page).
+        """
+        if num_results > 200:
+            raise ValueError("num_results cannot exceed 200")
+
+        output: Dict[str, List] = {
+            "search_string": [],
+            "paper_title": [],
+            "paper_author": [],
+            "paper_date": [],
+            "doi": [],
+        }
+
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": f"lit-review-machine/1 (mailto:{os.getenv('EMAIL_DOMAIN','noreply@example.com')})"
+        })
+
+        for search_string in self.state.insights["search_string"]:
+            params = {"search": search_string, "per_page": num_results}
+            try:
+                r = session.get(self.OPENALEX_BASE, params=params, timeout=self.OPENALEX_TIMEOUT)
+                if r.status_code in (429, 503):
+                    delay = 1 + random.random()
+                    print(f"OpenAlex {r.status_code} — retrying in {delay:.1f}s…")
+                    time.sleep(delay)
+                    r = session.get(self.OPENALEX_BASE, params=params, timeout=self.OPENALEX_TIMEOUT)
+                r.raise_for_status()
+            except requests.RequestException as e:
+                print(f"OpenAlex request failed for '{search_string}': {e}")
+                continue
+
+            data = r.json() or {}
+            for item in data.get("results", []):
+                # Title
+                title = item.get("title") or "No title found"
+                output["paper_title"].append(title)
+
+                # Authors
+                output["paper_author"].append(self._openalex_authors(item.get("authorships")))
+
+                # Publication year
+                year = item.get("publication_year")
+                output["paper_date"].append(year if isinstance(year, int) else pd.NA)
+
+                # DOI
+                doi = item.get("doi")
+                if isinstance(doi, str) and doi.lower().startswith("https://doi.org/"):
+                    doi = doi.split("https://doi.org/", 1)[1]
+                output["doi"].append(doi or pd.NA)
+
+                # Search string
+                output["search_string"].append(search_string)
+
+        df = pd.DataFrame(output)
+        df["search_engine"] = "OpenAlex"
+        df["paper_id"] = [f"openalex_paper_{i+1}" for i in range(len(df))]
+        df["paper_author"] = [";".join(authors) if isinstance(authors, list) else authors for authors in df["paper_author"]]
+
+        merged = self._merge_search_results_with_state(df)
+        merged = merged.drop_duplicates(
+            subset=["paper_title", "paper_date", "search_engine", "search_string"]
+        ).reset_index(drop=True)
+
+        self.state.insights = merged
+        self.state.save(os.path.join(STATE_SAVE_LOCATION, "02_academic_lit"))
+        return self.state.insights
+    
+# class DOI:
+#     """
+#     Retrieve DOIs and open-access download links for papers stored in a QuestionState
+#     object or provided as a DataFrame.
+#     """
+
+#     def __init__(
+#         self, 
+#         state: Optional["QuestionState"] = None, 
+#         papers: Optional[pd.DataFrame] = None
+#     ) -> None:
+#         """
+#         Initialize DOI retriever.
+
+#         Args:
+#             state: A pre-existing QuestionState object containing paper metadata.
+#             papers: A DataFrame containing paper metadata (used if state is None).
+#         """
+#         # Validate and set up state
+#         self.state = deepcopy(
+#             validate_format(
+#             state=state,
+#             injected_value=papers,
+#             state_required_cols=[
+#                 "question_id", "question_text", "search_string_id", "search_string", 
+#                 "search_engine", "doi", "paper_id", "paper_title", "paper_author", "paper_date"
+#             ],
+#             injected_required_cols=[
+#                 "question_id", "question_text", "paper_id", 
+#                 "paper_title", "paper_author", "paper_date"
+#             ]
+#             )
+#             )
+
+#         # Ensure folder exists for pickle
+#         os.makedirs(os.path.dirname(STATE_SAVE_LOCATION), exist_ok=True)
+
+#         # Store search strings for DOI lookup``
+#         self.search_string: List[str] = self._create_search_string()
+
+#     def _create_search_string(self) -> List[str]:
+#         """
+#         Concatenates paper title, authors, and year into search strings for DOI lookups.
+
+#         Returns:
+#             List[str]: A list of search strings for each paper.
+#         """
+#         if self.state.insights.empty:
+#             return []
+
+#         df = self.state.insights[["paper_title", "paper_author", "paper_date"]].copy()
+#         df["search_string"] = (
+#         df["paper_title"].astype(str) + " " +
+#         df["paper_author"].astype(str) + " " +
+#         df["paper_date"].astype(str)
+#         )
+
+#         search_string = df["search_string"].tolist()
+#         return search_string
+
+#     @staticmethod
+#     def call_alex(search_string: str) -> Optional[str]:
+#         """
+#         Queries the OpenAlex API with a search string to retrieve a DOI.
+
+#         Args:
+#             search_string: A string composed of title, author(s), and year.
+
+#         Returns:
+#             Optional[str]: The DOI string if found, otherwise None.
+#         """
+#         url = "https://api.openalex.org/works"
+#         params = {"search": search_string, "per-page": 1}
+#         try:
+#             response = requests.get(url, params=params, timeout=10)
+#             if response.status_code == 200:
+#                 items = response.json().get("results", [])
+#                 if items:
+#                     doi_url = items[0].get("doi")
+#                     if doi_url:
+#                         return doi_url.removeprefix("https://doi.org/")
+#         except requests.exceptions.RequestException:
+#             pass
+
+#         time.sleep(1)  # Prevent hitting API rate limits
+#         return None
+
+#     def get_doi(self) -> List[Optional[str]]:
+#         """
+#         Retrieves DOIs for all papers in the current state using OpenAlex.
+
+#         Returns:
+#             List[Optional[str]]: A list of DOIs corresponding to papers.
+#         """
+#         dois = self.state.insights["doi"]
+
+#         if not self.search_string:
+#             print("No papers available to retrieve DOIs.")
+#             self.state.insights["doi"] = []
+#             return []
+
+#         for idx, (string, doi) in enumerate(zip(self.search_string, dois), start=1):
+#             print(f"Retrieving DOI {idx} of {len(self.search_string)}")
+#             if not pd.isna(doi):
+#                 continue  # Skip if DOI already exists from the AcademicLit search
+#             else:
+#                 doi_result = self.call_alex(string)
+#                 dois[idx - 1] = doi_result
+
+#         self.state.insights["doi"] = dois
+
+#         return dois
+
+#     def get_download_link(self) -> List[Optional[str]]:
+#         """
+#         Retrieves open-access PDF download links for each paper via Unpywall.
+
+#         Returns:
+#             List[Optional[str]]: A list of open-access PDF download links (or None if unavailable).
+#         """
+#         # Ensure DOI column exists
+#         self.state = validate_format(
+#             state=self.state,
+#             injected_value=self.state.insights,
+#             state_required_cols=[
+#                 "question_id", "question_text", "search_string_id", "search_string",
+#                 "search_engine","paper_id", "paper_title", "paper_author", "paper_date", "doi"
+#             ],
+#             injected_required_cols=[
+#                 "question_id", "question_text", "paper_id",
+#                 "paper_title", "paper_author", "paper_date", "doi"
+#             ]
+#         )
+
+#         download_links: List[Optional[str]] = []
+
+#         for idx, doi in enumerate(self.state.insights.get("doi", []), start=1):
+#             print(f"Retrieving downlod link for paper {idx} of {self.state.insights.shape[0]}")
+
+#             if not doi:
+#                 download_links.append(None)
+#                 continue
+
+#             try:
+#                 unpay = Unpywall.get_json(doi)
+#                 oa_locations = unpay.get("oa_locations", [])
+#                 if not oa_locations:
+#                     download_links.append(None)
+#                     continue
+#             except Exception as e:
+#                 download_links.append(f"Error: {e}")
+#                 continue
+
+#             for loc in oa_locations:
+#                 url = loc.get("url_for_pdf")
+#                 if url:
+#                     try:
+#                         response = requests.head(url, allow_redirects=True, timeout=10)
+#                         if (
+#                             response.status_code == 200
+#                             and "application/pdf" in response.headers.get("Content-Type", "")
+#                         ):
+#                             download_links.append(url)
+#                             break
+#                     except requests.exceptions.RequestException:
+#                         continue
+#             else:
+#                 download_links.append(None)
+
+#         self.state.insights["download_link"] = download_links
+#         self.state.save(STATE_SAVE_LOCATION)
+
+#         return download_links
 
 class GreyLiterature:
     """
@@ -628,9 +683,12 @@ class GreyLiterature:
         llm_client: Any,  # Client interface for interacting with the LLM API
         state: Optional["QuestionState"] = None,  # Current research state (can be injected)
         questions: Optional[List[str]] = None,    # User-defined research questions
-        ai_model: str = "o3-deep-research",       # LLM model to use
-        GREY_LIT_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit.pkl"), # The pickle location for the valid processed json response from the LLM
-        GREY_LIT_RAW_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit_raw.pkl") # If the LLM fails to return a valid json the raw output gets saved here - as this is an expensive call
+        ai_reasoning_model: str = "o3-deep-research",       # LLM model to use
+        ai_chat_completion_model: str = "gpt-4o",  # Chat completion model for JSON cleaning
+        grey_lit_pickle_folder: str = os.path.join(os.getcwd(), "data", "pickles") # The pickle location for the valid processed json response from the LLM
+        
+        #GREY_LIT_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit.pkl"), # The pickle location for the valid processed json response from the LLM
+        #GREY_LIT_RAW_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit_raw.pkl") # If the LLM fails to return a valid json the raw output gets saved here - as this is an expensive call
     ) -> None:
         """
         Initialize the GreyLiterature object.
@@ -657,19 +715,21 @@ class GreyLiterature:
                 injected_value=questions,
                 state_required_cols=[
                     "question_id", "question_text", "search_string_id", "search_string",
-                    "search_engine","paper_id", "paper_title", "paper_author", "paper_date", "doi", "download_link"
+                    "search_engine","paper_id", "paper_title", "paper_author", "paper_date", "doi"
                     ],
                 injected_required_cols=["question_id", "question_text"]
                 )
         )
 
         self.llm_client: Any = llm_client
-        self.ai_model: str = ai_model
-        self.GREY_LIT_PICKLE_FILE = GREY_LIT_PICKLE_FILE
-        self.GREY_LIT_RAW_PICKLE_FILE = GREY_LIT_RAW_PICKLE_FILE
+        self.ai_reasoning_model: str = ai_reasoning_model
+        self.ai_chat_completion_model: str = ai_chat_completion_model
+        self.grey_lit_pickle_folder = grey_lit_pickle_folder
+        #self.GREY_LIT_PICKLE_FILE = os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl")
+        #self.GREY_LIT_RAW_PICKLE_FILE = os.path.join(self.grey_lit_pickle_folder, "grey_lit_raw.pkl")
 
 
-    def get_grey_lit(self, timeout=1200) -> Optional[pd.DataFrame]:
+    def get_grey_lit(self, example_grey_literature_sources, resp_timeout=1500) -> Optional[pd.DataFrame]:
         """
         Retrieve grey literature relevant to the research questions using the LLM.
 
@@ -685,6 +745,17 @@ class GreyLiterature:
             (where `paper_id` starts with "grey_lit_"), or None if parsing fails.
         """
 
+        if os.path.exists(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl")):
+            recover = None
+            while recover not in ["r", "n"]:
+                recover = input("AI generated grey literature already exists. Would you like to recover (r) or generate new (n)? (r/n): ").lower()
+            if recover == "r":
+                with open(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"), "rb") as f:
+                    self.grey_lit = pickle.load(f)
+
+                self.state.insights = pd.concat([self.state.insights, self.grey_lit], ignore_index=True)
+                return self.grey_lit
+
         # Build question strings: "question_id: question_text"
         question_strings = (
             self.state.insights[["question_id", "question_text"]]
@@ -694,48 +765,83 @@ class GreyLiterature:
             .to_list()
         )
 
-        # Build LLM prompt
-        prompt: str = Prompts().grey_lit_retrieve(questions=question_strings)
+        # Build LLM prompt for the reasoning model
+        prompt: str = Prompts().grey_lit_retrieve(questions=question_strings, 
+                                                  example_grey_literature_sources=example_grey_literature_sources)
 
-        now = datetime.datetime.now()
-        end_time = now + datetime.timedelta(seconds=timeout + 10)
-
-        print(
-            f"Undertaking AI-assisted research. Process will finish by {end_time.strftime('%Y-%m-%d %H:%M:%S')}."
-            " If not finished by then, the system may have hung."
-        )
 
         # Call the LLM
-        response = call_reasoning_model(prompt=prompt, llm_client=self.llm_client, ai_model=self.ai_model, timeout=timeout)
-
-        print("Seeking valid json format from the LLM...")
-        # First ask an LLM to clean it
-        clean_response = llm_json_clean(response, Prompts().grey_literature_format_check(), self.llm_client, "gpt-4o")
-
-        # Then check whether the list of strings - for the authors has come in correctky and the file will save as a parquet
-        success, error, result = json_format_check(clean_response)
-        if not success:
-            print(error)
-            return result
+        response_dict = call_reasoning_model(prompt=prompt,
+                                        llm_client=self.llm_client,
+                                        ai_model=self.ai_reasoning_model,
+                                        resp_timeout=resp_timeout                                            
+                                        )
+        
+        
+        if response_dict["status"] == "success":
+            response = response_dict["response"]
+            self.raw_grey_lit_response = response
         else:
-            grey_lit = result
+            print("LLM call for grey literature completed but did not return output_text full trace is being returned.")
+            return response_dict["response"]
 
-            # Prefix paper_id with "grey_lit_"
-            grey_lit["paper_id"] = [f"grey_lit_{i}" for i in range(len(grey_lit))]
+        # Have a chat completion model clean the json
+        # First create the fall back reflecting the json structure i am asking for back from the LLM
+        fallback = {
+            "results": [
+                {
+                    "question_id": "",
+                    "paper_title": "",
+                    "paper_author": "",
+                    "paper_date": "",
+                    "doi": None
+                }
+            ]
+        }
+        print("Passing the result of the AI assisted search to an LLM for cleaning....")
+        # Now call the chat completion model to clean the JSON
+        clean_response = call_chat_completion(ai_model=self.ai_chat_completion_model, 
+                                              llm_client=self.llm_client,
+                                              sys_prompt=Prompts().grey_literature_format_check(),
+                                              user_prompt=response,
+                                              return_json=True,
+                                              fall_back=fallback)
+        
+        self.clean_grey_lit_response = clean_response
+        
 
-            # Merge ONLY on canonical `question_id` to get original question_text
-            grey_lit = grey_lit.merge(
-                self.state.insights[["question_id", "question_text"]].drop_duplicates(),
-                on="question_id",
-                how="left"
-            )
+        # Get grey lit from the json and convert to dataframe
+        grey_lit_list = clean_response["results"]
+        grey_lit_pd = pd.DataFrame(grey_lit_list)
 
-            # Update state
-            self.state.insights = pd.concat([self.state.insights, grey_lit], ignore_index=True)
-            self.state.save(STATE_FILE_LOCATION)
+        # Prefix paper_id with "grey_lit_"
+        grey_lit_pd["paper_id"] = [f"grey_lit_{i}" for i in range(len(grey_lit_pd))]
 
-            # Return grey literature subset
-            return self.state.insights[self.state.insights["paper_id"].str.startswith("grey_lit_")]
+        # Merge ONLY on canonical `question_id` to get original question_text
+        grey_lit_pd = grey_lit_pd.merge(
+            self.state.insights[["question_id", "question_text"]].drop_duplicates(),
+            on="question_id",
+            how="left"
+        )
+
+        grey_lit_pd = grey_lit_pd.replace(["", "NA", pd.NA, np.nan, "null"], None)
+
+        # Create grey lit attribute for inspection 
+        self.grey_lit = grey_lit_pd
+
+        # Pickle the result so that it can be accessed later - this is an expensive call
+        os.makedirs(self.grey_lit_pickle_folder, exist_ok=True)
+        with open(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"), "wb") as f:
+            pickle.dump(self.grey_lit, f)
+
+        # Update state
+        self.state.insights = pd.concat([self.state.insights, self.grey_lit], ignore_index=True)
+        self.state.insights["paper_date"] = pd.to_numeric(self.state.insights["paper_date"], errors="coerce").astype("Int64")
+        self.state.insights.replace(["", "NA", pd.NA, np.nan, "null"], None, inplace=True)
+        self.state.save(os.path.join(STATE_SAVE_LOCATION, "03_grey_lit"))
+
+        # Return grey literature
+        return self.grey_lit
 
 class Literature:
     """
@@ -763,11 +869,11 @@ class Literature:
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date",
-                "doi", "download_link"
+                "doi"
             ],
             injected_required_cols=[
                 "question_id", "paper_id", "paper_title", "paper_author",
-                "paper_date", "doi", "download_link"
+                "paper_date", "doi"
             ]
             )
         )
@@ -880,11 +986,14 @@ class Literature:
             else:
                 dfs.append(pd.read_excel(file))
         
-        # The list of authors needs to come in as a string from the csv so hanlde that with ast.literal_eval()
+        # Clean up empty authors or "no author found" entries.
         for df in dfs:
             if "paper_author" in df.columns:
-                df["paper_author"] = df["paper_author"] \
-                    .apply(lambda x: ast.literal_eval(x) if pd.notna(x) else [])
+                df["paper_author"].replace(
+                    to_replace=["", "No author found", "NA", "null", pd.NA, np.nan],
+                    value=None,
+                    inplace=True
+                    )
         
         self.state.insights = pd.concat(dfs, ignore_index=True)
 
@@ -894,7 +1003,7 @@ class Literature:
         if "sim_group" in self.state.insights.columns:
             self.state.insights.drop(columns="sim_group", inplace=True)
 
-        self.state.save(STATE_FILE_LOCATION)
+        self.state.save(os.path.join(STATE_SAVE_LOCATION, "04_literature_deduped"))
         return self.state.insights
 
 class AiLiteratureCheck:
@@ -907,11 +1016,10 @@ class AiLiteratureCheck:
     def __init__(
         self,
         llm_client: Any,
-        ai_model: str = "o3-deep-research",
+        ai_reasoning_model: str = "o3-deep-research",
+        ai_chat_completion_model: str = "gpt-4o",
         state: Optional["QuestionState"] = None,
         papers: Optional[pd.DataFrame] = None, 
-        AI_LIT_PICKLE_FILE = os.path.join(os.getcwd(), "data", "pickles", "ai_lit.pkl"),
-        AI_LIT_RAW_PICKLE_FILE = os.path.join(os.getcwd(), "data", "pickles", "ai_lit_raw.pkl")
     ) -> None:
         """
         Initialize the AI Literature Check.
@@ -923,9 +1031,8 @@ class AiLiteratureCheck:
             papers: Optional DataFrame with literature to inject if state is None.
         """
         self.llm_client: Any = llm_client
-        self.ai_model: str = ai_model
-        self.AI_LIT_PICKLE_FILE = AI_LIT_PICKLE_FILE
-        self.AI_LIT_RAW_PICKLE_FILE = AI_LIT_RAW_PICKLE_FILE
+        self.ai_reasoning_model: str = ai_reasoning_model
+        self.ai_chat_completion_model: str = ai_chat_completion_model
 
         # Validate that the state or injected papers contain all required columns
         self.state: "QuestionState" = deepcopy(
@@ -935,11 +1042,11 @@ class AiLiteratureCheck:
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date",
-                "doi", "download_link"
+                "doi"
             ],
             injected_required_cols=[
                 "question_id", "question_text", "paper_id", "paper_title", "paper_author",
-                "paper_date", "doi", "download_link"
+                "paper_date", "doi"
             ]
             )
         )
@@ -971,7 +1078,7 @@ class AiLiteratureCheck:
 
         return json.dumps(json_list, indent=2)
 
-    def ai_literature_check(self, timeout = 1200) -> Optional[pd.DataFrame]:
+    def ai_literature_check(self, resp_timeout = 1500) -> Optional[pd.DataFrame]:
         """
         Uses the LLM to identify missing literature for each research question.
         Parses the LLM JSON output, flattens it, merges with the state, and
@@ -986,51 +1093,85 @@ class AiLiteratureCheck:
         prompt: str = Prompts().ai_literature_retrieve(
             questions_papers_json=self.json_for_prompt_insertion
         )
-        
-        # Send request to the language model
-        now = datetime.datetime.now()
-        end = now + datetime.timedelta(seconds = timeout + 10)
-        print(f"Undertaking AI assisted literature check. This may take some time. If you do not see a result by {end.strftime("%Y-%m-%d, %H:%M:%S")}, the process has hung. You should try again.")
 
-        response = call_reasoning_model(prompt=prompt, llm_client=self.llm_client, ai_model=self.ai_model, timeout=timeout)
+         # Call the LLM
+        response_dict = call_reasoning_model(prompt=prompt,
+                                        llm_client=self.llm_client,
+                                        ai_model=self.ai_reasoning_model,
+                                        resp_timeout=resp_timeout                                            
+                                        )
         
-        print("Checking json format of LLM output...")
-        clean_response = llm_json_clean(response, Prompts().ai_literature_format_check(), self.llm_client, "gpt-4o")
-
-        success, error, result = json_format_check(clean_response)
-        if not success:
-            self.llm_response = clean_response
-            print(error)
-            return(None)
+        
+        if response_dict["status"] == "success":
+            response = response_dict["response"]
+            self.raw_ai_lit_check = response
         else:
-            ai_lit = result
+            print("LLM call for grey literature completed but did not return output_text full trace is being returned.")
+            return response_dict["response"]
 
-        if ai_lit.shape[0] == 0:
+        # Have a chat completion model clean the json
+        # First create the fall back reflecting the json structure i am asking for back from the LLM
+        fallback = {
+            "results": [
+                {
+                    "question_id": "",
+                    "paper_title": "",
+                    "paper_author": "",
+                    "paper_date": "",
+                    "doi": None
+                }
+            ]
+        }
+        print("Passing the result of the AI assisted search to an LLM for cleaning....")
+        # Now call the chat completion model to clean the JSON
+        clean_response = call_chat_completion(ai_model=self.ai_chat_completion_model, 
+                                              llm_client=self.llm_client,
+                                              sys_prompt=Prompts().ai_literature_format_check(),
+                                              user_prompt=response,
+                                              return_json=True,
+                                              fall_back=fallback)
+        
+        self.clean_ai_lit_check = clean_response
+        
+        # if the response is empty no new papers were found so we print a message and save the current state and return the state.insights
+        if len(clean_response["results"]) == 0:
             print("No missing papers returned by the LLM.")
-            return pd.DataFrame()
+            self.state.save(os.path.join(STATE_SAVE_LOCATION, "05_ai_lit_check"))
+            return self.state.insights
 
-        # Merge back with question metadata for context
+        # Otherwise we convert to a df, clean and concat with state.insights
+        ai_lit = pd.DataFrame(clean_response["results"])
+        # Clean:
+        # Get canonical question text and join
+        canonical_questions = self.state.insights[["question_id", "question_text"]].drop_duplicates()
         ai_lit = ai_lit.merge(
-            self.state.insights[["question_id", "question_text", "search_string_id", "search_string"]],
+            canonical_questions,
             how="left",
             on="question_id"
         )
-
         # Assign unique AI paper IDs
         ai_lit["paper_id"] = [f"ai_lit_{i}" for i in range(ai_lit.shape[0])]
+        
+        # Create ai_lit attribute for inspection
+        self.ai_lit = ai_lit
 
         # Append AI literature to state
-        self.state.insights = pd.concat([self.state.insights, ai_lit], ignore_index=True)
+        updated_state = pd.concat([self.state.insights, ai_lit], ignore_index=True)
+        # CLean up any dates to numeric to not break parquet
+        updated_state["paper_date"] = pd.to_numeric(updated_state["paper_date"], errors="coerce").astype("Int64") 
+        # Clean up any empty strings to None to not break parquet
+        updated_state.replace(["", "NA", pd.NA, np.nan, "null", "No author found"], None, inplace=True)
+        # Update the oder for pretty export
+        updated_state = updated_state[["question_id", "question_text", "search_string_id", "search_string", "search_engine", "paper_id", "paper_title", "paper_author", "paper_date", "doi"]]
+
+        # Asign to state attribute
+        self.state.insights = updated_state
 
         # Save
-        self.state.insights["paper_date"] = pd.to_numeric(self.state.insights["paper_date"], errors="coerce").astype("Int64") #Clean up the paper_date file in case there are any strings which will break parquet
-        self.state.save(STATE_FILE_LOCATION)
+        self.state.save(os.path.join(STATE_SAVE_LOCATION, "05_ai_lit_check"))
 
         # Return only the new AI-suggested papers
-        return self.state.insights.loc[
-            self.state.insights["paper_id"].str.contains("ai_lit_"),
-            ["paper_id", "paper_title", "paper_author", "paper_date"]
-        ]
+        return self.ai_lit
 
 class DownloadManager:
     """
@@ -1060,26 +1201,28 @@ class DownloadManager:
             injected_value=papers,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                "download_link"
+                "paper_id", "paper_title", "paper_author", "paper_date", "doi"
             ],
             injected_required_cols=[
                 "question_id", "question_text",
                 "paper_id", "paper_title", "paper_author", "paper_date",
-                "download_link"
+                "doi"
             ]
             )
         )
 
         # Check if download_status variable is in the passed state if its not create with 0 values, assuming no downloads have happened yet, if it does exsist, simply use it. 
         if "download_status" not in self.state.insights.columns:
-            self.state.insights["download_link"] = 0
+            self.state.insights["download_status"] = 0
         else: 
             pass
 
         # Ensure the base download folder exists
         self.DOWNLOAD_LOCATION: str = DOWNLOAD_LOCATION
         os.makedirs(self.DOWNLOAD_LOCATION, exist_ok=True)
+
+        # Create subfolders for each question_id
+        self._create_download_folder()
 
         # Preserve original IDs and sanitize for filesystem-safe filenames
         self.state.insights["messy_question_id"] = self.state.insights["question_id"]
@@ -1124,7 +1267,7 @@ class DownloadManager:
         # This convenience function just calls the from csv method of the questionstate
         self.state = self.state.from_csv(filepath=os.path.join(self.DOWNLOAD_LOCATION))
         # And updates the state object on file by saving
-        self.state.save(STATE_FILE_LOCATION)
+        self.state.save(STATE_SAVE_LOCATION)
         return(self.state.insights)
 
 # THIS WAS ALL TOO FRAGILE TO MAKE WORK SO I BAILED ON IT AND RESORTED TO MANUAL DOWNLOADING
@@ -1191,7 +1334,7 @@ class DownloadManager:
 #             "Filenames correspond to sanitized question_id and paper_id, preserving traceability."
 #         )
 #         # Save the state
-#         self.state.save(STATE_FILE_LOCATION)
+#         self.state.save(STATE_SAVE_LOCATION)
 #         return self.state.insights[["paper_id", "download_status"]]
 
 class PaperAttainmentTriage:
@@ -1225,7 +1368,7 @@ class PaperAttainmentTriage:
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                "download_link", "download_status", "messy_question_id", "messy_paper_id"
+                 "download_status", "messy_question_id", "messy_paper_id"
             ],
             injected_value=None,
             injected_required_cols=[]
@@ -1487,7 +1630,7 @@ class Ingestor:
                 state_required_cols=[
                     "question_id", "question_text", "search_string_id", "search_string",
                     "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                    "download_link", "download_status", "messy_question_id", "messy_paper_id"
+                    "download_status", "messy_question_id", "messy_paper_id"
                 ],
                 injected_required_cols=["question_id", "question_text"]
             )
@@ -1710,7 +1853,7 @@ class Ingestor:
         if "pages" in self.state.insights.columns:
             self.state.insights.drop(columns=["pages"], inplace=True)
 
-        self.state.save(STATE_FILE_LOCATION)
+        self.state.save(STATE_SAVE_LOCATION)
 
         return self.state.insights
 
@@ -1747,7 +1890,7 @@ class Ingestor:
         self.state.full_text.drop(columns=["chunks"], inplace=True)
 
         # Save the updated state
-        self.state.save(STATE_FILE_LOCATION)
+        self.state.save(STATE_SAVE_LOCATION)
 
 class Insights:
     def __init__(
@@ -1789,8 +1932,7 @@ class Insights:
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                "download_link", "download_status", "messy_question_id", "messy_paper_id",
-                "ingestion_status"
+                 "download_status", "messy_question_id", "messy_paper_id","ingestion_status"
             ],
             injected_required_cols=None
             )
@@ -2187,7 +2329,7 @@ class Clustering:
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                "download_link", "download_status", "messy_question_id", "messy_paper_id",
+                "download_status", "messy_question_id", "messy_paper_id",
                 "ingestion_status", "chunk_id", "insight"
             ],
             injected_required_cols=None
