@@ -1,0 +1,7 @@
+# Config file for lit_review_machine
+
+# Location in which the object states are located and which are updated afgter each step of the pipeline completes
+STATE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "runs")
+
+# Location in which the summary object is saved after the summarization step of the pipeline completes
+SUMMARY_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "summaries")

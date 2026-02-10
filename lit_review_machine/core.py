@@ -2,6 +2,7 @@
 # import custom libraries
 from state import QuestionState
 from render import Summaries
+import config
 import utils
 from prompts import Prompts
 
@@ -365,7 +366,7 @@ class Ingestor:
         # Update state.insights with the new metadata
         self.state.insights = metadata_check_df
 
-        self.state.save(STATE_SAVE_LOCATION)
+        self.state.save(config.STATE_SAVE_LOCATION)
 
         return self.state.insights
 
@@ -402,7 +403,7 @@ class Ingestor:
         self.state.full_text.drop(columns=["chunks"], inplace=True)
 
         # Save the updated state
-        self.state.save(STATE_SAVE_LOCATION)
+        self.state.save(config.STATE_SAVE_LOCATION)
 
 class Insights:
     def __init__(
@@ -760,7 +761,7 @@ class Insights:
         # Ensure chunk_id is string type - neccesary as earlier chunk ids were integers, now they have "meta insight_{paper_id}" strings too
         self.state.insights["chunk_id"] = self.state.insights["chunk_id"].astype(str)
 
-        self.state.save(os.path.join(STATE_SAVE_LOCATION, "10_insights"))
+        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "10_insights"))
 
         return meta_insights_df
 
@@ -1324,7 +1325,7 @@ class Clustering:
             # Concatenate all research questions back together
             self.state.insights = pd.concat(selected_clusters_list)
             # Save the updated DataFrame to disk
-            self.state.save(os.path.join(STATE_SAVE_LOCATION, "11_clusters"))
+            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "11_clusters"))
             return self.state.insights
         
             
@@ -1336,7 +1337,7 @@ class Summarize:
                  ai_model: str,
                  paper_output_length: int,  # Approximate total paper length in words
                  summary_save_location: str = None, 
-                 state_save_location: str = os.path.join(STATE_SAVE_LOCATION, "12_summarize"), 
+                 state_save_location: str = os.path.join(config.STATE_SAVE_LOCATION, "12_summarize"), 
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")):
         """
         Class to handle summarization of clustered insights.
@@ -1352,7 +1353,7 @@ class Summarize:
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
         self.paper_output_length: int = paper_output_length
-        self.summary_save_location: str = summary_save_location or os.path.join(SUMMARY_SAVE_LOCATION, "parquet")
+        self.summary_save_location: str = summary_save_location or os.path.join(config.SUMMARY_SAVE_LOCATION, "parquet")
         self.state_save_location: str = state_save_location
         
         if not os.path.exists(insight_embedding_path):
@@ -1366,7 +1367,7 @@ class Summarize:
 
     def _calculate_summary_length(self) -> pd.DataFrame:
         """
-        Calculate approximate word length for each cluster relative to the total paper.
+        Calculate approximate word length for each cluster relative to the total paper
 
         Returns:
             DataFrame of insights with additional 'length_str' column for prompting the LLM.
@@ -1612,7 +1613,7 @@ class Summarize:
 
             fall_back = {"question_id": question_id, "themes": [], "other_bucket_rules": ""}
 
-            resp = call_chat_completion(
+            resp = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
                 llm_client=self.llm_client,
@@ -1736,7 +1737,7 @@ class Summarize:
 
                 fall_back = {"question_id": question_id, "theme_id": theme_id, "assigned_content": ""}
 
-                resp = call_chat_completion(
+                resp = utils.call_chat_completion(
                     sys_prompt=sys_prompt,
                     user_prompt=user_prompt,
                     llm_client=self.llm_client,
