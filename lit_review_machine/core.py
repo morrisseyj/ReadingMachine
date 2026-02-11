@@ -1,10 +1,10 @@
 
 # import custom libraries
-from state import QuestionState
-from render import Summaries
-import config
-import utils
-from prompts import Prompts
+
+from lit_review_machine import config, utils
+from lit_review_machine.state import QuestionState
+from lit_review_machine.render import Summaries
+from lit_review_machine.prompts import Prompts
 
 # import standard libraries
 from typing import List, Dict, Any, Optional
@@ -22,8 +22,8 @@ import pickle
 import tiktoken
 import re
 import umap
+from sklearn.cluster import HDBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score
-import hdbscan
 import itertools
 import networkx as nx
 
@@ -1054,7 +1054,7 @@ class Clustering:
 
     @staticmethod
     def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom"):
-        clusterer = hdbscan.HDBSCAN(
+        clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
             metric=metric,
             cluster_selection_method=cluster_selection_method

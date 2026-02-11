@@ -1,3 +1,5 @@
+from lit_review_machine.state import QuestionState
+
 import ast
 import pandas as pd
 import numpy as np
@@ -32,6 +34,69 @@ from openai import OpenAI, APITimeoutError, APIConnectionError
 #         return []
 #     return [str(val)]
 
+def validate_format(
+    state: Optional["QuestionState"], 
+    injected_value: Optional[pd.DataFrame],
+    state_required_cols: List[str], 
+    injected_required_cols: List[str]
+) -> "QuestionState":
+    """
+    Validates input state or injected DataFrame for required columns.
+    Returns a properly initialized QuestionState.
+
+    Args:
+        state: An existing QuestionState object (if available).
+        injected_value: A DataFrame to inject into a new QuestionState if state is None.
+        state_required_cols: List of columns required in state.insights.
+        injected_required_cols: List of columns required in the injected DataFrame.
+
+    Returns:
+        QuestionState: A valid state object with all required columns.
+
+    Raises:
+        ValueError: If neither state nor injected_value is provided,
+                    or if required columns are missing,
+                    or if 'paper_id' contains any NA values.
+    """
+    
+    if state is None and injected_value is None:
+        raise ValueError(
+            "Both state and injected_value cannot be None. "
+            "You must initialize the class with either a valid 'state' created by prior classes "
+            "or with a valid dataframe in tidy format."
+        )
+
+    elif state is not None:
+        # Verify that the state already has the required columns
+        if not set(state_required_cols).issubset(state.insights.columns):
+            raise ValueError(
+                "State does not contain all the required columns. "
+                f"Expected at least {state_required_cols}."
+            )
+        # Check for paper_id NAs
+        if "paper_id" in state.insights.columns and state.insights["paper_id"].isna().any():
+            raise ValueError(
+                "State contains NA values in 'paper_id'. "
+                "All papers must have unique IDs. If you have injected data or modified the state, "
+                "'paper_id' must be populated for each paper."
+            )
+        return state
+
+    else:
+        # Create new state from injected DataFrame
+        state = QuestionState(insights=injected_value)
+        if not set(injected_required_cols).issubset(state.insights.columns):
+            raise ValueError(
+                "Injected dataframe does not contain all required fields. "
+                f"Expected at least {injected_required_cols}."
+            )
+        # Add missing columns (from state_required but not in injected)
+        for field in state_required_cols:
+            if field not in injected_required_cols:
+                state.insights[field] = np.nan
+
+        return state
+    
 
 def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_json: bool, fall_back: Dict[str, Any]):
     """

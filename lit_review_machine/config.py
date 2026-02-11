@@ -1,5 +1,7 @@
 # Config file for lit_review_machine
 
+import os
+
 # Location in which the object states are located and which are updated afgter each step of the pipeline completes
 STATE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "runs")
 

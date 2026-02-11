@@ -1,6 +1,6 @@
 
 # Import custom libraries
-import utils
+from lit_review_machine import utils
 
 # Import standard libraries
 import pandas as pd

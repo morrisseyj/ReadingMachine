@@ -1,8 +1,7 @@
 
 # Import custom libraries and modules
-import config
-import utils
-from prompts import Prompts
+from lit_review_machine import config, utils
+from lit_review_machine.prompts import Prompts
 
 # Import standard libraries
 from typing import Any, Dict, Optional
