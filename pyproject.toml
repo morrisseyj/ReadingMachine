@@ -17,7 +17,9 @@ dependencies = [
     "pymupdf",
     "kneed",
     "langchain-text-splitters",
-    "umap-learn",
+    "umap-learn==0.5.7",
+    "numba>=0.59.0",
+    "pynndescent>=0.6.0",
     "scikit-learn",
     "hdbscan",
     "python-docx",
@@ -28,6 +30,5 @@ dependencies = [
     "crossref",
     "backoff", 
     "tiktoken", 
-    "pyarrow", 
     "habanero"
 ]
