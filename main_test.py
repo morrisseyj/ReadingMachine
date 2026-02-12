@@ -12,8 +12,9 @@ import pandas as pd
 import importlib
 from lit_review_machine import core, utils
 
-importlib.reload(core)
 importlib.reload(utils)
+importlib.reload(core)
+
 
 #---------
 
@@ -46,10 +47,18 @@ start_state = pd.DataFrame.from_dict({
     "question_text": questions
     })
 
+# Instantiate in Ingestor class
 ingestor = core.Ingestor(llm_client=llm_client,
                          ai_model="gpt-4o",
                          papers = start_state,
                          file_path=os.path.join(os.getcwd(), "data", "docs"))
 
+# Ingest the papers
 ingestor.ingest_papers()
+# update the metadata 
+# metadata is a first class object here as the result is citaiton achored synthesis
+# For this reason everythig gets passed through a metadata check to ensure  metatdata matches the actual text
+ingestor.update_metadata()
+# Chunk the papers so that they can be used to acquire insights
+ingestor.chunk_papers()
 

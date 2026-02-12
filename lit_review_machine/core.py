@@ -48,8 +48,8 @@ class Ingestor:
         ai_model: str,
         state: QuestionState = None,
         papers: pd.DataFrame = None,
-        confirm_read: Optional[str] = None,
         file_path: str = os.path.join(os.getcwd(), "data", "docs"),
+        pickle_path: str = config.PICKLE_SAVE_LOCATION # For storing the pickles of LLM metadata retreival for resume
     ) -> None:
         """Initialize Ingestor and validate state/papers format."""
         self.state = deepcopy(
@@ -66,12 +66,12 @@ class Ingestor:
         )
 
         self.state.enforce_canonical_question_text()
-
         self.file_path: str = file_path
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
-        self.confirm_read: Optional[str] = confirm_read # Param controls whether user has confirmed reading ingestion errors
         self.ingestion_errors: List[str] = []
+        self.pickle_path: str = pickle_path
+
 
     @staticmethod
     def _pprint_dict(d: dict):
@@ -124,7 +124,7 @@ class Ingestor:
             )
         
         # Otherwise return the list of files
-        return list_of_files
+        return [p.absolute() for p in list_of_path_obj]
 
     def _ingest_pdf(self, path: str) -> List[str]:
         """Extract text from all pages of a PDF file."""
@@ -199,13 +199,19 @@ class Ingestor:
         Returns a DataFrame with columns ['paper_path', 'pages', 'paper_id', 'question_id', 'full_text'].
         """
         
-        working_insights = self.state.insights.copy()
+        working_insights = (
+            self.state.insights.copy()
+            .assign(paper_id=lambda x: x["paper_id"].astype(str)) # set as string to handle NaN values so avoid merge issues on str and float (NaN)
+        )
+
         list_of_papers_by_page: List[List[str]] = []
         ingestion_status: List[int] = [] # to track ingestion success (1) or failure (0)
         self.ingestion_errors = []
 
         list_of_files = self._list_files()
-        
+        if len(list_of_files) == 0:
+            raise ValueError(f"No PDF or HTML files found in the specified directory: {self.file_path}. Please add files to ingest or check the directory path.")
+
         for count, file in enumerate(list_of_files, start=1):
             print(f"Ingesting paper {count} of {len(list_of_files)}...")
             try:
@@ -219,85 +225,92 @@ class Ingestor:
 
         # Confirm ingestion errors
         if self.ingestion_errors:
-            self.confirm_read = self.confirm_read or ""
-            while self.confirm_read != "c":
-                self.confirm_read = input(
+            abort_failed_ingest = None
+            while abort_failed_ingest not in ["y", "n"]:
+                abort_failed_ingest = input(
                     "Ingestion errors occurred. Examine .ingestion_errors and state.full_text.\n"
-                    "Hit 'c' to confirm having read this message:\n"
+                    "Hit 'c' to confirm having read this message:\n\n\n"
                 ).lower()
+            
+            if abort_failed_ingest == "y":
+                print("Aborting ingestion. Please review the ingestion errors (returned below and accessible via .ingestion_errors) and the state.full_text object to see which papers were not ingested successfully.\n\n\n")
+                return(self.ingestion_errors)
+            else:
+                pass # continue with ingestion despite errors
 
         # Create an ingestion status dataframe tracking ingestion success/failure linked by paper_id and question_id
         ingestion_status_df = pd.DataFrame({
             "paper_id": [os.path.splitext(os.path.basename(path))[0] for path in list_of_files],
             "question_id": [os.path.basename(os.path.dirname(path)) for path in list_of_files],
-            "ingestion_status": ingestion_status
+            "ingestion_status": ingestion_status, 
+            "pages": list_of_papers_by_page
         })
-        
-        # Get all the file imports that matched an id
-        matched_ids_df = working_insights.merge(
-            ingestion_status_df, how="left", on=["question_id", "paper_id"]
-        ) \
-        .assign(ingestion_ids_matched = lambda x: np.where(x["ingestion_status"].isna(), 0, 1)) # On a left join if there is no id match ingestion status will be na
+
+
+        # Clean up working insights to reflect what came in mathcing an id, what was in there for which no file was found, and what came in that did not match an id
+        working_insights = (
+            ingestion_status_df.merge(working_insights, how="outer", on=["question_id", "paper_id"]) # Outer merge to make sure all the ingestion status records and all the insights records are included so we don't lose anyting
+            .assign(ingestion_ids_matched = lambda x: np.where(x["question_text"].isna(), "import file does not match possible id", "match")) # First check if the question_text is na. If so, that means the ingested item did not match to a paper_id and question_id and therefore is unmatched
+            .query("paper_id.notna()") # Filter any records for which paper_id is na, as this means there was not paper (usually a hangover from entering just questions to match with a folder of files - i.e. dump files in a folder and query them)
+            .assign(ingestions_status=lambda x: np.where(x["ingestion_status"].isna(), 0, x["ingestion_status"])) # Set the ingestion status to 0 if it is na, meaning there was no paper ingested and thus no match
+            .assign(ingestion_ids_matched=lambda x: np.where(x["ingestion_status"]==0, "existing id had no corresponding file", x["ingestion_ids_matched"])) # Check if the ingestion status is 0. If so, there was no paper ingested and thus no match - these are essentially docs that were not downloaded
+        )
 
         # Get all the ids for which no file was found
-        failed_id_matches = matched_ids_df[matched_ids_df["ingestion_ids_matched"] == 0] # Above we set this to 0 or 1, so 0 means no match found
+        failed_id_matches = working_insights[working_insights["ingestion_ids_matched"] != "match"] # Get all the non-match ids: both files that came in without an id and those with an id for which no file came in
         self.failed_id_matches= failed_id_matches
 
         if failed_id_matches.shape[0] > 0:
-            abort = None
-            while abort not in ['y', 'n']:
-                abort = input(
+            abort_failed_match = None
+            while abort_failed_match not in ['y', 'n']:
+                abort_failed_match = input(
                 f"Warning: {failed_id_matches.shape[0]} paper(s) in the insights table "
                 "did not have a matching file in the ingestion directory. This is not neccessarily an error, but if you want to be able to match " 
                 "these papers to thier search terms and search engines later you will need to ensure the files are named correctly.\n\n"
                 "If you are conducting a literature review this warning is likely relevant to you. If you are reading your own corpus, you can likely ignore this message.\n\n"
                 "If you ignore this warning any paper ids that did not have a matching file will be deleted from state.insights. "  
                 "You can look these up later by exploring the state.insights object created earlier in the pipeline.\n\n"
-                "Do you wish to abort ingestion to review the failed id matches? (y/n):\n"
+                "Do you wish to abort ingestion to review the failed id matches? (y/n):\n\n"
             ).lower()
             
-            if abort == 'y':
-                print("Aborting ingestion. Please review the failed id matches (returned below and accessible via .failed_id_matches).")
+            if abort_failed_match == 'y':
+                print("Aborting ingestion. Please review the failed id matches (returned below and accessible via .failed_id_matches).\n\n")
                 return(failed_id_matches)
             else:
                 pass #continue with ingestion despite failed id matches
 
-        # Now get all the file imports that did not match an id
-        unmatched_id_df = (
-            working_insights.merge(ingestion_status_df, how="outer", on=["question_id", "paper_id"], indicator=True) 
-            .query('_merge == "right_only"')  # identify rows in ingestion_status_df not matched in working_insights - i.e. they came from the right side of the join only 
-            .assign(ingestion_ids_matched = 0)
-            .drop(columns=["_merge"])
-            .assign(paper_id = lambda x:[f"unmatched_paper_{i+1}" for i in range(x.shape[0])])
-        ) 
 
-        # Dropping the na values from matched_ids_df that showed failed id matches
-        # This means we effectively lose track of those papers that the retrival module might have identified but the user did not download. 
-        # While this is a loss of data it reflects an intentional choice - ReadingMachine reads the corpus of texts that you put in the import folder, it does not guarantee tracking of your files that you failed to get into this folder. 
-        # The retrieval moduel helps the reader populate that folder, but the user's capacity to populate it lies outside of ReadingMachines core concern. 
-        matched_ids_df = matched_ids_df[matched_ids_df["ingestion_status"].notna()]
+        # Identify all undownloaded files for the user to see what they are not getting. 
+        # Note not tracking these is a design. This package manages reading. It has a module that helps with identifying papers to read, but it is the users responsibility to get the papers. 
+        # So we record this error here but it is not persisted to state
+        self.dropped_papers = working_insights[working_insights["ingestion_status"] == 0]
 
-        # Combine matched and unmatched dataframes into final insights
-        working_insights = pd.concat([matched_ids_df, unmatched_id_df], ignore_index=True)
-        working_insights.drop(columns=["ingestion_ids_matched"], inplace=True)
-        self.state.insights = working_insights
-        
-        # Build full_text DataFrame
-        full_text = pd.DataFrame({
-            "paper_path": list_of_files,
-            "pages": list_of_papers_by_page
-        })
-        full_text["paper_id"] = [os.path.splitext(os.path.basename(path))[0] for path in list_of_files]
-        full_text["question_id"] = [os.path.basename(os.path.dirname(path)) for path in list_of_files]
-        full_text["full_text"] = ["".join(pages) for pages in full_text["pages"]]
-
-        # Drop pages from full_text as they take up memory and are not needed:
-        full_text.drop(columns=["pages"], inplace=True) 
-
+        # Get the all the ingested papers
+        working_insights = working_insights[working_insights["ingestion_status"] == 1] # Filter to just the papers that were ingested successfully, as these are the ones we have insights for and can track through the pipeline.
+        # Populate the full text state object
+        full_text = (
+            working_insights[["paper_id", "pages"]]
+            .assign(full_text=lambda x: ["".join(pages) for pages in x["pages"]])
+            .drop(columns=["pages"]) # Drop pages as they take up memory and are not needed, we have the full text now
+        )
+        # Set the full text as a state attribute
         self.state.full_text = full_text
-        return self.state.full_text
 
-    def _get_metadata(self, paper_id: str, text: str) -> dict[str, Any]:
+        # Drop pages from insights as well as other fields from the lit retrieve module that are no longer needed:
+        working_insights.drop(columns=["pages", "download_status", "messy_question_id", "messy_paper_id"], inplace=True)
+
+        # Set as state attributes
+        self.state.insights = working_insights
+
+        if self.dropped_papers.shape[0] > 0: # Set as none on init, gets created if there are dropped papers
+                print(
+                    f"Warning: {self.dropped_papers.shape[0]} paper(s) were not downloaded from your original list. These papers are listed in the .dropped_papers attribute.\n"
+                    "You can review these papers to see what was not ingested successfully, update and potentially re-ingest them, but they will not be included in the rest of the pipeline as we have no text to work with for these papers.\n\n"
+                    )
+                
+        print("\nPaper ingestion complete")
+
+    def _get_metadata_from_llm(self, paper_id: str, text: str) -> dict[str, Any]:
         """Call the LLM to extract metadata from the first three pages of a paper."""
         
         # Set variables for the call_chat_completion function from utils
@@ -335,38 +348,122 @@ class Ingestor:
             response_dict["paper_date"] = paper_date
 
         return response_dict
+    
+    @staticmethod
+    def _metadata_type_check(x, desired_type):
+            # Missing or explicit NA
+            if pd.isna(x):
+                return pd.NA
+            if isinstance(x, str):
+                s = x.strip()
+                if s.upper() == "NA" or s == "":
+                    return pd.NA
+                # Convert year-like strings when int requested
+                if desired_type is int:
+                    return int(s)  # assumes s is YYYY
+                if desired_type is str:
+                    return s
 
-    def update_metadata(self) -> pd.DataFrame:
-        """Update metadata for papers missing it by calling the LLM."""
-        
-        metadata_check_df = self.state.insights.copy()
+            # Non-string already correct type
+            if desired_type is int and isinstance(x, int):
+                return x
+            if desired_type is str and isinstance(x, str):
+                return x
 
-        metadata_check_df = metadata_check_df[
-            ["paper_id", "paper_title", "paper_author", "paper_date"]
-        ].merge(
-            self.state.full_text[["paper_id", "full_text"]],
-            how="left",
-            on=["paper_id"]
-        )
+            # If something unexpected comes back (e.g., list/dict), treat as missing
+            return pd.NA
+    
+    def _populate_metadata(self, 
+                           metadata_check_df: pd.DataFrame, # The dataframe containing the columns neccesary for the metadata check which is paper_id, paper_title, paper_author, paper_date, and full_text.
+                           recovered_metadata_check: Optional[List[pd.DataFrame]] = None # The recoevered metadata from a previous run if the metadata check was interrupted and needs to be resumed. 
+                           ) -> List[pd.DataFrame]:
+        # If there is no recovered metadata passed to the function then start with an empty list, otherwise start with the recovered metadata
+        if recovered_metadata_check is None:
+            output = []
+        else:
+            output = recovered_metadata_check
+            # Get the lenght of this list to see how many entries have been handled and drop them
+            start = len(recovered_metadata_check) 
+            metadata_check_df = metadata_check_df[start:] 
 
-        # Metadata is a first order concern here and it can get mixed up if the user misclasifies filenames on import, so this approach double checks all metadata for all papers, even those that has imports currently.
-        # This is slightly expensive but its more problematic if insights get attributed to the wrong authors. This approach is the only way to ensure every paper has the correct metadata. 
+        # Now iterate either over the full df populating the empty list or over the partial dataframe populating the partially completed list
         for idx, row in metadata_check_df.iterrows():
-            print(f"Checking metadata for paper {idx + 1} of {self.state.insights.shape[0]}...")
+            print(f"Checking metadata for paper {idx + 1} of {metadata_check_df.shape[0]}...")
             paper_id = row["paper_id"]
             text = row["full_text"][:5000] if row["full_text"] else ""
-            metadata = self._get_metadata(paper_id, text)
-            metadata_check_df.at[idx, "paper_title"] = metadata["paper_title"]
-            metadata_check_df.at[idx, "paper_author"] = metadata["paper_author"]  
-            metadata_check_df.at[idx, "paper_date"] = metadata["paper_date"]
+            metadata = self._get_metadata_from_llm(paper_id, text) # Get the metadat from the llm
+            # Call the metadata type check function to ensure the metadata is in the correct format and handle any unexpected formats that may come back from the llm, such as lists or dicts, which we want to treat as missing values. This is important for ensuring the integrity of the metadata and avoiding issues later in the pipeline when we rely on this metadata for linking insights to papers and for any analyses that involve metadata.
+            author = self._metadata_type_check(metadata.get("paper_author"), str)
+            title  = self._metadata_type_check(metadata.get("paper_title"), str)
+            year   = self._metadata_type_check(metadata.get("paper_date"), int)
+            
+            # create a new dataframe with the metadata pinned to paper id
+            paper_meta_df = pd.DataFrame({
+                "paper_id": [paper_id],
+                "paper_title": [title],
+                "paper_author": [author],
+                "paper_date": [year]
+            })
 
-        # drop full_text from insights as it is not needed and takes up memory - we only needed it for the metadata check, now that is done we can drop it to keep the insights dataframe clean and efficient
-        metadata_check_df = metadata_check_df.drop(columns=["full_text"])
+            output.append(paper_meta_df)
+            
+            # Save to pickle to allow for resume, make sure path exists
+            os.makedirs(self.pickle_path, exist_ok=True)
+            with open(os.path.join(self.pickle_path, "metadata_check.pkl"), "wb") as f:
+                pickle.dump(output, f)
+
+        return(output)
+
+
+
+    def update_metadata(self) -> pd.DataFrame:
+        """Get the metadata for every paper from the first 5000 chrs of the full text using the LLM and update state.insights with the metadata."""
+        #Create the metadata check which is the dataframe containing the columns i need for the check
+        metadata_check_df = (
+            self.state.insights.copy()[["paper_id", "paper_title", "paper_author", "paper_date"]]
+            .merge(self.state.full_text[["paper_id", "full_text"]],
+                how="left",
+                on=["paper_id"])
+        )
+
+        # Check whether a file exists which shows previoulsy completed meta data check results and ask the user what they want to do: rerun or resume
+
+        if os.path.isfile(os.path.join(self.pickle_path, "metadata_check.pkl")):
+            reload_meta_data = None
+            while reload_meta_data not in ["1", "2"]:
+                reload_meta_data = input(
+                    "A metadata check pickle file was found. This indicates that a metadata check was previously run but may not have completed. \n"
+                    "Do you want to: (pick the corresponding number)\n"
+                    "  1 - Reload/resume the previous metadata check\n"
+                    "  2 - Re-run the metadata check from the start\n"
+                ).lower()
+
+            # If they want to resume, get the data and run with recovered_metadata 
+            if reload_meta_data == "1":
+                with open(os.path.join(self.pickle_path, "metadata_check.pkl"), "rb") as f:
+                    recovered_metadata = pickle.load(f)
+                metadata_list = self._populate_metadata(metadata_check_df, recovered_metadata_check=recovered_metadata)
+            # If they want to rerun, run the check from the start with an empty list for the output
+            else:
+                metadata_list = self._populate_metadata(metadata_check_df)
         
-        # Update state.insights with the new metadata
-        self.state.insights = metadata_check_df
+        # If the file does not exist, run the metadata check from the start with an empty list for the output
+        else:
+            metadata_list = self._populate_metadata(metadata_check_df)
+         
+        # Now process the list: concat to full metadata
+        full_meta_data_df = pd.concat(metadata_list, ignore_index=True)
 
-        self.state.save(config.STATE_SAVE_LOCATION)
+        # Merge back to state.insights. Drop the old metadata columns and replace with the new metadata from the llm. This ensures that any metadata that was missing or incorrect is updated with the llm response, while any existing correct metadata is retained. We merge on paper_id to ensure we are updating the correct records, and we validate one_to_one to ensure there are no duplicate paper_ids which would indicate an issue with the data integrity.
+        updated_insights = (
+            self.state.insights
+            .drop(columns=["paper_title", "paper_author", "paper_date"])
+            .merge(full_meta_data_df, how="left", on="paper_id", validate="one_to_one")
+        )
+
+        # Update the state.insights to now have the correct metadata. 
+        # Note we don't save here as its not the end of the object and we have the pickle to handle recovery if we need to re run.
+        self.state.insights = updated_insights
 
         return self.state.insights
 
@@ -394,16 +491,15 @@ class Ingestor:
         chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
 
         # Create the chunks state from the full_text state
-        self.state.full_text["chunks"] = chunks_list
-        self.state.chunks = self.state.full_text[["question_id", "paper_id", "chunks"]].explode("chunks").reset_index(drop=True).copy()
-        self.state.chunks.rename(columns={"chunks": "chunk_text"}, inplace=True)   
-        self.state.chunks["chunk_id"] = self.state.chunks.groupby(["paper_id"]).cumcount()
+        self.state.full_text["chunk_text"] = chunks_list
+        self.state.chunks = self.state.full_text[["paper_id", "chunk_text"]].explode("chunk_text").reset_index(drop=True).copy()
+        self.state.chunks["chunk_id"] = [f"chunk_{i+1}" for i in range(self.state.chunks.shape[0])]
 
         # Chunks from full_text as its now joined by paper and question id
-        self.state.full_text.drop(columns=["chunks"], inplace=True)
+        self.state.full_text.drop(columns=["chunk_text"], inplace=True)
 
         # Save the updated state
-        self.state.save(config.STATE_SAVE_LOCATION)
+        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_full_text_and_chunks"))
 
 class Insights:
     def __init__(
@@ -411,7 +507,7 @@ class Insights:
         state: "QuestionState",
         llm_client: Any,
         ai_model: str, 
-        pickle_path: str = os.path.join(os.getcwd(), "data", "pickles"), 
+        pickle_path: str = config.PICKLE_SAVE_LOCATION, 
         chunk_insights_pickle_file: str="chunk_insights.pkl", 
         meta_insights_pickle_file: str="meta_insights.pkl"
     ) -> None:

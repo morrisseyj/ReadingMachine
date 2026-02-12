@@ -286,7 +286,7 @@ class Prompts:
             '    "paper_id": "<paper id>",\n'
             '    "paper_title": "<title>",\n'
             '    "paper_author": "<author 1>; <author 2>; ...",\n'
-            '    "paper_date": "<date or YYYY>"\n'
+            '    "paper_date": "<YYYY>"\n'
             '}\n'
         )
 
