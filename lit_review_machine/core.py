@@ -46,15 +46,18 @@ class Ingestor:
         self,
         llm_client: Any,
         ai_model: str,
-        state: QuestionState = None,
-        papers: pd.DataFrame = None,
+        state: Optional[QuestionState] = None,
+        questions: Optional[List[str]] = None,
+        papers: Optional[pd.DataFrame] = None,
         file_path: str = os.path.join(os.getcwd(), "data", "docs"),
         pickle_path: str = config.PICKLE_SAVE_LOCATION # For storing the pickles of LLM metadata retreival for resume
     ) -> None:
         """Initialize Ingestor and validate state/papers format."""
+               
         self.state = deepcopy(
             utils.validate_format(
                 state=state,
+                questions=questions,
                 injected_value=papers,
                 state_required_cols=[
                     "question_id", "question_text", "search_string_id", "search_string",
@@ -506,7 +509,8 @@ class Insights:
         self,
         state: "QuestionState",
         llm_client: Any,
-        ai_model: str, 
+        ai_model: str,
+        paper_context: str, 
         pickle_path: str = config.PICKLE_SAVE_LOCATION, 
         chunk_insights_pickle_file: str="chunk_insights.pkl", 
         meta_insights_pickle_file: str="meta_insights.pkl"
@@ -528,7 +532,8 @@ class Insights:
         self.ai_model: str = ai_model
         self.pickle_path: str = pickle_path
         os.makedirs(self.pickle_path, exist_ok=True)
-
+        
+        self.paper_context: str = paper_context
         self.chunk_insights_pickle_file = chunk_insights_pickle_file
         self.meta_insights_pickle_file = meta_insights_pickle_file
 
@@ -537,11 +542,11 @@ class Insights:
         self.state = deepcopy(
             utils.validate_format(
             state=state,
+            questions=None,
             injected_value=None,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                 "download_status", "messy_question_id", "messy_paper_id","ingestion_status"
+                "paper_id", "paper_title", "paper_author", "paper_date", "doi"
             ],
             injected_required_cols=None
             )
@@ -551,45 +556,98 @@ class Insights:
 
     
 
-    def _generate_chunk_insights(self, chunk_state= None, insights = None, count_start = None) -> pd.DataFrame:
+    def _generate_chunk_insights(self, insights: List = None) -> pd.DataFrame:
         """
-        Extract insights from each text chunk using the LLM.
-        Each chunk is processed individually, and assessed relative to all the research questions.
-        Insights are traced back to 
-        (chunk_id, paper_id).
+        Generate research-question–level insights for each text chunk using the LLM.
+
+        Each chunk is processed independently and evaluated against all defined
+        research questions. For every chunk, the model returns zero or more
+        insights per question. Even when no insights are identified, the chunk
+        is recorded to ensure complete traceability and resumable execution.
+
+        All generated insights are explicitly linked to:
+            - chunk_id  (unique identifier for the text chunk)
+            - paper_id  (source document identifier)
+
+        The method supports resumable execution by accepting previously
+        generated insight DataFrames and skipping already processed chunk_ids.
 
         Returns:
-            pd.DataFrame: Updated `state.insights` with new insights appended.
+            pd.DataFrame:
+                A consolidated insights table where each row represents a
+                (question_id, paper_id, chunk_id, insight) record, merged
+                with existing state metadata and assigned back to
+                `self.state.insights`.
+
+        # -------------------------------------------------------------
+        # Recovery / Resume Handling
+        #
+        # This function can be called in two modes:
+        #
+        # 1. Fresh run:
+        #    insights is None
+        #    → No chunks have been processed yet.
+        #
+        # 2. Resume run:
+        #    insights is a list of previously generated DataFrames,
+        #    each containing chunk-level results that were written
+        #    incrementally to pickle.
+        #
+        # We must defensively handle three distinct states:
+        #
+        #    insights is None   → brand new run
+        #    insights == []     → valid recovery state but zero chunks processed
+        #    insights has data  → resume and skip already-processed chunk_ids
+        #
+        # Even though under normal execution the pickle file should
+        # never contain an empty list (because we append before dumping),
+        # we explicitly support insights == [] to guard against:
+        #   - manual injection
+        #   - corrupted pickle files
+        #   - future refactors
+        #   - direct unit test calls
+        #
+        # The key invariant:
+        #   remaining_chunks must ALWAYS be defined.
+        # -------------------------------------------------------------
         """
-        if chunk_state is None:
-            chunk_state = self.state.chunks
+
         if insights is None:
-            insights: List[Dict[str, Any]] = []
-        if count_start is None:
-            count_start = 0
-        
+            insights = []
+            processed_chunks = []
+        else:
+            if len(insights) > 0:
+                insights_df = pd.concat(insights).reset_index(drop=True)
+                processed_chunks = insights_df["chunk_id"].unique().tolist()
+            else:
+                # Explicitly handle injected empty list
+                processed_chunks = []
+
+        remaining_chunks = self.state.chunks[
+            ~self.state.chunks["chunk_id"].isin(processed_chunks)
+        ]
+
         # Generate a list of all the research questions with ids in the form <rq_id>: <rq_text> for the llm to consdier against each chunk
-        rqs_df = self.state.insights[["question_id", "question_text"]].dropna().drop_duplicates()
-        rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in rqs_df.iterrows()]
+        rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.state.questions.iterrows()]
         rqs_ids_str = "\n".join(rqs_ids)
 
+        temp_state_insights = self.state.insights.copy()
 
         # Merge chunk text with metadata (author, date, etc.)
-        temp_state_df: pd.DataFrame = chunk_state.merge(
-            self.state.insights[["paper_id", "question_text", "paper_author", "paper_date"]],
+        temp_state_insights: pd.DataFrame = remaining_chunks.merge(
+            temp_state_insights[["paper_id", "question_text", "paper_author", "paper_date"]],
             how="left",
             on=["paper_id"]
         )
 
         # Iterate over each chunk
-        chunk_insights_lst = []
-        for idx, (df_index, row) in enumerate(temp_state_df.iterrows()):
-            print(f"Processing chunk {idx + 1 + count_start} of {temp_state_df.shape[0]}...")
+        for idx, (df_index, row) in enumerate(temp_state_insights.iterrows()):
+            print(f"Processing chunk {len(processed_chunks) + idx + 1} of {temp_state_insights.shape[0] + len(processed_chunks)}...")
 
             # Extract fields from row
             paper_id: str = row["paper_id"]
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
-            chunk_id: int = int(row["chunk_id"])
+            chunk_id: str = str(row["chunk_id"])
 
             # Generate the citation accounting for NA values in authors and date
             authors = row["paper_author"]
@@ -603,17 +661,11 @@ class Insights:
             citation = f"{citation} {date}"
            
 
-            # Encode text safely for JSON
-            safe_research_qs: str = json.dumps(rqs_ids_str, ensure_ascii=False)
-            safe_chunk_text: str = json.dumps(chunk_text, ensure_ascii=False)
-            safe_citation: str = json.dumps(citation, ensure_ascii=False)
-
-
             # Build prompts
-            sys_prompt: str = Prompts().gen_chunk_insights()
+            sys_prompt: str = Prompts().gen_chunk_insights(paper_context=self.paper_context)
             user_prompt: str = (
-                f"RESEARCH QUESTIONS:\n{safe_research_qs}\n\n"
-                f"TEXT CHUNK:\n{safe_chunk_text} - {safe_citation}\n"
+                f"RESEARCH QUESTIONS:\n{rqs_ids_str}\n\n"
+                f"TEXT CHUNK:\n{chunk_text} - {citation}\n"
             )
 
             fall_back = {
@@ -628,36 +680,49 @@ class Insights:
                                  fall_back=fall_back)
             
             # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the state later.
-            response_df = (pd.DataFrame(response_dict['results'].items(), columns=["question_id", "insight"])
-                           .explode("insight") #explode on insights to make tidy data from the lists
-                           .reset_index(drop=True))
+            results = response_dict.get("results", {})
             
-            # Add paper_id and chunk_id to the response_df 
-            response_df["chunk_id"] = chunk_id
-            response_df["paper_id"] = paper_id
+            response_df = (
+                pd.DataFrame(results.items(), columns=["question_id", "insight"])
+                .explode("insight") #explode on insights to make tidy data from the lists
+                .reset_index(drop=True)
+                           )
+            # If the response is empty (no insights were found) add a row with the chunk id and paper id
+            if response_df.empty:
+                response_df = pd.DataFrame([{
+                    "question_id": pd.NA,
+                    "insight": pd.NA, 
+                    "chunk_id": chunk_id,
+                    "paper_id": paper_id
+                }])
+            # Otherwise just add the chunk id and paper id to the response df
+            else: 
+                # Add paper_id and chunk_id to the response_df 
+                response_df["chunk_id"] = chunk_id
+                response_df["paper_id"] = paper_id
 
             # Append to insights list
-            chunk_insights_lst.append(response_df)
+            insights.append(response_df)
             with open(os.path.join(self.pickle_path, self.chunk_insights_pickle_file), "wb") as f:
-                pickle.dump(chunk_insights_lst, f)
+                pickle.dump(insights, f)
 
         # Convert insights list to DataFrame
         print("Converting insights to DataFrame and merging into state...")
-        chunk_insights_df: pd.DataFrame = pd.concat(chunk_insights_lst).reset_index(drop=True)
-        print(f"Dropping cols for first merge...")
+        insights_complete_df: pd.DataFrame = pd.concat(insights).reset_index(drop=True) if insights else pd.DataFrame(columns=["question_id", "insight", "chunk_id", "paper_id"])
         
         # Merge into global insights table - first drop existing insight columns if present (these can be created by previous runs of recover_chunk_insights_generation)
-        for col in ["chunk_id", "insight"]:
-            if col in self.state.insights.columns:
-                self.state.insights.drop(columns=[col], inplace=True)
+        base_insights = (
+            self.state.insights
+            .drop(columns=["chunk_id", "insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
+        )
         
         # Now we merge this chunk insights with all the insights data and metadata. 
         # Notably we drop question_id from the state.insights as previously if papers wwere not associated with a question when importing them, the question_id was NA
         # Now we have all the chunks and thier insights associated with a question_id thus this becomes the primary df
         working_insights_df = (
-            chunk_insights_df[["question_id", "paper_id", "chunk_id", "insight"]]
+            insights_complete_df
             .merge(
-                self.state.insights.drop(columns=["question_id"]),
+                base_insights.drop(columns=["question_id"], errors="ignore"), # So that we don't duplicate question_id columns
                 how="left",
                 on=["paper_id", "chunk_id"]
                 ))
@@ -674,12 +739,10 @@ class Insights:
         with open(os.path.join(self.pickle_path, self.chunk_insights_pickle_file), "rb") as f:
             recover_chunk_insights = pickle.load(f)
         
-        start = len(recover_chunk_insights)
-        print(f"Resuming chunk insights generation from chunk {start}...")
-        self.generate_chunk_insights(chunk_state = self.state.chunks.iloc[start:], insights=recover_chunk_insights, count_start=start)
+        self._generate_chunk_insights(insights=recover_chunk_insights)
 
 
-    def get_chunk_insights(self, chunk_state= None, insights = None, count_start = None) -> pd.DataFrame:
+    def get_chunk_insights(self) -> pd.DataFrame:
         if os.path.exists(os.path.join(self.pickle_path, self.chunk_insights_pickle_file)):
             recover = None
             while recover not in ['r', 'n']:
@@ -693,6 +756,8 @@ class Insights:
             else:
                 print("Overwriting existing chunk insights pickle file...")
                 self._generate_chunk_insights()
+        else:
+            self._generate_chunk_insights()
     
     def get_meta_insights(self, max_token_length = 100000) -> pd.DataFrame:
         """
@@ -923,9 +988,7 @@ class Clustering:
             injected_value=None,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                "download_status", "messy_question_id", "messy_paper_id",
-                "ingestion_status", "chunk_id", "insight"
+                "paper_id", "paper_title", "paper_author", "paper_date", "doi", "chunk_id", "insight"
             ],
             injected_required_cols=None
             )

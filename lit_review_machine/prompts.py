@@ -291,7 +291,7 @@ class Prompts:
         )
 
 
-    def gen_structured_chunk_insights(self, paper_context):
+    def gen_chunk_insights(self, paper_context):
         
         return (
             "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"

@@ -36,6 +36,7 @@ from openai import OpenAI, APITimeoutError, APIConnectionError
 
 def validate_format(
     state: Optional["QuestionState"], 
+    questions: Optional[pd.DataFrame],
     injected_value: Optional[pd.DataFrame],
     state_required_cols: List[str], 
     injected_required_cols: List[str]
@@ -46,6 +47,7 @@ def validate_format(
 
     Args:
         state: An existing QuestionState object (if available).
+        questions: A list of questions to initialize a new QuestionState if state is None.
         injected_value: A DataFrame to inject into a new QuestionState if state is None.
         state_required_cols: List of columns required in state.insights.
         injected_required_cols: List of columns required in the injected DataFrame.
@@ -59,43 +61,39 @@ def validate_format(
                     or if 'paper_id' contains any NA values.
     """
     
-    if state is None and injected_value is None:
-        raise ValueError(
-            "Both state and injected_value cannot be None. "
-            "You must initialize the class with either a valid 'state' created by prior classes "
-            "or with a valid dataframe in tidy format."
-        )
+    # --- PATH A: Existing State Provided ---
+    if state is not None:
+        # Strict check: Ensure they didn't try to provide Path B arguments too
+        if questions is not None or injected_value is not None:
+            raise ValueError("Provide EITHER 'state' OR ('questions' AND 'injected_value'), not both.")
 
-    elif state is not None:
-        # Verify that the state already has the required columns
+        # Column Validation
         if not set(state_required_cols).issubset(state.insights.columns):
-            raise ValueError(
-                "State does not contain all the required columns. "
-                f"Expected at least {state_required_cols}."
-            )
-        # Check for paper_id NAs
+            raise ValueError(f"State.insights missing required columns: {state_required_cols}")
+            
         if "paper_id" in state.insights.columns and state.insights["paper_id"].isna().any():
-            raise ValueError(
-                "State contains NA values in 'paper_id'. "
-                "All papers must have unique IDs. If you have injected data or modified the state, "
-                "'paper_id' must be populated for each paper."
-            )
+            raise ValueError("State.insights contains NA values in 'paper_id'.")
+            
         return state
 
-    else:
-        # Create new state from injected DataFrame
-        state = QuestionState(insights=injected_value)
-        if not set(injected_required_cols).issubset(state.insights.columns):
-            raise ValueError(
-                "Injected dataframe does not contain all required fields. "
-                f"Expected at least {injected_required_cols}."
-            )
-        # Add missing columns (from state_required but not in injected)
+    # --- PATH B: New State via Injection ---
+    elif questions is not None and injected_value is not None:
+        if not set(injected_required_cols).issubset(injected_value.columns):
+            raise ValueError(f"Injected DataFrame missing: {injected_required_cols}")
+
+        # Fill missing columns
         for field in state_required_cols:
-            if field not in injected_required_cols:
-                state.insights[field] = np.nan
+            if field not in injected_value.columns: # Use .columns check directly
+                injected_value[field] = np.nan
 
-        return state
+        return QuestionState(questions=questions, insights=injected_value)
+
+    # --- PATH C: Failure (Nothing provided or partial Path B) ---
+    else:
+        raise ValueError(
+            "Invalid arguments. You must provide a 'state' object "
+            "OR both 'questions' and 'injected_value'."
+        )
     
 
 def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_json: bool, fall_back: Dict[str, Any]):
@@ -328,24 +326,28 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
         pipeline_steps = {
         "01_search_strings": ("You have generated search strings and saved them in your state. "
                               "You should continue with retreieving academic literature. Initialize AcademicLit as follows:\n"
-                              f"latest_state = outputs.QuestionState.load(filepath = '{latest_path}')\n"
-                              "processing.AcademicLit(state = latest_state)"),
+                              f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                              "getlit.AcademicLit(state = latest_state)"),
         "02_academic_lit": ("You have retrieved academic literature and added it to your state. "
                            "You should continue with processing the literature. Initialize AcademicLit as follows:\n"
-                           f"latest_state = outputs.QuestionState.load(filepath = '{latest_path}')\n"
-                           "processing.GreyLiterature(state = latest_state, llm_client=llm_client))"),
+                           f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                           "getlit.GreyLiterature(state = latest_state, llm_client=llm_client)"),
         "03_grey_lit": ("You have acquired the relevant grey literature and added it to your state. "
                         "You should continue with the next step. Initialize the next class as follows:\n"
-                        f"latest_state = outputs.QuestionState.load(filepath = '{latest_path}')\n"
-                        "processing.Literature(state = latest_state)"),
+                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                        "getlit.Literature(state = latest_state)"),
         "04_literature_deduped": ("You have deduplicated the literature and updated your state. "
                                   "You should continue by condutcing an ai assisted check of your literature. Initialize the next class as follows:\n"
-                                  f"latest_state = outputs.QuestionState.load(filepath = '{latest_path}')\n"
-                                  "processing.AiLiteratureCheck(state = latest_state, llm_client=llm_client)"),
+                                  f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                                  "getlit.AiLiteratureCheck(state = latest_state, llm_client=llm_client)"),
         "05_ai_lit_check": ("You have completed the AI literature check and updated your state. "
                            "You should proceed to set up your download architecture for your papers. Initialize the next class as follows:\n"
-                           f"latest_state = outputs.QuestionState.load(filepath = '{latest_path}')\n"
-                           "processing.DownloadManager(state = latest_state)"),
+                           f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                           "getlit.DownloadManager(state = latest_state)"),
+        "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
+                                    f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                                    "core.InsightsGenerator(state = latest_state, llm_client=llm_client)")
+
         }
         
         # Call the dict to return the text

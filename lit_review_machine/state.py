@@ -4,7 +4,7 @@ from lit_review_machine import utils
 
 # Import standard libraries
 import pandas as pd
-from typing import Optional
+from typing import Optional, List
 import os
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -17,8 +17,10 @@ class QuestionState:
     Container for managing research pipeline state.
 
     This class keeps track of:
-      1. Insights dataframe - traces insights back to the `question_id`.
-      2. Full-text dataframe - links full text to a `paper_id`.
+      1. Questions dictionary - key values of question id and question text.
+      2. Insights dataframe - traces insights back to the `paper_id`.
+      3. Chunk dataframe - links text chunks to a `paper_id` and `chunk_id`.
+      4. Full-text dataframe - links full text to a `paper_id`.
 
     It provides methods to save and load the entire state object as a pickle,
     and to initialize a state from a CSV containing literature data.
@@ -26,10 +28,13 @@ class QuestionState:
 
     def __init__(
         self,
+        questions: pd.DataFrame,
         insights: pd.DataFrame,
         full_text: Optional[pd.DataFrame] = None, 
         chunks: Optional[pd.DataFrame] = None
     ) -> None:
+        
+        self.questions = questions
         
         required_insights_cols = ["question_id", "question_text"]
         if not all(col in insights.columns for col in required_insights_cols):
@@ -37,6 +42,7 @@ class QuestionState:
                 "insights dataframe requires the following variables to initialize: 'question_id' and 'question_text'."
             )
         self.insights = insights
+        
         
         if full_text is not None:
             required_full_text_cols = ["paper_id", "full_text"]
@@ -49,14 +55,14 @@ class QuestionState:
             self.full_text = pd.DataFrame(columns=["paper_id", "full_text"])
         
         if chunks is not None:
-            required_chunks_cols = ["question_id", "paper_id", "chunk_id", "chunk_text"]
+            required_chunks_cols = ["paper_id", "chunk_id", "chunk_text"]
             if not all(col in chunks.columns for col in required_chunks_cols):
                 raise ValueError(
-                    "chunks dataframe must include 'question_id', 'paper_id', 'chunk_id', 'chunk_text'."
+                    "chunks dataframe must include 'paper_id', 'chunk_id', 'chunk_text'."
                 )
             self.chunks = chunks
         else:
-            self.chunks = pd.DataFrame(columns=["question_id", "paper_id", "chunk_id", "chunk_text"])
+            self.chunks = pd.DataFrame(columns=["paper_id", "chunk_id", "chunk_text"])
 
     def enforce_canonical_question_text(self) -> None:
         """
@@ -133,13 +139,15 @@ class QuestionState:
     def write_to_csv(
         self, 
         save_location: str = os.path.join(os.getcwd(), "data", "csv"), 
+        write_questions=True,
         write_insights=True, 
         write_full_text=True, 
         write_chunks=True
     ) -> None:
         os.makedirs(save_location, exist_ok=True)
         self._drop_unnamed_columns()
-
+        if write_questions:
+            self.questions.to_csv(os.path.join(save_location, "questions.csv"), index=False)
         if write_insights:
             self.insights.to_csv(os.path.join(save_location, "insights.csv"), index=False)
         if write_full_text:
@@ -175,6 +183,7 @@ class QuestionState:
             state_df_dict[Path(file).stem] = df
 
         question_state = cls(
+            questions=state_df_dict.get("questions"),
             insights=state_df_dict["insights"],
             full_text=state_df_dict.get("full_text", None),
             chunks=state_df_dict.get("chunks", None)
@@ -205,6 +214,7 @@ class QuestionState:
                         )
 
             question_state = cls(
+                questions=state_df_dict.get("questions"),
                 insights=state_df_dict["insights"],
                 full_text=state_df_dict.get("full_text", None),
                 chunks=state_df_dict.get("chunks", None)
@@ -222,7 +232,8 @@ class QuestionState:
                 state_df_dict[Path(file).stem] = df
 
             question_state = cls(
-                insights=state_df_dict["insights"],
+                questions=state_df_dict.get("questions"),
+                insights=state_df_dict.get("insights", None),
                 full_text=state_df_dict.get("full_text", None),
                 chunks=state_df_dict.get("chunks", None)
             )
@@ -262,6 +273,7 @@ class QuestionState:
 
         # --- FIX 2: handle missing keys safely ---
         return cls(
+            questions=state_df_dict.get("questions"),
             insights=state_df_dict.get("insights"),
             full_text=state_df_dict.get("full_text"),
             chunks=state_df_dict.get("chunks"),
@@ -285,7 +297,8 @@ class QuestionState:
             df_dict[Path(file).stem] = df
 
         question_state = cls(
-            insights=df_dict["insights"],
+            questions=df_dict.get("questions"),
+            insights=df_dict.get("insights", None),
             full_text=df_dict.get("full_text", None),
             chunks=df_dict.get("chunks", None)
         )
