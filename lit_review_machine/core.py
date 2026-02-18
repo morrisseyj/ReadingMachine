@@ -201,6 +201,7 @@ class Ingestor:
         Ingest all papers and populate state.full_text.
         Returns a DataFrame with columns ['paper_path', 'pages', 'paper_id', 'question_id', 'full_text'].
         """
+
         
         working_insights = (
             self.state.insights.copy()
@@ -255,7 +256,7 @@ class Ingestor:
             ingestion_status_df.merge(working_insights, how="outer", on=["question_id", "paper_id"]) # Outer merge to make sure all the ingestion status records and all the insights records are included so we don't lose anyting
             .assign(ingestion_ids_matched = lambda x: np.where(x["question_text"].isna(), "import file does not match possible id", "match")) # First check if the question_text is na. If so, that means the ingested item did not match to a paper_id and question_id and therefore is unmatched
             .query("paper_id.notna()") # Filter any records for which paper_id is na, as this means there was not paper (usually a hangover from entering just questions to match with a folder of files - i.e. dump files in a folder and query them)
-            .assign(ingestions_status=lambda x: np.where(x["ingestion_status"].isna(), 0, x["ingestion_status"])) # Set the ingestion status to 0 if it is na, meaning there was no paper ingested and thus no match
+            .assign(ingestion_status=lambda x: np.where(x["ingestion_status"].isna(), 0, x["ingestion_status"])) # Set the ingestion status to 0 if it is na, meaning there was no paper ingested and thus no match
             .assign(ingestion_ids_matched=lambda x: np.where(x["ingestion_status"]==0, "existing id had no corresponding file", x["ingestion_ids_matched"])) # Check if the ingestion status is 0. If so, there was no paper ingested and thus no match - these are essentially docs that were not downloaded
         )
 
@@ -417,8 +418,6 @@ class Ingestor:
 
         return(output)
 
-
-
     def update_metadata(self) -> pd.DataFrame:
         """Get the metadata for every paper from the first 5000 chrs of the full text using the LLM and update state.insights with the metadata."""
         #Create the metadata check which is the dataframe containing the columns i need for the check
@@ -501,6 +500,14 @@ class Ingestor:
         # Chunks from full_text as its now joined by paper and question id
         self.state.full_text.drop(columns=["chunk_text"], inplace=True)
 
+        # Get chunk_id into insights
+        temp_insights = self.state.insights.copy()
+        self.state.insights = (
+            self.state.chunks
+            .drop(columns=["chunk_text"])
+            .merge(temp_insights, how="left", on="paper_id")
+        )
+
         # Save the updated state
         self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_full_text_and_chunks"))
 
@@ -511,6 +518,7 @@ class Insights:
         llm_client: Any,
         ai_model: str,
         paper_context: str, 
+        max_token_length: int = 100000,
         pickle_path: str = config.PICKLE_SAVE_LOCATION, 
         chunk_insights_pickle_file: str="chunk_insights.pkl", 
         meta_insights_pickle_file: str="meta_insights.pkl"
@@ -536,6 +544,7 @@ class Insights:
         self.paper_context: str = paper_context
         self.chunk_insights_pickle_file = chunk_insights_pickle_file
         self.meta_insights_pickle_file = meta_insights_pickle_file
+        self.max_token_length: int = max_token_length
 
 
         # Ensure state has all required columns before processing
@@ -713,7 +722,7 @@ class Insights:
         # Merge into global insights table - first drop existing insight columns if present (these can be created by previous runs of recover_chunk_insights_generation)
         base_insights = (
             self.state.insights
-            .drop(columns=["chunk_id", "insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
+            .drop(columns=["insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
         )
         
         # Now we merge this chunk insights with all the insights data and metadata. 
@@ -726,7 +735,21 @@ class Insights:
                 how="left",
                 on=["paper_id", "chunk_id"]
                 ))
+        
+        # Add insight_ids
+        mask = working_insights_df["insight"].notna()
 
+        # Create numeric ids only where valid
+        working_insights_df["insight_id"] = pd.NA
+        working_insights_df.loc[mask, "insight_id"] = range(1, mask.sum() + 1)
+
+        # Explicitly transform only valid rows to final string form
+        working_insights_df.loc[mask, "insight_id"] = (
+            "chunk_insight_" +
+            working_insights_df.loc[mask, "insight_id"].astype(int).astype(str)
+        )
+
+        # Assign to state
         self.state.insights = working_insights_df
 
         # Note i don't save here as i only save at the end of the class's operations. This is cleaner for the user. 
@@ -758,15 +781,18 @@ class Insights:
                 self._generate_chunk_insights()
         else:
             self._generate_chunk_insights()
-    
-    def get_meta_insights(self, max_token_length = 100000) -> pd.DataFrame:
+
+
+    def _prepare_meta_insights_df(self) -> pd.DataFrame:
         """
-        Generate 'meta-insights' — arguments that span multiple chunks within 
-        the same paper. Each paper is processed once, combining all chunk insights 
-        and the full text.
+        Generate the dataframe 'meta-insights'. This is compiled once to allow for easy passing to the LLM to extract meta-insights — arguments that span multiple chunks within 
+        the same paper. Creating this single dataframe allows us to manage resume if the user has to abort the generation process.
+        The dataframe includes the paper_id, the full_text (broken into chunks that max the context window), the chunk insights for the paper and meatadata. 
+        All data is tidy with the full_text chunk the most granular level 
+
 
         Returns:
-            pd.DataFrame: DataFrame of meta-insights appended to state.insights.
+            pd.DataFrame: DataFrame of meta-insights 
 
         Raises:
             ValueError: If chunk insights do not exist prior to running.
@@ -778,154 +804,226 @@ class Insights:
                 "Please run .get_chunk_insights before .get_meta_insights."
             )
         
-        meta_insights: List[Dict[str, Any]] = []
-        # All research questions for context
-        rqs = self.state.insights[["question_id", "question_text"]].drop_duplicates().dropna()
-
-        # rqs: List[str] = [
-        #     f"{row['question_id']}: {row['question_text']}"
-        #     for _, row in self.state.insights[["question_id", "question_text"]].iterrows()
-        # ]
-
-        # Process each paper
-        for idx, paper_id in enumerate(self.state.insights["paper_id"].unique()):
-            print(f"Processing meta-insight for paper {idx + 1} of {len(self.state.insights['paper_id'].unique())}...")
-            # Get paper full text
-            paper_content: str = (
-                self.state.full_text
-                .loc[self.state.full_text["paper_id"] == paper_id, "full_text"]
-                .iloc[0]
-            )
-
+        rqs = self.state.questions
+        # Create the final list of paper that we will populate as we develop all the data for checking for meta insights for each paper
+        list_of_papers = []
+        # Get the full text and paper id
+        for _, row in self.state.full_text.iterrows():
+            paper_id = row["paper_id"]
+            paper_content = row["full_text"]
             # Check that the whole paper fits in the model context window, if not break into chunks and process separately 
             # (this is a bit of a hack but it allows us to at least get some meta insights from papers that exceed the context window, 
             # which is likely to be the case for many academic papers with the full text included)
             token_count = self.estimate_tokens(paper_content, self.ai_model)
-            if token_count > max_token_length:
-                paper_content_list = self.string_breaker(paper_content, max_token_length=max_token_length)
+            if token_count > self.max_token_length:
+                paper_content_list = self.string_breaker(paper_content, max_token_length=self.max_token_length)
             else:
                 paper_content_list = [paper_content]
-              
-            for paper_content in paper_content_list:
-                # Get the insights dataframe for the specific paper_id 
-                paper_df: pd.DataFrame = self.state.insights[self.state.insights["paper_id"] == paper_id]
 
-                # Now get the metadata and chunk insights for the paper
-                authors = paper_df['paper_author'].iloc[0]
-                if isinstance(authors, list):
-                    author_str = ", ".join(authors)
-                elif pd.isna(authors):
+            # Get the chunk insights for the paper id and the question_id
+            for rqid in rqs["question_id"].to_list():
+                paper_question_chunk_insights = self.state.insights[
+                    (self.state.insights["paper_id"] == paper_id) & (self.state.insights["question_id"] == rqid)
+                ]["insight"].dropna().tolist()
+                paper_question_chunk_insights = "\n".join(paper_question_chunk_insights) if paper_question_chunk_insights else ""
+            
+                # Get the metadata for the paper id
+                paper_metadata_df = self.state.insights[self.state.insights["paper_id"] == paper_id][["paper_author", "paper_title", "paper_date"]].drop_duplicates()
+                author = paper_metadata_df["paper_author"].iloc[0] if not paper_metadata_df.empty and "paper_author" in paper_metadata_df.columns else pd.NA
+                if isinstance(author, list):
+                        author_str = ", ".join(author)
+                elif pd.isna(author):
                     author_str = ""
                 else:
-                    author_str = str(authors)
-                date = paper_df['paper_date'].iloc[0]
+                    author_str = str(author)
+                date = paper_metadata_df["paper_date"].iloc[0] if not paper_metadata_df.empty and "paper_date" in paper_metadata_df.columns else pd.NA
                 date_str = "" if pd.isna(date) else str(date)
-                title = paper_df['paper_title'].iloc[0]
+                title = paper_metadata_df["paper_title"].iloc[0] if not paper_metadata_df.empty and "paper_title" in paper_metadata_df.columns else pd.NA
                 title_str = "" if pd.isna(title) else str(title)
                 metadata = f"{author_str}, {date_str}, {title_str}"
 
-                # Any paper_id can be associated with multiple research questions. 
-                # The link between papers and research questions is set when we determine if chunks for the paper hold any insighs for any RQ.
-                # Thus a paper_id is associated with all the RQs for which any of its chunks hold insights. 
-                # So we get all the RQs for the paper ID
-                relevant_rqs_dict = paper_df[paper_df["insight"].notna()]["question_id", "question_text"].drop_duplicates().to_dict(orient="records")
-                # Now iterate over each question for which the paper has relevance and call the llm to id the meta insights for that paper
-                for rq_id, rq_text in zip(relevant_rqs_dict["question_id"], relevant_rqs_dict["question_text"]):
-                    current_rq_str: str = f"{rq_id}: {rq_text}"
-                    other_rqs_df: pd.DataFrame = rqs[rqs["question_id"] != rq_id] # Get other RQs for context, excluding the current one
-                    other_rqs_str: str = "\n".join(f"{row['question_id']}: {row['question_text']}" for _, row in other_rqs_df.iterrows())
-                    insights_str: str = "\n".join(paper_df.loc[paper_df["question_id"] == rq_id, "insight"].dropna().tolist()) # Get insights for the current RQ and paper ID, dropna to avoid issues with empty insights
+                # Now build the dataframe that we can call against the LLM and that we can use to determine resume points
+                meta_insight_check_df = pd.DataFrame({
+                    "paper_id": [paper_id] * len(paper_content_list),
+                    "question_id": [rqid] * len(paper_content_list),
+                    "paper_content": paper_content_list,
+                    "paper_chunk_insights": [paper_question_chunk_insights] * len(paper_content_list),
+                    "metadata": [metadata] * len(paper_content_list),
+                })
 
+                list_of_papers.append(meta_insight_check_df)
 
-                    # Build prompt
-                    user_prompt: str = (
-                        "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n"
-                        f"{current_rq_str}\n"
-                        f"PAPER ID: {paper_id}:\n"
-                        f"PAPER METADATA:\n"
-                        f"{metadata}\n"
-                        "PAPER TEXT:\n"
-                        f"{paper_content}\n"
-                        "EXISTING CHUNK INSIGHTS\n"
-                        f"{insights_str}\n"
-                        "OTHER RESEARCH QUESTIONS IN THE REVIEW\n"
-                        f"{other_rqs_str}\n\n"
-                    )
-                    sys_prompt: str = Prompts().gen_meta_insights()
+        # Concat all the papers in the list
+        meta_insight_check_df = pd.concat(list_of_papers).reset_index(drop=True)    
 
-                    # Empty dict for fallback
-                    fall_back = {
-                        "paper_id": "",
-                        "insight": []
-                    }   
-                    # call LLM
-                    response_dict = utils.call_chat_completion(ai_model = self.ai_model,
-                                                        llm_client = self.llm_client,
-                                                        sys_prompt = sys_prompt,
-                                                        user_prompt = user_prompt,
-                                                        return_json = True, 
-                                                        fall_back=fall_back)
-                
-                    response_dict["paper_id"] = paper_id
-                    response_dict["question_id"] = rq_id
-                    # Ensure insight key exists
-                    if "insight" not in response_dict:
-                        response_dict["insight"] = []
-                    # Ensure insight is a list
-                    if isinstance(response_dict["insight"], list):
-                        pass
-                    elif isinstance(response_dict["insight"], str):
-                        response_dict["insight"] = [response_dict["insight"]]
-                    else:
-                        response_dict["insight"] = []
-                    # Now append to the overall meta insights
-                    meta_insights.append(response_dict)
-                    with open(os.path.join(self.pickle_path, "meta_insights.pkl"), "wb") as f:
-                        pickle.dump(meta_insights, f)
-                
+        # Create an id for full_content chunks both for resuming and traceability
+        meta_insight_check_df["content_chunk_id"] = [f"meta_chunk_{i+1}" for i in range(meta_insight_check_df.shape[0])]
+
+        # Update the state.chunks with the meta chunks and their ids
+        temp_chunks = self.state.chunks.copy()
+        # Check if the meta_chunks were already created in a previous run. If so remove them from the state object before we concat so that they don't get duplicated. 
+        if temp_chunks["chunk_id"].str.startswith("meta_chunk_").any():
+            temp_chunks = temp_chunks[~temp_chunks["chunk_id"].str.startswith("meta_chunk_")]
         
-        # Convert to DataFrame
-        meta_insights_df: pd.DataFrame = pd.DataFrame(meta_insights)
-        
-        # We want to eventually concat meta insights with insights, so we get all the columns neccesary to make meta insights compatible with insights
-        # Make a temp copy of state.insights to drop unneccesary columns and then to merge with meta insights
-        # Make copy
-        temp_insights = deepcopy(self.state.insights)
-        
-        # Drop columns that will duplicate or are unneccesary
-        cols_to_drop = [col for col in ["chunk_id", "insight"] if col in temp_insights.columns]
-        temp_insights = temp_insights.drop(columns=cols_to_drop)
-        
-        # Drop duplicates so we have one row per (paper_id, question_id)
-        temp_insights = temp_insights.drop_duplicates()
+        self.state.chunks = pd.concat([
+            meta_insight_check_df[["paper_id", "paper_content", "content_chunk_id"]].rename(columns={"paper_content": "chunk_text", "content_chunk_id": "chunk_id"}),
+            temp_chunks
+            ])
 
-        # Merge meta insights into state.insights so meta insights have all the same columns as insights
-        meta_insights_df = meta_insights_df.merge(
-            temp_insights, how="left", on=["paper_id", "question_id"])
+        return(meta_insight_check_df)
+        
 
-        # Prepare for exploding insights into separate rows
-        meta_insights_df["insight"] = meta_insights_df["insight"].apply(self.ensure_list)
-        # Explode meta insights so each insight is its own row
-        meta_insights_df = meta_insights_df.explode("insight")
-        # Create chunk_id column to identify meta insights
-        meta_insights_df["chunk_id"] = [f"meta_insight_{pid}" for pid in meta_insights_df["paper_id"]]
+    def get_meta_insights(self) -> pd.DataFrame:
+        """
+        Generate 'meta-insights' — arguments that span multiple chunks within 
+        the same paper. Each paper is processed once, combining all chunk insights 
+        and the full text.
 
-        # Concat new meta insights
-        self.state.insights = pd.concat(
-            [self.state.insights, meta_insights_df], 
-            ignore_index=True
+        Returns:
+            pd.DataFrame: An updated version of state.insights which has the meta-insights appended.
+
+        Raises:
+            ValueError: If chunk insights do not exist prior to running.
+        """
+        # Must run chunk insights first
+        if "insight" not in self.state.insights.columns:
+            raise ValueError(
+                "Meta-insights cannot be created prior to generating chunk insights. "
+                "Please run .get_chunk_insights before .get_meta_insights."
+            )
+        
+        # Check if there is a pickle file with previously generated meta_insights and ask the user if they want to recover or regenerate
+        meta_insights = None
+        if os.path.exists(os.path.join(self.pickle_path, self.meta_insights_pickle_file)):
+            recover = None
+            while recover not in ['r', 'n']:
+                recover = input(
+                    f"Meta-insights already exist on file at {os.path.join(self.pickle_path, self.meta_insights_pickle_file)}. "
+                    "Do you wish to recover/restore or regenerate meta-insights?\n"
+                    "Hit 'r' to recover/restore from file, or 'n' to generate new meta-insights (this will overwrite existing file):\n"
+                    ).lower()
+            if recover == 'r':
+                print("Recovering meta-insights from file...")
+                with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "rb") as f:
+                    meta_insights = pickle.load(f)
+            else:
+                # Clean up any meta insights that have been generated in self.state.insights to avoid duplication when we generate new ones.
+                self.state.insights = self.state.insights[
+                    ~self.state.insights["insight_id"].astype(str).str.startswith("meta_insight_")
+                    ]
+                meta_insights = None
+
+        # If meta insights exists (its a list of dicts), so we concat them to get the ids of all the processed content chunks so we can drop them from the meta_insight_check_df and only process the remaining content chunks. 
+        if meta_insights is not None:
+            meta_insights_run_df = pd.concat(meta_insights).reset_index(drop=True)
+            processed_meta_chunks = meta_insights_run_df["content_chunk_id"].unique().tolist()
+        else: 
+            processed_meta_chunks = [] #if it doesn't exist its empty so we will exclude nothing
+
+        # Drop the processed content chunks
+        meta_insight_check_df = self._prepare_meta_insights_df()
+        meta_insight_check_df = meta_insight_check_df[~meta_insight_check_df["content_chunk_id"].isin(processed_meta_chunks)]
+
+        # Now prepare to pass to the LLM for checking
+        meta_insights_df_lst = [] if meta_insights is None else meta_insights
+        for idx, row in meta_insight_check_df.iterrows():
+            print(f"Processing meta-insights for content piece {idx + len(processed_meta_chunks) + 1} of {meta_insight_check_df.shape[0] + len(processed_meta_chunks)}...")
+
+            # Extract fields from row
+            paper_id: str = row["paper_id"]
+            rq_id = row["question_id"]
+            rq_text = self.state.questions[self.state.questions["question_id"] == rq_id]["question_text"].iloc[0] if rq_id in self.state.questions["question_id"].tolist() else ""
+            rq = f"{rq_id}: {rq_text}"
+            other_rqs = self.state.questions[self.state.questions["question_id"] != rq_id]
+            other_rqs_str = "\n".join([f"{row['question_id']}: {row['question_text']}" for _, row in other_rqs.iterrows()])
+            paper_content: str = row["paper_content"] if pd.notna(row["paper_content"]) else ""
+            paper_chunk_insights: str = row["paper_chunk_insights"] if pd.notna(row["paper_chunk_insights"]) else ""
+            metadata: str = row["metadata"] if pd.notna(row["metadata"]) else ""
+            content_chunk_id: str = row["content_chunk_id"]
+
+
+            # Build prompts
+            sys_prompt: str = Prompts().gen_meta_insights(paper_context=self.paper_context)
+            user_prompt: str = (
+                f"SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n{rq}\n"
+                f"PAPER METADATA:\n{metadata}\n"
+                f"PAPER TEXT:\n{paper_content}\n"
+                f"EXISTING CHUNK INSIGHTS:\n{paper_chunk_insights}\n\n"
+                f"OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n{other_rqs_str}\n\n"
+            )
+
+            fall_back = {
+                "results": {}
+            }
+
+            response_dict = utils.call_chat_completion(ai_model = self.ai_model,
+                                llm_client = self.llm_client,
+                                sys_prompt = sys_prompt,
+                                user_prompt = user_prompt,
+                                return_json = True, 
+                                fall_back=fall_back)
+            
+            results = pd.DataFrame(response_dict["results"])
+
+            # If the response is empty use an empty list otherwise get the list of results from results
+            meta_list = results["meta_insight"].tolist() if not results.empty else []
+
+            meta_insight_df = pd.DataFrame({
+                "paper_id": [paper_id],
+                "question_id": [rq_id],
+                "content_chunk_id": [content_chunk_id],
+                "meta_insight": [meta_list]
+            })
+
+            meta_insights_df_lst.append(meta_insight_df)
+
+            with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "wb") as f:
+                pickle.dump(meta_insights_df_lst, f)
+
+
+        # Now join up the list of dataframes to get a single value
+        meta_insights_complete_df: pd.DataFrame = pd.concat(meta_insights_df_lst).reset_index(drop=True) if meta_insights_df_lst else pd.DataFrame(columns=["paper_id", "question_id", "content_chunk_id", "meta_insight"])
+        # Explode on meta_insight (currently a list for each content chunk)
+        meta_insights_complete_df = meta_insights_complete_df.explode("meta_insight").reset_index(drop=True) 
+
+        # Now we want to append to self.state.insights (which already has the chunk level insights)
+        # First rename meta_insight to insight to match .state.insights, i also rename content_chunk_id to chunk_id to match the state and ensure the meta_chunks have an ID of thier own. 
+        meta_insights_complete_df.rename(columns={"meta_insight": "insight", 
+                                                  "content_chunk_id": "chunk_id"}, 
+                                                  inplace=True)
+        #Then add insight ids to meta insights to distinguish them from chunk insights and to have a unique id for each insight which we can use for traceability 
+        # First create mask so that we only iterate insight_id count for insights, not for NA insights
+        mask = meta_insights_complete_df["insight"].notna()
+
+        # Create numeric ids only where valid
+        meta_insights_complete_df["insight_id"] = pd.NA
+        meta_insights_complete_df.loc[mask, "insight_id"] = range(1, mask.sum() + 1)
+
+        # Explicitly transform only valid rows to final string form
+        meta_insights_complete_df.loc[mask, "insight_id"] = (
+            "meta_insight_" +
+            meta_insights_complete_df.loc[mask, "insight_id"].astype(int).astype(str)
         )
-        
-        # Add insight_id as i need this for joining in subsequent steps
-        self.state.insights["insight_id"] = self.state.insights.index.astype(str)
 
-        # Ensure chunk_id is string type - neccesary as earlier chunk ids were integers, now they have "meta insight_{paper_id}" strings too
-        self.state.insights["chunk_id"] = self.state.insights["chunk_id"].astype(str)
+        # Then manipulate state.insights so that we can merge with meta_insights to get a complete df that we can later append to insights
+        temp_insights = self.state.insights.copy()
+        temp_insights = (
+            temp_insights
+            .drop(columns=["question_id", "question_text", "insight_id", "insight", "chunk_id"]) #Drop these to avoid conflicts
+            .drop_duplicates(subset=["paper_id"])
+            ) 
+        meta_insights_complete = meta_insights_complete_df.merge(
+            temp_insights, 
+            on="paper_id", 
+            how="left"
+            )
+        # Now we have the meta insights with all the metadata and we can append to the state insights
+        self.state.insights = pd.concat([self.state.insights, meta_insights_complete], ignore_index=True)
+        # Save to parquet and return
+        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "07_insights"))
+        return self.state.insights
 
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "10_insights"))
-
-        return meta_insights_df
-
+      
     @staticmethod
     def ensure_list(x):
         if isinstance(x, list):
@@ -959,14 +1057,14 @@ class Insights:
             chunks.append(current_chunk)
         return chunks
     
-    def recover_meta_insights_generation(self):
-        print("Opening pickle file to recover meta insights generation...")
-        with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "rb") as f:
-            recover_meta_insights = pickle.load(f)
+    # def recover_meta_insights_generation(self):
+    #     print("Opening pickle file to recover meta insights generation...")
+    #     with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "rb") as f:
+    #         recover_meta_insights = pickle.load(f)
         
-        start = len(recover_meta_insights)
-        print(f"Resuming meta insights generation from paper {start}...")
-        self.get_meta_insights()
+    #     start = len(recover_meta_insights)
+    #     print(f"Resuming meta insights generation from paper {start}...")
+    #     self.get_meta_insights()
     
 class Clustering:
     """

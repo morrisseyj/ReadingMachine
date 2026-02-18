@@ -50,12 +50,19 @@ paper_context = (
 
 ############
 #Restart the pipeline if you want
-############
+
 utils.restart_pipeline()
 
+############
+
+# We need to pass a df of both the questions and the papers to the ingestor. 
+# If our papers are just in a single folder and not associated with specific questions, then we can just pass the same df for both the questions and the papers, as the ingestor will be able to associate the papers with the questions based on the question ids and text that are present in both dfs. This is a bit of a hack, but it allows us to keep the pipeline flexible and adaptable to different use cases. In this case, we are just using the questions df as a placeholder for the papers df, as we don't have specific papers associated with each question at this point in the pipeline. The insights will be added in later steps of the pipeline, and they will be associated with the questions based on the question ids and text that are present in both dfs.
+# First create a questions dict from the ist
 questions_dict = {f"question_{idx}": question_text for idx, question_text in enumerate(questions)}
+# Then create a df from the questions dict, with columns for question id and question text
 questions_df = pd.DataFrame(list(questions_dict.items()), columns=["question_id", "question_text"])
-insights_df = questions_df.copy() # initialize insights df with question ids and text, the insights will be added in later steps of the pipeline. This ensures that the question ids and text are always present in the insights df, which is important for the metadata anchored synthesis that we are doing in this pipeline.
+# Then initialize insights df with question ids and text, the insights will be added in later steps of the pipeline. This ensures that the question ids and text are always present in the insights df, which is important for the metadata anchored synthesis that we are doing in this pipeline.
+insights_df = questions_df.copy() 
 
 # Instantiate in Ingestor class
 ingestor = core.Ingestor(
@@ -75,16 +82,17 @@ ingestor.update_metadata()
 # Chunk the papers so that they can be used to acquire insights
 ingestor.chunk_papers()
 
-
+# To recover the state of the pipeline at any point, we can use the QuestionState class to load the state from a specific filepath. This allows us to pick up where we left off in the pipeline without having to re-run previous steps. In this case, we are loading the state from a specific filepath that corresponds to a previous run of the pipeline. This is useful for testing and debugging purposes, as it allows us to see how the pipeline is progressing and to identify any issues that may arise.
 latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\06_full_text_and_chunks')
 
+# Now we create the insights generator, which is responsible for taking the chunked papers and generating insights from the chunks as well as meta insights from the whole paper 
 insights_generator = core.Insights(state = latest_state,
                                    llm_client=llm_client,
                                    ai_model="gpt-4o", 
                                    paper_context=paper_context)
 
+# Get the chunk insights
 insights_generator.get_chunk_insights()
+# Get the meta insights from the whole paper
+insights_generator.get_meta_insights()
 
-
-with open(os.path.join(insights_generator.pickle_path, insights_generator.chunk_insights_pickle_file), "rb") as f:
-    recover_chunk_insights = pickle.load(f)

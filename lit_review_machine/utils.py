@@ -122,7 +122,8 @@ def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_j
             response = llm_client.chat.completions.create(
                 model=ai_model,
                 messages=messages,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"}, 
+                temperature=0
             )
         except Exception as e:
             print(f"Call to OpenAI failed. Error: {e}")
@@ -141,7 +142,8 @@ def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_j
         try:
             response = llm_client.chat.completions.create(
                 model=ai_model,
-                messages=messages
+                messages=messages, 
+                temperature=0
             )
         except Exception as e:
             print(f"Call to OpenAI failed. Error: {e}")
@@ -346,8 +348,10 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
                            "getlit.DownloadManager(state = latest_state)"),
         "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
                                     f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                                    "core.InsightsGenerator(state = latest_state, llm_client=llm_client)")
-
+                                    "core.InsightsGenerator(state = latest_state, llm_client=llm_client)"),
+        "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
+                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                        "core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')")
         }
         
         # Call the dict to return the text

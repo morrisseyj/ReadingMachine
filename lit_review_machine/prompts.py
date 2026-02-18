@@ -307,9 +307,11 @@ class Prompts:
             "<text chunk, including citations like (Author Date)>\n\n"
             "Instructions:\n"
             "1) For each research question, extract any explicit arguments/findings/claims in the text that answer or bear directly on that question.\n"
-            "2) Each extracted item must be concise (one sentence or short phrase), standalone, and preserve wording as much as possible.\n"
-            "3) Each extracted item MUST end with the citation exactly as it appears in the chunk (e.g., '(Author Date)'). If the chunk provides no citation for that item, omit the item.\n"
-            "4) Output MUST be valid JSON only, matching this schema:\n\n"
+            "2) Each extracted item must be concise (one sentence or short phrase) and preserve wording as much as possible.\n"
+            "3) Each insight will later be synthezied, by an LLM, according to clusters. To ensure coherence in the synthesis, ensure that each insight is also a coherent stand-alone idea.\n"
+            "4) Each extracted item MUST end with the citation exactly as it appears in the chunk (e.g., '(Author Date)').\n"
+            "5) If citing material referenced by the authors identified cite as (Author Date in Author Date), include the full citation as it appears in the text (e.g., '(Smith 2020 in Jones 2023)').\n"
+            "6) Output MUST be valid JSON only, matching this schema:\n\n"
             "{\n"
             '  "results": {\n'
             '    "<rq_id>": ["<claim ... (Author Date)>", "<claim ... (Author Date)>"],\n'
@@ -339,10 +341,9 @@ class Prompts:
             
             f'{paper_context}'
 
-            'Input format:\n\n'
+            'INPOUT FORMAT:\n\n'
             'SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n'
             '<question_id>: <question_text>\n\n'
-            'PAPER ID: <paper_id>:\n'
             'PAPER METADATA:\n'
             '<paper_metadata - author, date, title>\n'
             'PAPER TEXT:\n'
@@ -352,25 +353,24 @@ class Prompts:
             'OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n'
             '<question_id1>: <question_text1>\n<question_id2>: <question_text2>\n...\n\n'
             '---\n\n'
+            
             'OUTPUT REQUIREMENTS:\n'
             'Return a **valid JSON object** matching this exact schema:\n\n'
             '```json\n'
             '{\n'
-            '  "paper_id": "paper_id",\n'
-            '  "insight": [\n'
-            '    "meta_insight_1 (Author Date)",\n'
-            '    "meta_insight_2 (Author Date)"\n'
-            '  ]\n'
+            '  "results": {\n'
+            '    "meta_insight": ["<claim ... (Author Date)>", "<claim ... (Author Date)>"],\n'
             '}\n'
             '```\n\n'
             'ADDITIONAL INSTRUCTIONS:\n'
-            '- The value of "insight" **must always be a JSON array (list)** — even if empty or containing only one insight.\n'
-            '- Return `"insight": []` if no new meta-insights are found.\n'
-            '- Do **not** return strings, null, or omit the "insight" key.\n'
-            '- Derive insights that pertain ONLY to the specified research question.\n'
+            '- The value of "meta_insight" **must always be a JSON array (list)** — even if only one insight.\n'
+            '- Return an empty dictionary for results {} if no new meta-insights are found i.e. "results: {}".\n'
+            '- Derive meta-insights that pertain ONLY to the specified research question.\n'
             '- Use the "OTHER RESEARCH QUESTIONS IN THE REVIEW" section for broader context to ground your understanding of what a relevant insight to the current research question might be, but ensure the insights you return are focused on the specific research question only.\n'
-            '- Use the provided paper metadata to append citations to each insight.\n'
-            '- Keep insights concise (ideally 1-3 sentences each).\n'
+            '- Each extracted item must be concise (one sentence or short phrase) and preserve wording as much as possible.\n'
+            '- Each insight will later be synthezied, by an LLM, according to clusters. To ensure coherence in the synthesis, ensure that each insight is also a coherent stand-alone idea.\n'
+            '- Each extracted item MUST end with the citation, derived from the metadata (e.g., "(Author Date)").\n'
+            '- If citing material referenced by the authors identified cite as (Author Date in Author Date), include the full citation as it appears in the text (e.g., "(Smith 2020 in Jones 2023)").\n'
             '- Note that if full text exceeds the context window it will be broken into parts. You should treat the text you recieve as the entire content even if it is only a portion of the full paper. Focus on extracting meta-insights from the text you receive, without assuming access to the full paper.\n'
             '- Do not repeat insights already found in chunks.\n'
             '- Do not output explanations, markdown, or any text outside the JSON object.'
