@@ -96,3 +96,11 @@ insights_generator.get_chunk_insights()
 # Get the meta insights from the whole paper
 insights_generator.get_meta_insights()
 
+# Get the latest state again
+latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\07_insights')
+# Initialize the cluster class
+cluster = core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')
+# Embed the insights
+cluster.embed_insights()
+# Reduce dimensions for the purpose of clustering
+cluster.reduce_dimensions()

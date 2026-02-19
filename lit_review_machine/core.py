@@ -1162,27 +1162,28 @@ class Clustering:
                     "Hit 'n' to generate new embeddings (this will overwrite existing pickle), or 'r' to reload from file:\n"
                 ).lower()
             if recover == 'r':
-                self.load_embeddings()
-            elif recover == 'n':
+                self._load_embeddings()
+                return(self.insight_embeddings_array)
+            else:
                 print("Overwriting existing embeddings pickle...")
                 
-                # Generate embeddings for valid insights only
-                insight_embeddings = []
-                for idx, insight in enumerate(self.valid_embeddings_df["no_author_insight_string"], start=1):
-                    print(f"Embedding insight {idx} of {self.valid_embeddings_df.shape[0]}")
-                    response = self.llm_client.embeddings.create(
-                        input=insight,
-                        model=self.embedding_model,
-                        dimensions=self.embedding_dims
-                    )
-                    insight_embeddings.append(response.data[0].embedding)
+        # Generate embeddings for valid insights only
+        insight_embeddings = []
+        for idx, insight in enumerate(self.valid_embeddings_df["no_author_insight_string"], start=1):
+            print(f"Embedding insight {idx} of {self.valid_embeddings_df.shape[0]}")
+            response = self.llm_client.embeddings.create(
+                input=insight,
+                model=self.embedding_model,
+                dimensions=self.embedding_dims
+            )
+            insight_embeddings.append(response.data[0].embedding)
 
 
-                self.insight_embeddings_array = np.vstack(insight_embeddings)
-                self.valid_embeddings_df["full_insight_embedding"] = [emb.tolist() for emb in self.insight_embeddings_array]
+        self.insight_embeddings_array = np.vstack(insight_embeddings)
+        self.valid_embeddings_df["full_insight_embedding"] = [emb.tolist() for emb in self.insight_embeddings_array]
 
-                self._save_embeddings()  # safe pickle save
-                return self.insight_embeddings_array
+        self._save_embeddings()  # safe pickle save
+        return self.insight_embeddings_array
 
     def _save_embeddings(self):
         """Save embeddings safely, creating folder if it does not exist."""
@@ -1191,7 +1192,7 @@ class Clustering:
             pickle.dump(self.insight_embeddings_array, f)
         print(f"Embeddings safely saved to '{self.embeddings_pickle_path}'.")
 
-    def load_embeddings(self):
+    def _load_embeddings(self):
         """Load embeddings safely if the pickle exists."""
         if not os.path.exists(self.embeddings_pickle_path):
             raise FileNotFoundError(f"No embeddings pickle found at {self.embeddings_pickle_path}")
