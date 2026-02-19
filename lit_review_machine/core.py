@@ -1083,6 +1083,7 @@ class Clustering:
         self.state = deepcopy(
             utils.validate_format(
             state=state,
+            questions = None,
             injected_value=None,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
@@ -1104,31 +1105,44 @@ class Clustering:
 
     
     @staticmethod
-    def _strip_author_parenthetical(row):
-        first_author = re.escape(row["paper_author"][0])
-        # Remove (FirstAuthor ... ) greedily
-        pattern = r"\(" + first_author + r".*?\)"
-        # Always a list with one string
-        if len(row["insight"]) > 0:
-            insight_string = row["insight"][0]
-        else: 
-            return("")
-        cleaned = re.sub(pattern, "", insight_string).strip()
+    def _strip_citation_parentheticals(text: str) -> str:
+        """
+        Remove citation-style parentheticals to reduce embedding bias.
+        """
 
-        return cleaned
+        if not isinstance(text, str):
+            return ""
+
+        # 1. Remove parentheses containing a 4-digit year
+        text = re.sub(r"\([^)]*\d{4}[^)]*\)", "", text)
+
+        # 2. Remove parentheses that look like author lists (capitalized names)
+        text = re.sub(r"\(([A-Z][a-zA-Z]+(?:\s+(?:and|et al\.|,)?\s*[A-Z][a-zA-Z]+)+)\)", "", text)
+
+        # Collapse whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return text
 
     def _gen_valid_embeddings_df(self):
         """
-        Get the DataFrame of insights that are non-empty after stripping author parentheticals.
-        Updates the self.state.insights with a new column 'no_author_insight_string'.
+        Get the DataFrame of insights that are non-empty after stripping
+        citation parentheticals.
+        Updates self.state.insights with a new column 'no_author_insight_string'.
         Returns: pd.DataFrame
         """
-        # Apply row-wise to your DataFrame
-        self.state.insights["no_author_insight_string"] = self.state.insights.apply(self._strip_author_parenthetical, axis=1)
 
+        # Strip citation-style parentheticals from the insight text
+        self.state.insights["no_author_insight_string"] = (
+            self.state.insights["insight"]
+            .astype(str)
+            .apply(self._strip_citation_parentheticals)
+        )
+
+        # Keep only non-empty strings
         out = self.state.insights[
-            self.state.insights["no_author_insight_string"] != ""
-            ].copy()
+            self.state.insights["no_author_insight_string"].str.strip() != ""
+        ].copy()
 
         return out
     
