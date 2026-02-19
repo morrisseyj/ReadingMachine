@@ -352,7 +352,7 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
         "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
                         "core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')")
-        }
+        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"}
         
         # Call the dict to return the text
         return(pipeline_steps[latest_step])

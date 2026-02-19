@@ -1344,7 +1344,7 @@ class Clustering:
         filtered_embeddings = embeddings_matrix[mask]
         filtered_labels = cluster_labels[mask]
         if len(set(filtered_labels)) < 2:
-            return(pd.NA)
+            return(pd.NA, num_outliers)
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
         return db_score, num_outliers
 
@@ -1378,7 +1378,6 @@ class Clustering:
         results_df = pd.DataFrame(results)
         self.hdbscan_tuning_results = results_df.sort_values(["question_id","db_score"], ascending=True)
         print(self.hdbscan_tuning_results)
-
 
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
@@ -1561,7 +1560,7 @@ class Clustering:
             pd.DataFrame: Updated insights DataFrame with 'selected_cluster' column.
         """
         if final_cluster_count is None:
-            self.state.save(os.path.join(STATE_SAVE_LOCATION, "11_clusters"))
+            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
             return(self.state.insights)
 
         else:
@@ -1597,7 +1596,7 @@ class Clustering:
             # Concatenate all research questions back together
             self.state.insights = pd.concat(selected_clusters_list)
             # Save the updated DataFrame to disk
-            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "11_clusters"))
+            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
             return self.state.insights
         
             

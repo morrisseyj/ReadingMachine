@@ -102,5 +102,61 @@ latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documen
 cluster = core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')
 # Embed the insights
 cluster.embed_insights()
-# Reduce dimensions for the purpose of clustering
-cluster.reduce_dimensions()
+
+# Now we have to do dimensionality reduction so that we can cluster without the "curse of dimensionality"
+# The logic here is as follows: we want to make sure that our dim reduction does not remove the meaningful structure in the data
+# To do this we sweep UMAP params and calculate the silhoete score against the question_ids as our labels. So the test here is how well does the clustering separate out reduced dim insights by research question
+# This is a proxy testing whether enough structure remains in the data after dimensionality reduction
+# Notbaly, we expect natural language to not separate perfectly. Also if we have similar research questions we expect the separation of insights to be weak
+# What we do then is select the params we want to sweep and optionally exclude any research questions that we think are very similar that might be polluting our silhoette score proxy
+# The params below are the defaults to sweep over, but you can adjust as you like - adding more params will increase the run time
+# You want high numbers here (close to 1). But note that the standards for silhoette need to be relaxed for this case, where natural language overlaps and labels are not mutually exclusive. Anything above or close to 0.1 is likely acceptable.
+cluster.tune_umap_params(n_neighbors_list = [5, 15, 30, 50, 75, 100],
+                         min_dist_list = [0.0, 0.1, 0.2, 0.5],
+                         n_components_list = [5, 10, 20],
+                         metric_list = ["cosine", "euclidean"],
+                         rq_exclude=["question_3"]) # Exclude question with id 4 as it is quite similar to question 3 and it will cause the silhouette score to overlap 
+# Now we reduce dimensions using the best params that we found in the above sweep 
+cluster.reduce_dimensions(n_neighbors = 75,
+                          min_dist = 0,
+                          n_components = 5,
+                          metric = "cosine",
+                          random_state = 42)
+# With dimensions reduced we now look to tune HDBSCAN params so that we can cluster. 
+cluster.tune_hdbscan_params(min_cluster_sizes=[5, 10, 15, 20],
+                            metrics=["euclidean", "manhattan"],
+                            cluster_selection_methods=["eom", "leaf"])
+
+# Useful to save the results to html to inspect - you want low db score and few outliers
+cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
+
+# Now we read the results (hdbscan_tuning_results.html) to identify params. Not we select these for each question to try and maximize coherence within the question
+# We want to get lowest DBI scores, maximum cluster size and minimize outliers. 
+cluster.generate_clusters(clustering_param_dict={
+    # Best DBI (0.44) before hitting the <NA> wall at size 15
+    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "leaf"},
+    # Excellent DBI (0.38) with decent data retention (212 outliers)
+    "question_1": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "leaf"},
+    # Messiest question; size 15 leaf selection yields the best balance (0.61)
+    "question_2": {"min_cluster_size": 15, "metric": "euclidean", "cluster_selection_method": "leaf"},
+    # Size 5 is the clear winner here (0.36) - larger sizes caused <NA> failure
+    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
+    # Absolute best score in the entire sweep (0.34); highly stable at size 20
+    "question_4": {"min_cluster_size": 20, "metric": "manhattan", "cluster_selection_method": "eom"}
+})
+
+# As final sense check on your clustering you can look at the cumulative proportion of clusters per research question. 
+# Essentially if you have 90% of the insights in three clusters and another 8% in a large number of small clusters (with 2% in the outliers) you can just shift the small clusters into outliers. 
+# Note all outliers are handled in summarization so you are not losing insights by shifting small clusters into outliers, you are just shrinking the number of cliusters that get passed for synthesis and then for theme mapping
+cluster.cum_prop_cluster.to_html("cum_prop_cluster.html")
+# Now you can clean your clusters by optionally shifting your small clusters into outliers - passed as a dict with question ids as keys and top_n as the number of clusters to keep before shifting the rest into outliers
+# For this small corpus i am happy with the way the clusters look so i don't pass any dict.
+cluster.clean_clusters()
+
+# Now we move to summarizing the clusters and generating the themes. 
+# Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
+latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
+summarize = core.Summarize(state=latest_state, 
+                           llm_client=llm_client,
+                           ai_model="gpt-4o",
+                           paper_output_length=8000)
