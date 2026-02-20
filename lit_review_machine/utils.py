@@ -96,7 +96,7 @@ def validate_format(
         )
     
 
-def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_json: bool, fall_back: Dict[str, Any]):
+def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, fall_back: Dict[str, Any], return_json: bool, json_schema = None):
     """
     Call the chat completion API.
 
@@ -116,20 +116,28 @@ def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, return_j
     ]
 
     if return_json:
-        # -------- JSON MODE --------
-        print("Calling LLM for JSON response...")
         try:
-            response = llm_client.chat.completions.create(
-                model=ai_model,
-                messages=messages,
-                response_format={"type": "json_object"}, 
-                temperature=0
-            )
+            if json_schema is not None:
+                response = llm_client.chat.completions.create(
+                    model=ai_model,
+                    messages=messages,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": json_schema
+                    },
+                    temperature=0
+                )
+            else:
+                response = llm_client.chat.completions.create(
+                    model=ai_model,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0
+                )
         except Exception as e:
             print(f"Call to OpenAI failed. Error: {e}")
             return fall_back
 
-        # parse JSON response
         try:
             parsed = json.loads(response.choices[0].message.content.strip())
             return parsed
@@ -351,8 +359,11 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
                                     "core.InsightsGenerator(state = latest_state, llm_client=llm_client)"),
         "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                        "core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')")
-        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"}
+                        "core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
+        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
+                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
+                        "core.Summarize(state=latest_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000)")
+        }
         
         # Call the dict to return the text
         return(pipeline_steps[latest_step])

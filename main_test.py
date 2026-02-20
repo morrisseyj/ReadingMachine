@@ -160,3 +160,5 @@ summarize = core.Summarize(state=latest_state,
                            llm_client=llm_client,
                            ai_model="gpt-4o",
                            paper_output_length=8000)
+
+summarize.summarize_clusters()

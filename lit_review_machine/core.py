@@ -1608,6 +1608,7 @@ class Summarize:
                  ai_model: str,
                  paper_output_length: int,  # Approximate total paper length in words
                  summary_save_location: str = None, 
+                 pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
                  state_save_location: str = os.path.join(config.STATE_SAVE_LOCATION, "12_summarize"), 
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")):
         """
@@ -1624,17 +1625,84 @@ class Summarize:
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
         self.paper_output_length: int = paper_output_length
-        self.summary_save_location: str = summary_save_location or os.path.join(config.SUMMARY_SAVE_LOCATION, "parquet")
-        self.state_save_location: str = state_save_location
-        
+        self.summary_save_location: str = config.SUMMARY_SAVE_LOCATION
+
+        # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
         if not os.path.exists(insight_embedding_path):
             raise FileNotFoundError(f"Insight embeddings pickle not found at {insight_embedding_path}. Please run clustering first or amend the path to where you pickled your insight embeddings.")
         else:
             with open(insight_embedding_path, "rb") as f:
                 self.insight_embeddings_array: np.ndarray = pickle.load(f)
 
+        # Reload any runs that might have already happened, or create place holders for that data. 
+        # These are in a different form to state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
+        self.cluster_summary_list = self._reload_summary_outputs("cluster_summary") 
+        self.theme_schema_list = self._reload_summary_outputs("theme_schema")
+        self.populated_theme_list = self._reload_summary_outputs("populated_theme")
+        self.orphans = self._reload_summary_outputs("orphan")
+        self.redundancy = self._reload_summary_outputs("redundancy_pass")      
+        
+        # Ensure summary save location exists
         if not os.path.exists(self.summary_save_location):
             os.makedirs(self.summary_save_location, exist_ok=True)
+
+    
+    def _reload_summary_outputs(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
+        """
+        Finds and loads all parquet versions of a specific file, sorted by creation time.
+
+        This method searches the summary save location for files matching the 
+        pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
+        ordered from oldest to newest.
+
+        Args:
+            file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
+
+        Returns:
+            A list of pandas DataFrames if matching files exist, otherwise None.
+            The list is sorted by file creation time (st_birthtime/st_mtime).
+        """
+        base_dir = Path(self.summary_save_location)
+        
+        # 1. Grab all potential matches using the prefix wildcard
+        # We wrap in list() so we can check if any files were actually found
+        paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
+
+        if not paths:
+            return None
+
+        # 2. Sort by creation/birth time
+        # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
+        paths_sorted = sorted(
+            paths, 
+            key=lambda p: getattr(p.stat(), 'st_birthtime', p.stat().st_mtime)
+        )
+
+        # 3. Load and return the list of DataFrames
+        return [pd.read_parquet(p.absolute()) for p in paths_sorted]
+
+    def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
+        """
+        Deletes summary output files matching the given prefixes.
+
+        Args:
+            file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
+        """
+        if not self.summary_save_location:
+            return
+
+        base_dir = Path(self.summary_save_location)
+        
+        # Ensure we don't try to glob an empty path or a non-existent directory
+        if not base_dir.is_dir():
+            return
+
+        for prefix in file_prefixes:
+            # glob finds every file starting with prefix and ending in .parquet
+            for file_path in base_dir.glob(f"{prefix}*.parquet"):
+                # missing_ok=True prevents crashes if another process 
+                # deletes the file between globbing and unlinking
+                file_path.unlink(missing_ok=True)
 
     def _calculate_summary_length(self) -> pd.DataFrame:
         """
@@ -1740,8 +1808,8 @@ class Summarize:
     
         return shortest_paths
     
-    
-    def summarize(self) -> Summaries:
+
+    def summarize_clusters(self) -> Summaries:
         """
         Generate summaries for all clusters across all research questions.
 
@@ -1749,15 +1817,30 @@ class Summarize:
             Summaries object containing a DataFrame of cluster summaries.
         """
         
-        if os.path.exists(os.path.join(os.path.join(self.summary_save_location, "summaries.parquet"))):
-            recover = None
-            while recover not in ['r', 'n']:
-                recover = input("Summaries already exist on disk. Do you want to recover (r) or generate new ones (n)? (r/n): ").lower()
-            if recover == 'r':
-                self.summaries = pd.read_parquet(os.path.join(self.summary_save_location, "summaries.parquet"))
-                return self.summaries
+        if self.cluster_summary_list is not None and len(self.cluster_summary_list) > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Cluster summaries already exist on disk. Do you want to:\n"
+                    "(1) reload existing summaries\n"
+                    "(2) regenerate summaries (NOTE:this will overwrite existing summaries and delete all existing theme mapping, populated themes, orphans and redundancy passes; as these all derive from summaries)? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+            if new == "1":
+                print(
+                    "Summaries loaded.\n" \
+                    "Summaries can be accessed via the cluster_summary_list attribute of this class. There is only one item in the list thus: `variable.cluster_summary_list[0]`."
+                    )
+                return(None) # Return to exit the function and avoid re-running summarization
             else:
-                print("Re-running cleaning of summaries...")
+                # If we are regenerating summeries we need to delete all existing outputs and reset the attributes to none as they are loaed on init if they exist
+                print("Re-running summarization of clusters...")
+                self._delete_summary_outputs(file_prefixes=["cluster_summary", "theme_schema", "populated_theme", "orphan", "redundancy_pass"])
+                self.cluster_summary_list = None
+                self.theme_schema_list = None
+                self.populated_theme_list = None
+                self.orphans = None
+                self.redundancy = None
 
         # We are going to send the insights to the LLM in the order of the shortest path, so that the most similar clusters are summarized close together
         # This will add coherence to the final paper when the summaries are stitched together
@@ -1767,15 +1850,18 @@ class Summarize:
         # Add calculated lengths to insights
         self.state.insights = self._calculate_summary_length()
         
-        raw_summaries_list: List[str] = []
+        # Create list to populate with summaries from the LLM
+        summaries_dict_lst: List[dict] = []
 
+        # Get the numbers to show progress 
         total_clusters = len(self.state.insights.groupby("question_id")["cluster"].nunique(dropna=False))
         count = 1
 
         # Loop over unique research questions
-        for rq_id in self.state.insights["question_id"].unique():
+        for _, row in self.state.questions.iterrows():
+            rq_id = row["question_id"]
+            rq_text = row["question_text"]
             rq_df: pd.DataFrame = self.state.insights[self.state.insights["question_id"] == rq_id].copy()
-            rq_text: str = rq_df["question_text"].iloc[0]
 
             # Loop over clusters for this research question - in shortest path order
             for cluster in shortest_paths[rq_id]["order"]:
@@ -1796,125 +1882,194 @@ class Summarize:
                 if any(i is None for i in insights):
                     raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
 
+                # Build system prompt from predefined method
+                sys_prompt: str = Prompts().summarize(summary_length=length_str)
+
+                # Get the summaries frozen so far if there are any
+                frozen_summaries = pd.DataFrame(summaries_dict_lst)["summary"].tolist() if summaries_dict_lst else []
+
                 # Build user prompt for LLM
                 user_prompt: str = (
                     f"Research question id: {rq_id}\n"
                     f"Research question text: {rq_text}\n"
                     "PRECEDING CLUSTER SUMMARIES (for context only; may be empty):\n"
-                    f"{'\n'.join(raw_summaries_list) if raw_summaries_list else ''}\n"
+                    f"{'\n'.join(frozen_summaries) if frozen_summaries else ''}\n"
                     f"Cluster: {cluster}\n"
                     "INSIGHTS:\n" +
                     "\n".join(insights)
                 )
 
-                # Build system prompt from predefined method
-                sys_prompt: str = Prompts().summarize(summary_length=length_str)
+                json_schema = {
+                    "name": "cluster_summary",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "question_id": {"type": "string"},
+                            "question_text": {"type": "string"},
+                            "cluster": {"type": "number"},
+                            "summary": {"type": "string"}
+                        },
+                        "required": ["question_id", "question_text", "cluster", "summary"],
+                        "additionalProperties": False
+                    }
+                }
+                fall_back = {"question_id": rq_id, "question_text": rq_text, "cluster": cluster, "summary": ""}
 
-                messages: List[dict] = [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt},
-                ]
-
-                # Call LLM
-                response: Any = self.llm_client.chat.completions.create(
-                    model=self.ai_model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    return_json=True,
+                    json_schema=json_schema,
+                    fall_back=fall_back
                 )
 
-                # Store raw JSON string from LLM
-                raw_summaries_list.append(response.choices[0].message.content)
+                summaries_dict_lst.append(response)
 
-        # Parse JSON responses safely
-        clean_summaries_list: List[dict] = []
-        for idx, summary in enumerate(raw_summaries_list):
-            try:
-                clean_summaries_list.append(json.loads(summary))
-            except json.JSONDecodeError:
-                print(f"JSON decode failed for summary at index: {idx}")
-
-        # Convert to DataFrame
-        summaries_df: pd.DataFrame = pd.DataFrame(clean_summaries_list)
-
+        # Now convert the list of dict responses to a dataframe for easier handling and saving
+        summaries_df: pd.DataFrame = pd.DataFrame(summaries_dict_lst)
 
         print(
-            f"Summaries saved here: {self.summary_save_location}\n"
-            "Returned object is a Summaries instance. Access via `variable.summaries`.\n"
-            f"Or load later with: Summaries.from_parquet('{self.summary_save_location}')"
+            f"Summaries saved here: {self.summary_save_location} and accesible via `variable.cluster_summary_list[0]`.\n"
         )
 
-        self.summaries = summaries_df
+        self.cluster_summary_list = [summaries_df]
 
         # Save summaries as this is LLM output we may want to reuse later - save as parquet
         os.makedirs(self.summary_save_location, exist_ok=True)
-        self.summaries.to_parquet(os.path.join(self.summary_save_location, "summaries.parquet"))
+        [i.to_parquet(os.path.join(self.summary_save_location, "cluster_summary.parquet")) for i in self.cluster_summary_list]
 
-        return summaries_df
+        return self.cluster_summary_list
     
-    def identify_themes(self, save_file_name="summary_themes.parquet") -> pd.DataFrame:
-        if not hasattr(self, "summaries"):
+
+    def _prepare_for_mapping(self, run: List[str]):
+        if run not in ["new", "iterate"]:
+            raise ValueError("Invalid input for run. Expected 'new' or 'iterate'.")
+        
+        if run == "new":
+
+    def gen_theme_schema(self, save_file_name="theme_schema.parquet") -> pd.DataFrame:
+        # First check that summaries exist
+        if self.cluster_summary_list is None or len(self.cluster_summary_list) == 0:
             raise ValueError("No summaries found. Please run summarize() first.")
 
-        save_dir = self.summary_save_location
-        save_path = os.path.join(save_dir, save_file_name)
+        # Next we want to confirm that the user wants to run the mapping again, rather tha possibly accessing previoulsy generated and saved mappings
+        # There are actually three options here: 1) start the mapping process afresh, 2) load previously generated maps, 3) run another mapping iteration on top of a populated theme. We have to handle all
+        # First we check if there are theme maps (which get loaded on class init if they exist)
+        new = None
+        if self.theme_map_list is not None and len(self.theme_map_list) > 0:
+            while new not in ['1', '2', '3']:
+                new = input("Theme mapping already exists. " \
+                "Theme maps already exist. Please select what you want to do:\n" \
+                "1: Load existing maps\n" \
+                "2: Fully recreate your theme mapping (i.e. start again). NOTE this will delete all existing theme maps as well as any populated themes, orphans and redundancy passes\n" \
+                "3: Run another mapping iteration on top of a populated theme\n" \
+                "Enter either 1, 2, or 3:\n").lower()
+            
+            if new == '1':
+                print("Theme mapping available via .theme_map_list, orderd by creation time if multiple exist.")
+                return(None)
+            
+            elif new == '2':
+                print("Re-running theme mapping from scratch...")
+                self._delete_summary_outputs(file_prefixes=["theme_schema", "populated_theme", "orphan", "redundancy_pass"])
+                self.theme_schema_list = None
+                self.populated_theme_list = None
+                self.orphans = None
+                self.redundancy = None
 
-        if os.path.exists(save_path):
-            recover = None
-            while recover not in ['r', 'n']:
-                recover = input("Themed summaries already exist on disk. Recover (r) or generate new (n)? ").lower()
-            if recover == 'r':
-                self.summary_themes = pd.read_parquet(save_path)  # fix
-                return self.summary_themes
             else:
-                print("Re-running theming of summaries...")
+                # Make sure the user is not iterating theme mapping without first populating themes for whatever iteration of this they are on.
+                if len(self.theme_schema_list) > len(self.populated_theme_list):
+                    raise ValueError("Your theme schema is already ahead of your theme population. Please run populate_themes() before generating theme schema again")
+                # Make sure they have populated themes before they try to iterate the theme schema
+                if len(self.populated_theme_list) == 0:
+                    raise ValueError("No populated themes found. Please run populate_themes() before tying to iterate your theme schema.")
+                
+                # Run new mapping
+                print("Running additional theme mapping...")
 
-        out_pdfs = []
+        # Now we create a generic dataframe from eithe the summaries or the populated themes depending on whether the user is starting fresh or iterating
+        # First check new or full re-write. 
+        if new == '1' or self.theme_schema_list is None or new == '2':
+            # Grab data from summaries
+            source_df = self.summaries_list[0]
+            source_df.rename(columns={"cluster": "id", "summary": "text_to_theme"}, inplace=True)
+        else:
+            # if its an iteration we get data from the last populated theme and convert the columsn to a generic form to send to the llm
+            source_df = self.populated_theme_list[-1]
+            source_df.rename(columns={"theme_id": "id", "theme_text": "text_to_theme"}, inplace=True) ##########################DOUBLE CHECK THIS RENAME TO MAKE SURE IT FITS WITH THE EXPECTED PROMPT AND LLM RESPONSE
+        
+        out_df_list = []
 
-        for question_id, rq_df in self.summaries.groupby("question_id", sort=False):
-            question_text = rq_df["question_text"].iloc[0]
-            summary_text = "\n\n".join(rq_df["summary"].tolist())
+        for _, row in self.state.questions.iterrows():
+            question_id = row["question_id"]
+            question_text = row["question_text"]
+            rq_df = source_df[source_df["question_id"] == question_id].copy()
+            text_to_theme = "\n\n".join(rq_df["text_to_theme"].tolist())
 
             user_prompt = (
-                f"Research question id: {question_id}\n"
-                f"Research question text: {question_text}\n"
-                "SUMMARY TEXT:\n"
-                f"{summary_text}\n"
+                f"Research Question: {question_text}\n"
+                "TEXT TO ANALYZE:\n"
+                f"{text_to_theme}\n"
             )
-            sys_prompt = Prompts().llm_theme_id()
+            sys_prompt = Prompts().gen_theme_schema()
 
-            fall_back = {"question_id": question_id, "themes": [], "other_bucket_rules": ""}
+            fall_back = {"question_id": question_id, "themes": []}
 
-            resp = utils.call_chat_completion(
+            json_schema = {
+                "name": "thematic_schema_generator",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "label": { "type": "string" },
+                            "instructions": { "type": "string" }
+                        },
+                        "required": ["id", "label", "instructions"],
+                        "additionalProperties": false
+                        }
+                        }
+                    },
+                    "required": ["themes"],
+                    "additionalProperties": false
+                    }
+                }
+
+            response = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
                 llm_client=self.llm_client,
                 ai_model=self.ai_model,
-                return_json=True,
                 fall_back=fall_back,
+                return_json=True,
+                json_schema=json_schema
             )
 
-            # enforce schema even if empty
-            themes = resp.get("themes") or []
-            themes_df = pd.DataFrame(themes, columns=["id", "label", "criteria"])
+            theme_list = response.get("themes", [])
+            themes_df = pd.DataFrame(theme_list, columns=["id", "label", "criteria"])
+            themes_df["question_id"] = question_id
+            themes_df["question_text"] = question_text
 
-            other_bucket_rules = (resp.get("other_bucket_rules") or "").strip()
-            other_df = pd.DataFrame(
-                [{"id": "other", "label": "Other", "criteria": other_bucket_rules}],
-                columns=["id", "label", "criteria"],
-            )
-
-            out_row = pd.concat([themes_df, other_df], ignore_index=True)
-            out_row["question_id"] = question_id
-            out_row["question_text"] = question_text
-            out_pdfs.append(out_row)
-
-        output = pd.concat(out_pdfs, ignore_index=True, sort=False)
-
-        self.summary_themes = output
+            out_df_list.append(themes_df)
+        
+        # Concat all the questions
+        output = pd.concat(out_df_list, ignore_index=True, sort=False)
+        # Append to the list of schemas
+        self.theme_schema_list.append(output)
+        # Save all the schemas in the list to capture the new one and maintain the order on disk in case we need to reload later for any reason
         os.makedirs(save_dir, exist_ok=True)
-        self.summary_themes.to_parquet(save_path)
+        for idx, df in enumerate(self.theme_schema_list):
+            df.to_parquet(os.path.join(self.summary_save_location, f"theme_schema_{idx+1}.parquet"))
 
-        return self.summary_themes
+        return self.theme_schema_list[-1]
 
     def populate_themes(self, save_file_name="populated_themes.parquet") -> pd.DataFrame:
         # utils
