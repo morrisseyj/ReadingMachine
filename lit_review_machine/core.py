@@ -1638,8 +1638,8 @@ class Summarize:
         # These are in a different form to state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
         self.cluster_summary_list = self._reload_summary_outputs("cluster_summary") 
         self.theme_schema_list = self._reload_summary_outputs("theme_schema")
+        self.mapped_theme_list = self._reload_summary_outputs("mapped_theme")
         self.populated_theme_list = self._reload_summary_outputs("populated_theme")
-        self.orphans = self._reload_summary_outputs("orphan")
         self.redundancy = self._reload_summary_outputs("redundancy_pass")      
         
         # Ensure summary save location exists
@@ -1943,12 +1943,6 @@ class Summarize:
         return self.cluster_summary_list
     
 
-    def _prepare_for_mapping(self, run: List[str]):
-        if run not in ["new", "iterate"]:
-            raise ValueError("Invalid input for run. Expected 'new' or 'iterate'.")
-        
-        if run == "new":
-
     def gen_theme_schema(self, save_file_name="theme_schema.parquet") -> pd.DataFrame:
         # First check that summaries exist
         if self.cluster_summary_list is None or len(self.cluster_summary_list) == 0:
@@ -2071,6 +2065,117 @@ class Summarize:
 
         return self.theme_schema_list[-1]
 
+    
+    def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
+        
+        # HANDLE RELOAD/ITERATION LOGIC ETC
+        
+        
+        mapped_insights_df_list = []
+        
+        # Iterate through each research question
+        for _, q_row in self.state.questions.iterrows():
+            question_id = q_row["question_id"]
+            question_text = q_row["question_text"]
+
+            # Filter insights for this question and drop empty/NaN values immediately
+            q_insights_df = self.state.insights[
+                (self.state.insights["question_id"] == question_id) & 
+                (self.state.insights["insight"].notna()) & 
+                (self.state.insights["insight"] != "")
+            ].copy()
+
+            # Get the schema for this specific question
+            q_schema_df = self.theme_schema_list[-1][
+                self.theme_schema_list[-1]["question_id"] == question_id
+            ].copy()
+            q_schema_json = q_schema_df[["id", "label", "criteria"]].to_json(orient="records", indent=2)
+
+            # create json schema for the llm call so i don't recreate it every call
+            json_schema = {
+                "name": "insight_to_theme_mapper",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "mapped_data": { # Match prompt: "mapped_data"
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "insight_id": {"type": "string"},
+                                    "theme_ids": { # Match prompt: "theme_ids"
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
+                                },
+                                "required": ["insight_id", "theme_ids"],
+                                "additionalProperties": False
+                            }
+                        }
+                    },
+                    "required": ["mapped_data"],
+                    "additionalProperties": False
+                }
+            }
+            
+            
+            # CHUNKING LOGIC: Process the filtered insights in batches
+            for i in range(0, len(q_insights_df), batch_size):
+                batch_df = q_insights_df.iloc[i : i + batch_size]
+                
+                # Format insights for the prompt: "id: text"
+                current_batch_str = "\n".join(
+                    [f"{row.insight_id}: {row.insight}" for row in batch_df.itertuples()]
+                )
+
+                sys_prompt = self.theme_map_to_schema() # Assuming this is your prompt method
+                user_prompt = (
+                    f"RESEARCH QUESTION: {question_text}\n"
+                    "THEMATIC CODEBOOK:\n"
+                    f"{q_schema_json}\n\n"
+                    f"INSIGHTS TO MAP:\n"
+                    f"{current_batch_str}\n\n"
+                )
+
+
+            response = utils.call_chat_completion(
+                sys_prompt=sys_prompt,  
+                user_prompt=user_prompt,
+                llm_client=self.llm_client,
+                ai_model=self.ai_model,
+                fall_back={"mappings": []}, # Match your schema key
+                return_json=True, 
+                json_schema=json_schema
+            )
+
+            # Convert response to DF and tag with metadata
+            batch_results_df = pd.DataFrame(response.get("mapped_data", []))
+
+            if not batch_results_df.empty:
+                # 1. Assignment is required (explode is not in-place)
+                # 2. Use the correct key "theme_ids"
+                batch_results_df = batch_results_df.explode("theme_ids")
+                
+                batch_results_df["question_id"] = question_id
+                mapped_insights_df_list.append(batch_results_df)
+
+        # Concat everything
+        if not mapped_insights_df_list:
+            mapped_insights_df = pd.DataFrame()
+        else:
+            mapped_insights_df = pd.concat(mapped_insights_df_list, ignore_index=True)
+
+        self.mapped_theme_list.append(mapped_insights_df)
+        os.makedirs(self.summary_save_location, exist_ok=True)
+
+        for idx, i in enumerate(self.mapped_theme_list):
+            i.to_parquet(os.path.join(self.summary_save_location, f"mapped_themes_{idx+1}.parquet"), index=False)
+
+        return(self.mapped_theme_list[-1])
+
+
+    
     def populate_themes(self, save_file_name="populated_themes.parquet") -> pd.DataFrame:
         # utils
         def build_frozen_block(frozen_content: list[dict]) -> str:

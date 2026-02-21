@@ -519,8 +519,8 @@ class Prompts:
             '3. **Establish Instructions:** For EVERY theme (including the "Other" bucket), write precise "Inclusion/Exclusion" instructions using a Boolean logic style.\n\n'
 
             '## INPUT:\n'
-            '- Research Question: <question_text>\n'
-            '- TEXT TO ANALYZE:\n'
+            'Research Question: <question_text>\n'
+            'TEXT TO ANALYZE:\n'
             '<text_content>\n\n'
 
             '## OUTPUT FORMAT (STRICT JSON):\n'
@@ -551,6 +551,53 @@ class Prompts:
             '- **Boolean Precision:** Every theme MUST use the "INCLUDE if...; EXCLUDE if..." format in its instructions to eliminate ambiguity for the tagging process.\n'
             '- **JSON Only:** Return only the JSON object.'
         )
+    
+    def theme_map_to_schema(self):
+        return(
+            "## ROLE\n"
+            "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
+            "Your task is to map batches of insights to a Thematic Codebook Schema with full coverage.\n\n"
+
+            "## THEMATIC SCHEMA STRUCTURE\n"
+            "You will be provided with a JSON 'codebook' representing the thematic pillars. Each theme follows this structure:\n"
+            "{\n"
+            "  'id': 'Unique identifier (e.g., 1, 2, 3...)',\n"
+            "  'label': 'The conceptual name of the category',\n"
+            "  'criteria': 'Detailed INCLUDE and EXCLUDE criteria'\n"
+            "}\n\n"
+
+            "## INPUT\n"
+            "RESEARCH QUESTION: <question_text>\n"
+            "THEMATIC CODEBOOK:\n"
+            "<JSON array of themes, each with id, label, and criteria>\n\n"
+            "INSIGHTS TO MAP:\n"
+            "<insight_id>: <insight_text>\n"
+            "<insight_id>: <insight_text>\n"
+            "...\n\n"
+            
+            "## MAPPING LAWS\n"
+            "1. **Active Best-Match:** Evaluate every insight against the 'criteria' of all themes. Use 'Conceptual Gravity'—if an insight aligns with the core intent of a theme, map it there.\n"
+            "2. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
+            "3. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant Theme IDs.\n"
+            "4. **The Residual Override (Theme 6 / Other):** Theme 6 is the mandatory exit valve. If an insight fails the specific criteria for Themes 1-5 (either no inclusion or all exclusion), "\
+            "you MUST assign it to Theme 6. In this override scenario, the requirement for full data coverage supersedes the specific instructions for Theme 6.\n"
+            "5. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
+
+            "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
+            "Return ONLY a JSON object. No preamble, no commentary, no conversational filler. Structure:\n"
+            "{\n"
+            '  "mapped_data": [\n'
+            '    { "insight_id": "string", "theme_ids": ["string"] }\n'
+            '  ]\n'
+            "}\n"
+
+            "RULES FOR theme_ids:\n"
+            "- **Always return an array**, even if there is only one theme (e.g., ['T1']).\n"
+            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['T1', 'T3']).\n"
+            "- Never return a null, a single string, or an empty array."
+        )
+
+
     
     def populate_themes(self):
         return (
