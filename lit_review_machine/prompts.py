@@ -510,46 +510,51 @@ class Prompts:
     
     def gen_theme_schema(self):
         return(
-            'You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. '
-            'Your task is to analyze the provided text and design a "Thematic Codebook" that maps the semantic landscape while ensuring full overage of the content.\n\n'
+            "## ROLE\n"
+            "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
+            "Your task is to analyze the provided text and design a 'Thematic Codebook' "
+            "that maps the semantic landscape while ensuring total coverage of the ideas expressed.\n"
+            "The text provided is either semantically clustered set of insights or an output of a prior theme population exercise.\n\n"
 
-            '## THE TASK:\n'
-            '1. **Identify Major Themes:** Determine the recurring, dominant topics within the provided text.\n'
-            '2. **If necessary, Define an "Other" Category:** Identify minority concepts that are relevant but do not warrant a standalone theme. Use this bucket to capture these items to ensure total coverage without creating thematic bloat.\n'
-            '3. **Establish Instructions:** For EVERY theme (including the "Other" bucket), write precise "Inclusion/Exclusion" instructions using a Boolean logic style.\n\n'
+            "## THE TASK\n"
+            "1. **Identify Major Themes:** Determine the recurring, dominant topics. Themes must be **conceptually exclusive**—each should represent a distinct semantic territory.\n"
+            "2. **Identify Discursive Conflicts (Conditional):** If the text indicates contradictions or trade-offs (e.g., 'views are mixed'), create a 'Conflicts' category. This is a **Relational Flagger** used to identify tension within or across themes.\n"
+            "3. **Identify 'Other' Category (Conditional):** A bucket for relevant but minority concepts to ensure full semantic coverage without inducing theme bloat.\n"
+            "4. **Establish Precise Instructions:** Create logic-based instructions for every category based on the Architectural Constraints below.\n\n"
 
-            '## INPUT:\n'
-            'Research Question: <question_text>\n'
-            'TEXT TO ANALYZE:\n'
-            '<text_content>\n\n'
+            "## INPUT\n"
+            "RESEARCH QUESTION: <question_text>\n"
+            "TEXT TO ANALYZE: <text_content>\n\n"
 
-            '## OUTPUT FORMAT (STRICT JSON):\n'
-            '{\n'
+            "## OUTPUT FORMAT (STRICT JSON)\n"
+            "{\n"
             '  "themes": [\n'
-            '    {\n'
-            '      "id": "theme_id",\n'
-            '      "label": "Theme Label",\n'
-            '      "instructions": "THEME DESCRIPTION: <theme_description>; INCLUDE if <specific conditions>; EXCLUDE if <conditions for other themes>."\n'
-            '    },\n'
-            '    {\n'
+            "    {\n"
+            '      "id": "1",\n'
+            '      "label": "Name of Major Theme",\n'
+            '      "instructions": "THEME DESCRIPTION: <desc>; INCLUDE if <logic>; EXCLUDE if <logic>."\n'
+            "    },\n"
+            "    {\n"
             '      "id": "other",\n'
             '      "label": "Other Topics",\n'
-            '      "instructions": "THEME DESCRIPTION: <theme_description>; INCLUDE if <specific conditions for germane minority concepts>; EXCLUDE if <conditions for major themes or non-substantive fragments>."\n'
-            '    }\n'
-            '  ]\n'
-            '}\n\n'
+            '      "instructions": "THEME DESCRIPTION: Residual germane concepts; INCLUDE if <logic>; EXCLUDE if <logic>."\n'
+            "    },\n"
+            "    {\n"
+            '      "id": "conflicts",\n'
+            '      "label": "Discursive Conflicts",\n'
+            '      "instructions": "DETECTION TRIGGERS: Flag here if the content specifically represents the tension between [A] and [B], or disputes the consensus of [Theme X]. No exclusion list required."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
 
-            '## NOTES:\n'
-            '- The text you are generating themes for is either a summary of clustered insights or a previously populated set of themes, generated from those cluster summaries.\n'
-            '- **In the case of clusters:** You should feel free to theme as you see fit. There is no need to generate one theme per cluster; you should combine or split them based on conceptual coherence.\n'
-            '- **In the case of existing themes:** You should feel free to maintain or completely revise themes (including the number of themes) as you see fit.\n'
-            '- Keep in mind that these themes are being generated as a means to organize how the insights address the research question.\n\n'
-
-            '## ARCHITECTURAL CONSTRAINTS:\n'
-            '- **Total Coverage:** Every concept in the text must be addressable by a major theme or the "Other" bucket.\n'
-            '- **Anti-Fragmentation:** Use the "Other" bucket to house valid but low-frequency concepts, preventing the creation of dozens of single-item themes.\n'
-            '- **Boolean Precision:** Every theme MUST use the "INCLUDE if...; EXCLUDE if..." format in its instructions to eliminate ambiguity for the tagging process.\n'
-            '- **JSON Only:** Return only the JSON object.'
+            "## ARCHITECTURAL CONSTRAINTS\n"
+            "- **Conceptual Mutuality (Themes):** Themes must have distinct boundaries. The 'EXCLUDE' criteria for a theme should explicitly point to the territories of other themes to prevent conceptual overlap.\n"
+            "- **Relational Flagger (Conflicts):** The 'Conflicts' category is a secondary overlay. It must NOT use standard 'Exclusion' logic. Use **DETECTION TRIGGERS** to name specific fault lines. Content can be assigned to a substantive theme AND the Conflicts flag simultaneously.\n"
+            "- **The 'Other' Bucket:** This category exists to prevent 'Theme Bloat.' It should house valid, relevant ideas that do not have the frequency to warrant a standalone theme. It requires standard INCLUDE/EXCLUDE logic.\n"
+            "- **Multi-Labeling:** Design the codebook with the understanding that categories are not mutually exclusive. A single point of data may satisfy the criteria for multiple themes or flags.\n"
+            "- **Anti-Smoothing:** If the input text indicates multiple points of view, the 'Conflicts' triggers must explicitly define those opposing views to ensure the tension is preserved.\n"
+            "- **Total Coverage:** Every concept in the input must be addressable by the substantive themes or the 'Other' category.\n"
+            "- **Theme Optimization:** You have full authority to merge, split, or revise themes/clusters to best serve the research question. You are not tethered to the original structure of the provided text."
         )
     
     def theme_map_to_schema(self):
@@ -561,9 +566,9 @@ class Prompts:
             "## THEMATIC SCHEMA STRUCTURE\n"
             "You will be provided with a JSON 'codebook' representing the thematic pillars. Each theme follows this structure:\n"
             "{\n"
-            "  'id': 'Unique identifier (e.g., 1, 2, 3...)',\n"
+            "  'id': 'Unique identifier (e.g., 1, other, conflicts)',\n"
             "  'label': 'The conceptual name of the category',\n"
-            "  'criteria': 'Detailed INCLUDE and EXCLUDE criteria'\n"
+            "  'criteria': 'Detailed instructions (either INCLUDE/EXCLUDE logic or DETECTION TRIGGERS)'\n"
             "}\n\n"
 
             "## INPUT\n"
@@ -576,12 +581,13 @@ class Prompts:
             "...\n\n"
             
             "## MAPPING LAWS\n"
-            "1. **Active Best-Match:** Evaluate every insight against the 'criteria' of all themes. Use 'Conceptual Gravity'—if an insight aligns with the core intent of a theme, map it there.\n"
+            "1. **Active Best-Match:** Evaluate every insight against the 'criteria' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent.\n"
             "2. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
             "3. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant Theme IDs.\n"
-            "4. **The Residual Override (Theme 6 / Other):** Theme 6 is the mandatory exit valve. If an insight fails the specific criteria for Themes 1-5 (either no inclusion or all exclusion), "\
-            "you MUST assign it to Theme 6. In this override scenario, the requirement for full data coverage supersedes the specific instructions for Theme 6.\n"
-            "5. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
+            "4. **The Residual Override ('Other'):** 'Other' is the mandatory exit valve. If an insight fails the specific criteria for all substantive themes (either no inclusion or explicit exclusion), you MUST assign it to 'Other'. "
+            "In this override scenario, the requirement for full data coverage supersedes the specific instructions for 'Other'.\n"
+            "5. **Conflict Flagging:** If there is a 'conflicts' theme and an insight explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it the conflicts flag. As above all insights may be tagged to multiple themes.\n"
+            "6. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
             "Return ONLY a JSON object. No preamble, no commentary, no conversational filler. Structure:\n"

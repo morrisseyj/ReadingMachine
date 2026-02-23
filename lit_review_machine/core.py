@@ -2067,11 +2067,66 @@ class Summarize:
 
     
     def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
+        #### RESUMPTION/RECOVER/REPOPULATE LOGIC #### ---------------------------
+
+        # First check whether a partial mapping took place - this is a process with a large number of calls so we are going to log to pickle as we go so that resume is possible
+        # Create a default variable that can be populated if partial run exists
+        mapped_insights_df_list = None
         
-        # HANDLE RELOAD/ITERATION LOGIC ETC
+        # Now check for pickle file
+        if os.path.exists(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle")):
+            resume = None
+            while resume not in ["1", "2"]:
+                resume = input("A partial mapping process was detected. Do you want to:\n"
+                               "1) resume from the last saved point? \n"
+                               "2) start a new mapping process? \n"
+                               "Enter 1 or 2:\n").lower()
+            if resume == "1":
+                with open(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"), "rb") as f:
+                    mapped_insights_df_list = pickle.load(f)
+                    mapped_insights = pd.concat(mapped_insights_df_list, ignore_index=True)["insight_id"].tolist()
+                    
+                print("Resuming mapping process from last saved point...")
+
+            else:
+                print("Starting new mapping process and deleting the in progress pickle...")
+                os.remove(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"))
+
+        # Then check that theme schema exists
+        if self.theme_schema_list is None or len(self.theme_schema_list) == 0:
+            raise ValueError("No theme schema found. Please run gen_theme_schema() first.")
         
+        # Then check that theme mapping is not ahead of theme population (as you don't want to map multiple times without populating)
+        if len(self.theme_schema_list) > len(self.populated_theme_list):
+            raise ValueError("Your theme schema is already ahead of your theme population. Please run populate_themes() before mapping insights to themes.")
         
-        mapped_insights_df_list = []
+        # Now check whether the user just want to re-load thier existing mappings of re-run the mapping on the latest schema
+        if self.mapped_theme_list is not None and len(self.mapped_theme_list) > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Mapped themes already exist on disk. Do you want to:\n"
+                    "(1) reload existing mapped themes\n"
+                    "(2) remap insights to the current themes again (NOTE:this will overwrite existing mapped themes)? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+            if new == "1":
+                print(
+                    "Mapped themes loaded. Inspect them via variable.mapped_theme_list[-1]\n"
+                )
+                return(None) # Return to exit the function and avoid re-running the mapping
+            else:
+                # If re-running make sure that the number of theme maps is equal to the one less than the number of schemas (so we are mapping to the last one)
+                schema_len = len(self.theme_schema_list)
+                self.mapped_theme_list = self.mapped_theme_list[:schema_len - 1]             
+
+        #### MAPPING LOGIC ####----------------------------
+        # create the output for the loop using the recovered list if it exists, otherwise create an empty list to populate with the mapping results as we go
+        mapped_insights_df_list = [] if mapped_insights_df_list is None else mapped_insights_df_list
+        # Create a temporary copy of the insights to work with so that we can drop mapped insights as we go without affecting the original state
+        temp_state_insights = self.state.insights.copy()
+        # If we are resuming we need to drop the already mapped insights
+        temp_state_insights = temp_state_insights[~temp_state_insights["insight_id"].isin(mapped_insights)] if mapped_insights_df_list is not None else temp_state_insights
         
         # Iterate through each research question
         for _, q_row in self.state.questions.iterrows():
@@ -2079,10 +2134,10 @@ class Summarize:
             question_text = q_row["question_text"]
 
             # Filter insights for this question and drop empty/NaN values immediately
-            q_insights_df = self.state.insights[
-                (self.state.insights["question_id"] == question_id) & 
-                (self.state.insights["insight"].notna()) & 
-                (self.state.insights["insight"] != "")
+            q_insights_df = temp_state_insights[
+                (temp_state_insights["question_id"] == question_id) & 
+                (temp_state_insights["insight"].notna()) & 
+                (temp_state_insights["insight"] != "")
             ].copy()
 
             # Get the schema for this specific question
@@ -2119,7 +2174,6 @@ class Summarize:
                 }
             }
             
-            
             # CHUNKING LOGIC: Process the filtered insights in batches
             for i in range(0, len(q_insights_df), batch_size):
                 batch_df = q_insights_df.iloc[i : i + batch_size]
@@ -2137,7 +2191,6 @@ class Summarize:
                     f"INSIGHTS TO MAP:\n"
                     f"{current_batch_str}\n\n"
                 )
-
 
             response = utils.call_chat_completion(
                 sys_prompt=sys_prompt,  
@@ -2160,6 +2213,9 @@ class Summarize:
                 batch_results_df["question_id"] = question_id
                 mapped_insights_df_list.append(batch_results_df)
 
+                with open(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"), "wb") as f:
+                    pickle.dump(mapped_insights_df_list, f)
+
         # Concat everything
         if not mapped_insights_df_list:
             mapped_insights_df = pd.DataFrame()
@@ -2168,6 +2224,9 @@ class Summarize:
 
         self.mapped_theme_list.append(mapped_insights_df)
         os.makedirs(self.summary_save_location, exist_ok=True)
+        # delete the in progress pickle as we have now saved the final output to the mapped theme list and we don't want to accidentally resume from a mid mapping point when we have a full mapping saved
+        if os.path.exists(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle")):
+            os.remove(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"))
 
         for idx, i in enumerate(self.mapped_theme_list):
             i.to_parquet(os.path.join(self.summary_save_location, f"mapped_themes_{idx+1}.parquet"), index=False)
@@ -2175,7 +2234,6 @@ class Summarize:
         return(self.mapped_theme_list[-1])
 
 
-    
     def populate_themes(self, save_file_name="populated_themes.parquet") -> pd.DataFrame:
         # utils
         def build_frozen_block(frozen_content: list[dict]) -> str:

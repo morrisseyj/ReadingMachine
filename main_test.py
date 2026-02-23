@@ -1,3 +1,5 @@
+from typing import List
+
 from lit_review_machine import core, utils, state
 
 
@@ -161,4 +163,130 @@ summarize = core.Summarize(state=latest_state,
                            ai_model="gpt-4o",
                            paper_output_length=8000)
 
+# First we summarize the clusters. This only happens once
+# Specifically we calculate the shortest path between the cluster centroids and feed them to the LLM in that order with already summarized clusters passed as frozen context for the next summariation
+# This maximizes semantic coherence when asking the LLM to summarize clusters and will better enable conceptual coheremce when we undertake theme mapping
 summarize.summarize_clusters()
+# Next we move to map themes
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if os.path.exists(os.path.join(os.path.join(summarize.summary_save_location, "summaries.parquet"))):
+    recover = None
+    while recover not in ['r', 'n']:
+        recover = input("Summaries already exist on disk. Do you want to recover (r) or generate new ones (n)? (r/n): ").lower()
+    if recover == 'r':
+        summarize.summaries = pd.read_parquet(os.path.join(summarize.summary_save_location, "summaries.parquet"))
+        return summarize.summaries
+    else:
+        print("Re-running cleaning of summaries...")
+
+# We are going to send the insights to the LLM in the order of the shortest path, so that the most similar clusters are summarized close together
+# This will add coherence to the final paper when the summaries are stitched together
+# It will also aid in the applicaion of the sliding window for summary clean up
+shortest_paths = summarize._estimate_shortest_path()
+
+# Add calculated lengths to insights
+summarize.state.insights = summarize._calculate_summary_length()
+
+summaries_dict_lst: List[dict] = []
+
+total_clusters = len(summarize.state.insights.groupby("question_id")["cluster"].nunique(dropna=False))
+count = 1
+
+# Loop over unique research questions
+for _, row in summarize.state.questions.iterrows():
+    rq_id = row["question_id"]
+    rq_text = row["question_text"]
+    rq_df: pd.DataFrame = summarize.state.insights[summarize.state.insights["question_id"] == rq_id].copy()
+
+    # Loop over clusters for this research question - in shortest path order
+    for cluster in shortest_paths[rq_id]["order"]:
+        print(f"Summarizing cluster {cluster} for research question {rq_id} ({count} of {total_clusters})...")
+        count += 1
+        # Skip any cases where chunks might have had no insights (and therefore no cluster)
+        if pd.isna(cluster) or cluster == "NA":
+            continue
+
+        cluster_df: pd.DataFrame = rq_df[rq_df["cluster"] == cluster]
+        length_str: str = cluster_df["length_str"].iloc[0]
+        # get the insights, they are list of single strings. So make sure they are valid string to send to the LLM
+        insights: List[str] = cluster_df["insight"].apply(
+            lambda x: x if isinstance(x, str) else (
+                x[0] if isinstance(x, list) and len(x) == 1 and isinstance(x[0], str) else None
+            )).tolist()
+        
+        if any(i is None for i in insights):
+            raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
+
+        # Build system prompt from predefined method
+        sys_prompt: str = Prompts().summarize(summary_length=length_str)
+
+        # Get the summaries frozen so far if there are any
+        frozen_summaries = pd.DataFrame(summaries_dict_lst)["summary"].tolist() if summaries_dict_lst else []
+
+        # Build user prompt for LLM
+        user_prompt: str = (
+            f"Research question id: {rq_id}\n"
+            f"Research question text: {rq_text}\n"
+            "PRECEDING CLUSTER SUMMARIES (for context only; may be empty):\n"
+            f"{'\n'.join(frozen_summaries) if frozen_summaries else ''}\n"
+            f"Cluster: {cluster}\n"
+            "INSIGHTS:\n" +
+            "\n".join(insights)
+        )
+
+        json_schema = {
+            "name": "cluster_summary",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "question_id": {"type": "string"},
+                    "question_text": {"type": "string"},
+                    "cluster": {"type": "number"},
+                    "summary": {"type": "string"}
+                },
+                "required": ["question_id", "question_text", "cluster", "summary"],
+                "additionalProperties": False
+            }
+        }
+        fall_back = {"question_id": rq_id, "question_text": rq_text, "cluster": cluster, "summary": ""}
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=summarize.llm_client,
+            ai_model=summarize.ai_model,
+            return_json=True,
+            json_schema=json_schema,
+            fall_back=fall_back
+        )
+
+        summaries_dict_lst.append(response)
+
+# Now convert the list of dict responses to a dataframe for easier handling and saving
+summaries_df: pd.DataFrame = pd.DataFrame(summaries_dict_lst)
+
+print(
+    f"Summaries saved here: {summarize.summary_save_location}\n"
+    "Returned object is a Summaries instance. Access via `variable.summaries`.\n"
+    f"Or load later with: Summaries.from_parquet('{summarize.summary_save_location}')"
+)
+
+summarize.summaries = summaries_df
+
+# Save summaries as this is LLM output we may want to reuse later - save as parquet
+os.makedirs(summarize.summary_save_location, exist_ok=True)
+summarize.summaries.to_parquet(os.path.join(summarize.summary_save_location, "summaries.parquet"))
+return summaries_df
