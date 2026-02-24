@@ -509,7 +509,7 @@ class Prompts:
     #     )
     
     def gen_theme_schema(self):
-        return(
+       return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
             "Your task is to analyze the provided text and design a 'Thematic Codebook' "
@@ -520,7 +520,7 @@ class Prompts:
             "1. **Identify Major Themes:** Determine the recurring, dominant topics. Themes must be **conceptually exclusive**—each should represent a distinct semantic territory.\n"
             "2. **Identify Discursive Conflicts (Conditional):** If the text indicates contradictions or trade-offs (e.g., 'views are mixed'), create a 'Conflicts' category. This is a **Relational Flagger** used to identify tension within or across themes.\n"
             "3. **Identify 'Other' Category (Conditional):** A bucket for relevant but minority concepts to ensure full semantic coverage without inducing theme bloat.\n"
-            "4. **Establish Precise Instructions:** Create logic-based instructions for every category based on the Architectural Constraints below.\n\n"
+            "4. **Establish Precise Instructions:** Create logic-based instructions and high-level descriptions for every category based on the Architectural Constraints below.\n\n"
 
             "## INPUT\n"
             "RESEARCH QUESTION: <question_text>\n"
@@ -530,24 +530,28 @@ class Prompts:
             "{\n"
             '  "themes": [\n'
             "    {\n"
-            '      "id": "1",\n'
-            '      "label": "Name of Major Theme",\n'
-            '      "instructions": "THEME DESCRIPTION: <desc>; INCLUDE if <logic>; EXCLUDE if <logic>."\n'
+            '      "theme_id": "1",\n'
+            '      "theme_label": "Name of Major Theme",\n'
+            '      "theme_description": "A concise summary of the theme’s core intent and semantic territory to guide the final population and reporting.",\n'
+            '      "instructions": "INCLUDE if <logic>; EXCLUDE if <logic>."\n'
             "    },\n"
             "    {\n"
-            '      "id": "other",\n'
-            '      "label": "Other Topics",\n'
-            '      "instructions": "THEME DESCRIPTION: Residual germane concepts; INCLUDE if <logic>; EXCLUDE if <logic>."\n'
+            '      "theme_id": "other",\n'
+            '      "theme_label": "Other Topics",\n'
+            '      "theme_description": "Captures germane minority concepts not covered by major themes.",\n'
+            '      "instructions": "INCLUDE if <logic>; EXCLUDE if <logic>."\n'
             "    },\n"
             "    {\n"
-            '      "id": "conflicts",\n'
-            '      "label": "Discursive Conflicts",\n'
+            '      "theme_id": "conflicts",\n'
+            '      "theme_label": "Discursive Conflicts",\n'
+            '      "theme_description": "Captures specific contradictions, trade-offs, and tensions identified in the text.",\n'
             '      "instructions": "DETECTION TRIGGERS: Flag here if the content specifically represents the tension between [A] and [B], or disputes the consensus of [Theme X]. No exclusion list required."\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
 
             "## ARCHITECTURAL CONSTRAINTS\n"
+            "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. This provides the conceptual narrative for the theme, serving as a reference point for both the tagger and the final summary population.\n"
             "- **Conceptual Mutuality (Themes):** Themes must have distinct boundaries. The 'EXCLUDE' criteria for a theme should explicitly point to the territories of other themes to prevent conceptual overlap.\n"
             "- **Relational Flagger (Conflicts):** The 'Conflicts' category is a secondary overlay. It must NOT use standard 'Exclusion' logic. Use **DETECTION TRIGGERS** to name specific fault lines. Content can be assigned to a substantive theme AND the Conflicts flag simultaneously.\n"
             "- **The 'Other' Bucket:** This category exists to prevent 'Theme Bloat.' It should house valid, relevant ideas that do not have the frequency to warrant a standalone theme. It requires standard INCLUDE/EXCLUDE logic.\n"
@@ -566,27 +570,27 @@ class Prompts:
             "## THEMATIC SCHEMA STRUCTURE\n"
             "You will be provided with a JSON 'codebook' representing the thematic pillars. Each theme follows this structure:\n"
             "{\n"
-            "  'id': 'Unique identifier (e.g., 1, other, conflicts)',\n"
-            "  'label': 'The conceptual name of the category',\n"
-            "  'criteria': 'Detailed instructions (either INCLUDE/EXCLUDE logic or DETECTION TRIGGERS)'\n"
+            "  'theme_id': 'Unique identifier (e.g., 1, other, conflicts)',\n"
+            "  'theme_label': 'The conceptual name of the category',\n"
+            "  'theme_description': 'A concise summary of the theme’s core intent and semantic territory',\n"
+            "  'instructions': 'Detailed instructions (either INCLUDE/EXCLUDE logic or DETECTION TRIGGERS)'\n"
             "}\n\n"
 
             "## INPUT\n"
             "RESEARCH QUESTION: <question_text>\n"
             "THEMATIC CODEBOOK:\n"
-            "<JSON array of themes, each with id, label, and criteria>\n\n"
+            "<JSON array of themes, each with theme_id, theme_label, theme_description, and instructions>\n\n"
             "INSIGHTS TO MAP:\n"
             "<insight_id>: <insight_text>\n"
             "<insight_id>: <insight_text>\n"
             "...\n\n"
             
             "## MAPPING LAWS\n"
-            "1. **Active Best-Match:** Evaluate every insight against the 'criteria' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent.\n"
+            "1. **Active Best-Match:** Evaluate every insight against the 'theme_description' and 'instructions' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent and narrative defined in the description.\n"
             "2. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
-            "3. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant Theme IDs.\n"
-            "4. **The Residual Override ('Other'):** 'Other' is the mandatory exit valve. If an insight fails the specific criteria for all substantive themes (either no inclusion or explicit exclusion), you MUST assign it to 'Other'. "
-            "In this override scenario, the requirement for full data coverage supersedes the specific instructions for 'Other'.\n"
-            "5. **Conflict Flagging:** If there is a 'conflicts' theme and an insight explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it the conflicts flag. As above all insights may be tagged to multiple themes.\n"
+            "3. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant theme_ids.\n"
+            "4. **The Residual Override ('other'):** 'other' is the mandatory exit valve. If an insight fails the specific criteria for all substantive themes (either no inclusion or explicit exclusion), you MUST assign it to 'other'. In this override scenario, the requirement for full data coverage supersedes the specific instructions for 'other'.\n"
+            "5. **Conflict Flagging:** If there is a 'conflicts' theme and an insight explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it the 'conflicts' flag. As above all insights may be tagged to multiple themes.\n"
             "6. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
@@ -595,69 +599,45 @@ class Prompts:
             '  "mapped_data": [\n'
             '    { "insight_id": "string", "theme_ids": ["string"] }\n'
             '  ]\n'
-            "}\n"
+            "}\n\n"
 
             "RULES FOR theme_ids:\n"
-            "- **Always return an array**, even if there is only one theme (e.g., ['T1']).\n"
-            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['T1', 'T3']).\n"
+            "- **Always return an array**, even if there is only one theme (e.g., ['1']).\n"
+            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['1', 'conflicts']).\n"
             "- Never return a null, a single string, or an empty array."
         )
 
 
-    
-    def populate_themes(self):
-        return (
-        "You are an expert in organizing insights from literature reviews into predefined thematic sections. "
-        "You will assign portions of summarized text to the CURRENT THEME based on its criteria. "
-        "This is part of a human-in-the-loop process constructing a final literature review.\n\n"
+    def populate_themes(self, theme_len: int):
+        return(
+            "## ROLE\n"
+            "You are a Qualitative Research Lead specializing in High-Fidelity Synthesis. "
+            "Your task is to analyze a collection of Research Insights mapped to a specific theme "
+            "and transform them into a cohesive, evidence-based thematic summary.\n\n"
 
-        "## INPUT FORMAT\n"
-        "You will receive information for one research question containing:\n"
-        "- Research question id: <question_id>\n"
-        "- Research question text: <question_text>\n"
-        "- FROZEN CONTENT (read-only; text already assigned to themes):\n"
-        "  For each theme:\n"
-        "  Theme label: <theme_label>\n"
-        "  Criteria: <criteria_for_theme>\n"
-        "  Content:\n"
-        "  <frozen_content_text>\n"
-        "  --- END THEME ---\n\n"
-        "- --- CURRENT THEME TO POPULATE:---\n"
-        "  Theme id: <theme_id>\n"
-        "  Theme label: <theme_label>\n"
-        "  Criteria: <detailed_criteria_for_identifying_relevant_content>\n\n"
-        "- CLUSTER SUMMARY TEXT (source material):\n"
-        "<summary_para_1>\n"
-        "<summary_para_2>\n"
-        "...\n\n"
-        "--- THEMES STILL TO PROCESS (context only):---\n"
-        "  Theme label: <theme_label_1>\n"
-        "  Criteria: <criteria_for_theme_1>\n"
-        "  ...\n\n"
+            "## INPUT STRUCTURE\n"
+            "You will receive a user message in the following format::\n"
+            "RESEARCH QUESTION: <question_text (the overarching question that generated the insights)>\n"
+            "THEME LABEL: <theme_label>\n"
+            "THEME DESCRIPTION: <theme_description (the North Star logic)>\n"
+            "INSIGHTS TO SYNTHESIZE:\n"
+            "<list of specific insights identified as relevant to this theme>\n\n"
 
-        "## OUTPUT FORMAT (valid JSON object)\n"
-        "{\n"
-        '  "question_id": "<question_id>",\n'
-        '  "theme_id": "<theme_id>",\n'
-        '  "theme_label": "<theme_label>",\n'
-        '  "assigned_content": "<paragraphs drawn or adapted from CLUSTER SUMMARY TEXT that fit the theme criteria>"\n'
-        "}\n\n"
+            "## SYNTHESIS LAWS\n"
+            "1. **Adhere to the North Star:** Your summary must reflect the conceptual territory defined in the 'theme_description'. Ensure the output reads as a self-contained thematic section.\n"
+            "2. **Coherence & Flow:** Integrate related insights into a coherent, continuous paragraph or series of short paragraphs. Do not simply list data points.\n"
+            "3. **Length Target:** Aim for approximately {theme_len} words. If the insights can be effectively synthesized without losing detail in fewer words, produce a shorter summary. Preserve as much granularity of insight as possible within the limit; compress phrasing, not substance.\n"
+            "4. **Fidelity:** Preserve all factual details and citations exactly as they appear in the source text. Do not add new information or external knowledge.\n"
+            "5. **Tone:** Maintain a formal, academic, and analytic tone.\n"
+            "6. **Handling 'Other' Themes:** If the theme is 'Other', treat the contents as salient minority claims rather than noise. Organize and summarize these insights to reflect valid concepts that lacked the volume for a standalone theme.\n"
+            "7. **Handling 'Conflict' Themes:** If the theme is 'conflicts', organize and summarize the discursive disagreements. Do not seek to resolve tensions. Instead, reflect on how they are weighted across the corpus by assessing the volume of insights and diversity of sources. Use analytic language (e.g., 'widely supported', 'frequently mentioned', 'a few citations') rather than monotone numerical counts. Use author-date citations consistently.\n\n"
 
-        "## INSTRUCTIONS\n"
-        "- Analyze the CLUSTER SUMMARY TEXT and extract all text relevant to the CURRENT THEME criteria.\n"
-        "- Do not copy content that clearly belongs to other themes listed in the frozen content or remaining themes.\n"
-        "- When relevant information already appears in frozen content, refer to it briefly (e.g., 'As discussed in the section on X...') instead of repeating it.\n"
-        "- Integrate related insights into a coherent, continuous paragraph or series of short paragraphs.\n"
-        "- Preserve all factual details and citations exactly as in the source text.\n"
-        "- Do not add new information.\n"
-        "- Tone: formal, academic, analytic, suitable for a literature review. Note that you should vary your language for the purposes of readability - for example do not just monotically start each theme with 'This theme addresses...'. "
-        "Instead vary language - e.g. The third theme identified in the literature covers...' or 'Another salient theme identified in the literature pertains to...', etc..\n"
-        "- Begin with a framing sentence such as 'This theme addresses...'.\n"
-        "- Ensure the output reads as a self-contained thematic section.\n"
-        "- If the CURRENT THEME is labelled 'other', include all remaining relevant material not covered by other themes "
-        "and close with a reflective concluding tone for the research question.\n"
-        "- Frozen content may be empty—start cleanly if so.\n"
-    )
+            "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
+            "Return ONLY a JSON object. No preamble, no commentary, no conversational filler. Structure:\n"
+            "{\n"
+            '  "thematic_summary": "The formal, synthesized narrative including citations."\n'
+            "}\n"
+        )
 
     def exec_summary(self, token_length: int):
         return (

@@ -2014,28 +2014,34 @@ class Summarize:
 
             json_schema = {
                 "name": "thematic_schema_generator",
-                "strict": true,
+                "strict": True,
                 "schema": {
                     "type": "object",
                     "properties": {
-                    "themes": {
-                        "type": "array",
-                        "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": { "type": "string" },
-                            "label": { "type": "string" },
-                            "instructions": { "type": "string" }
-                        },
-                        "required": ["id", "label", "instructions"],
-                        "additionalProperties": false
-                        }
+                        "themes": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "theme_id": { "type": "string" },
+                                    "theme_label": { "type": "string" },
+                                    "theme_description": { "type": "string" },
+                                    "instructions": { "type": "string" }
+                                },
+                                "required": [
+                                    "theme_id", 
+                                    "theme_label", 
+                                    "theme_description", 
+                                    "instructions"
+                                ],
+                                "additionalProperties": False
+                            }
                         }
                     },
                     "required": ["themes"],
-                    "additionalProperties": false
-                    }
+                    "additionalProperties": False
                 }
+            }
 
             response = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
@@ -2048,7 +2054,7 @@ class Summarize:
             )
 
             theme_list = response.get("themes", [])
-            themes_df = pd.DataFrame(theme_list, columns=["id", "label", "criteria"])
+            themes_df = pd.DataFrame(theme_list, columns=["theme_id", "theme_label", "theme_description", "instructions"])
             themes_df["question_id"] = question_id
             themes_df["question_text"] = question_text
 
@@ -2234,7 +2240,358 @@ class Summarize:
         return(self.mapped_theme_list[-1])
 
 
-    def populate_themes(self, save_file_name="populated_themes.parquet") -> pd.DataFrame:
+    def _estimate_theme_lengths(self, paper_len: int):
+        # 1. Get the full list of expected themes from the schema
+        full_schema = self.theme_schema_list[-1][["question_id", "theme_id"]].copy()
+
+        # 2. Get the count of insights mapped to each theme
+        theme_counts = self.mapped_theme_list[-1].copy()
+        theme_counts = theme_counts.groupby(["question_id", "theme_id"]).size().reset_index(name="count")
+
+        # 3. Merge schema with counts so themes with 0 insights are included as NaN
+        theme_counts = full_schema.merge(theme_counts, on=["question_id", "theme_id"], how="left")
+        theme_counts["count"] = theme_counts["count"].fillna(0)
+
+        # 4. Calculate total insights per question (for proportions)
+        total_counts = theme_counts.groupby("question_id")["count"].sum().reset_index(name="total_count")
+
+        # 5. Merge total counts back
+        theme_counts = theme_counts.merge(total_counts, on="question_id")
+
+        # 6. Calculate proportion and allocate length
+        # Use np.where to handle the division by zero case if a question has NO insights at all
+        theme_counts["proportion"] = np.where(
+            theme_counts["total_count"] > 0, 
+            theme_counts["count"] / theme_counts["total_count"], 
+            0
+        )
+        
+        theme_counts["allocated_length"] = np.ceil(theme_counts["proportion"] * paper_len).astype(int)
+
+        # Ensure even themes with 0 hits have a 0 integer value (redundant but safe)
+        theme_counts["allocated_length"] = theme_counts["allocated_length"].fillna(0).astype(int)
+
+
+    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float) -> pd.DataFrame:
+        # Take a dataframe and check whether the current lengh of the summary exceeds some proportion of the allocated length
+        df["length_flag"] = df.apply(
+            lambda row: 0 if row["current_length"] <= row["allocated_length"] * max_prop else 1,
+            axis=1
+        )
+        # Return two dataframes - one with the flagged themes and one with the themes that are within the length limits so that they can be treated differently in the next steps
+        df_len_ok = df[df["length_flag"] == 0]
+        df_len_flagged = df[df["length_flag"] == 1]
+        
+        return(df_len_ok, df_len_flagged)
+    
+    def _run_theme_pop(self, 
+                       schema_df: pd.DataFrame,
+                       mapped_themes_df: pd.DataFrame, 
+                       paper_len = 8000) -> pd.DataFrame:
+
+        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
+        # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
+        if "allocated_length" not in schema_df.columns:
+            schema_df = schema_df.merge(self._estimate_theme_lengths(paper_len), on=["question_id", "theme_id"], how="left")
+
+        # Iterate over the themes from the schema to get the data for the LLM call
+        populated_themes = []
+        for idx, row in schema_df.iterrows():
+            print(f"Populating theme {idx + 1} of {schema_df.shape[0]}...")
+            rq_id = row["question_id"]
+            rq_text = row["question_text"]
+            theme_id = row["theme_id"]
+            theme_label = row["theme_label"]
+            theme_description = row["theme_description"]
+            allocated_length = row["allocated_length"]
+            # Get the insight ids for the specific question and theme
+            insight_ids = mapped_themes_df[
+                (mapped_themes_df["question_id"] == rq_id) & 
+                (mapped_themes_df["theme_id"] == theme_id)
+            ]["insight_id"].tolist()
+            # Get the insight text from those insight ids
+            insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+            # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
+            if len(insights) == 0:
+                no_insight_df = pd.DataFrame([{
+                    "thematic_summary": "",
+                    "question_id": rq_id,
+                    "theme_id": theme_id,
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "allocated_length": allocated_length
+                }])
+                populated_themes.append(no_insight_df)
+                continue
+            insights_str = "\n".join(insights)
+            
+            # Build the prompt
+            sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
+            user_prompt = (
+                f"RESEARCH QUESTION: {rq_text}\n"
+                f"THEME LABEL: {theme_label}\n"
+                f"THEME DESCRIPTION: {theme_description}\n"
+                f"INSIGHTS TO SYNTHESIZE:\n"
+                f"{insights_str}\n\n"
+            )
+            fall_back = {"thematic_summary": ""}
+
+            json_schema = {
+                "name": "theme_populator",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "thematic_summary": {"type": "string"}
+                    },
+                    "required": ["thematic_summary"],
+                    "additionalProperties": False
+                }
+            }
+            # Call the LLM
+            response = utils.call_chat_completion(
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                llm_client=self.llm_client,
+                ai_model=self.ai_model,
+                fall_back=fall_back,
+                return_json=True,
+                json_schema=json_schema
+            )
+            
+            # Get the summary from the response and tag with metadata in a dataframe
+            thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
+            thematic_summary["question_id"] = rq_id
+            thematic_summary["theme_id"] = theme_id
+            thematic_summary["theme_label"] = theme_label
+            thematic_summary["theme_description"] = theme_description
+            thematic_summary["allocated_length"] = allocated_length
+
+            # Get the length of the summary in words and calculate the percentage of the allocated length that this summary represents
+            thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
+            thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
+            
+            # Append the result to the list of dfs the loop is producing, which will be concatenated at the end
+            populated_themes.append(thematic_summary)
+        # Concat the final list of dfs and return
+        populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+        return(populated_themes_df)
+
+    def populate_themes(self, 
+                        paper_len: int = 8000, 
+                        max_prop: float = 0.9) -> pd.DataFrame:
+        
+        
+        # First check whether the user wants to re-run the population or load existing populated themes if they exist
+        if self.populated_theme_list is not None and len(self.populated_theme_list) > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Populated themes already exist on disk. Do you want to:\n"
+                    "(1) reload existing populated themes\n"
+                    "(2) repopulate themes based on the current theme schema and mapped insights (NOTE:this will overwrite the most recent existing populated theme)? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+            if new == "1":
+                print(
+                    "Populated themes loaded. Inspect them via variable.populated_theme_list[-1]\n"
+                )
+                return(None) # Return to exit the function and avoid re-running the population
+            else:
+                # If rerunning make sure that the number of populated themes is not ahead of the theme mapping
+                if len(self.populated_theme_list) > len(self.mapped_theme_list):
+                    raise ValueError("Your theme population is already ahead of your theme mapping. Please run map_insights_to_themes() before re-running populate_themes()")
+                              
+                # If re-running make sure that the number of populated themes runs is equal to the one less than the number of schemas (so we are populating based on the last one)
+                schema_len = len(self.theme_schema_list)
+                self.populated_theme_list = self.populated_theme_list[:schema_len - 1] 
+                print("Re-running theme population...")
+        
+        
+        # Populate the themes with the insights mapped to them 
+        populated_themes_df = self._run_theme_pop(
+            schema_df=self.theme_schema_list[-1],
+            mapped_themes_df=self.mapped_theme_list[-1],
+            paper_len=paper_len
+        )
+
+        # Check whether any of the populated themes exceed a certain proportion of th total allocated length
+        df_len_ok, df_len_flagged = self._check_length_and_flag(populated_themes_df, max_prop)
+
+        #While any themes exceed the length threshold its a sign that the LLM is undertaking more compression of the granulatiry of the theme than might be optimal (to fit length requirements). 
+        # Offer the user the options to re-run these themes with a 20% expansion of the word count allocated to them.
+        while df_len_flagged is not None and not df_len_flagged.empty:
+            expand_count = None
+            while expand_count not in ["1", "2"]:
+                expand_count = input(
+                    f"{df_len_flagged.shape[0]} themes exceed {max_prop*100}% of their allocated length. This suggests the model is compressing these themes through aggressive abstraction and granularity is being lost. \n"
+                    "Do you want to:\n"
+                    "1) re-run these themes with a 20% expansion of the word count allocated to them? \n"
+                    "2) keep the current populated themes and move on to the next step? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+
+            if expand_count == "1":
+                # If the user wants to expand, we re run the theme populator on the flagged themes
+                # First get the schema map for the flagged themes and expand the allocated length by 20%
+                df_len_flagged["allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
+                # Then get the ids and the corresponding insights
+                length_check_theme_ids = df_len_flagged["theme_id"].tolist()
+                rerun_mapped_df = self.mapped_theme_list[-1][self.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)]
+                # Rerun on the flagged themes with the expanded length and get new summaries for those themes
+                rerun_populated_themes_df = self._run_theme_pop(df_len_flagged, rerun_mapped_df, paper_len)
+                rerun_len_ok, df_len_flagged = self._check_length_and_flag(rerun_populated_themes_df, max_prop)
+                if rerun_len_ok.shape[0] > 0:
+                    # If any of the rerun themes are now under the threshold we update those in the main df of populated themes and the loop will continue checking if there are flagged themes
+                    df_len_ok = pd.concat([df_len_ok, rerun_len_ok], ignore_index=True)
+
+            else:
+                # if the user does not want to expand the word count, concat the flagged and ok themes and set flagged themes to None to exit the loop
+                df_len_ok = pd.concat([df_len_ok, df_len_flagged], ignore_index=True)
+                df_len_flagged = None
+                pass
+
+        # Now save df_len_ok to the populated theme list and to disk as the final output of this function
+        self.populated_theme_list.append(df_len_ok)
+        os.makedirs(self.summary_save_location, exist_ok=True)
+        for idx, df in enumerate(self.populated_theme_list):
+            df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+
+        return self.populated_theme_list[-1]
+
+
+    def address_orphans():
+
+
+
+                
+                        
+
+
+
+        
+
+
+            
+
+
+
+        # Utility function to estimate the length of each theme based on the number of insights mapped to it, relative to the total number of insights for that research question, and allocate a proportion of the total paper length to each theme accordingly. This will be used to prompt the LLM on how much to write for each theme when we get to the population stage.
+        
+        
+        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
+        # Prior to doing the caluclation remove any wordcounts that might have been calculated on prior runs
+        self.theme_schema_list[-1] = self.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
+        # Then populate the new lengths and merge to the theme schema
+        self.theme_schema_list[-1] = (
+            self.theme_schema_list[-1].
+            merge(
+                self._estimate_theme_lengths(),
+                on=["question_id", "theme_id"],
+                how="left"
+                )
+            )
+        
+        populated_themes = []    
+        for _, row in self.theme_schema_list[-1].iterrows():
+            rq_id = row["question_id"]
+            rq_text = row["question_text"]
+            theme_id = row["theme_id"]
+            theme_label = row["theme_label"]
+            theme_description = row["theme_description"]
+            allocated_length = row["allocated_length"]
+            insight_ids = self.mapped_theme_list[-1][
+                (self.mapped_theme_list[-1]["question_id"] == rq_id) & 
+                (self.mapped_theme_list[-1]["theme_id"] == theme_id)
+            ]["insight_id"].tolist()
+            insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+            if len(insights) == 0:
+                no_insight_df = pd.DataFrame([{
+                    "thematic_summary": "",
+                    "question_id": rq_id,
+                    "theme_id": theme_id,
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "allocated_length": allocated_length
+                }])
+                populated_themes.append(no_insight_df)
+                continue
+            insights_str = "\n".join(insights)
+
+            sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
+            user_prompt = (
+                f"RESEARCH QUESTION: {rq_text}\n"
+                f"THEME LABEL: {theme_label}\n"
+                f"THEME DESCRIPTION: {theme_description}\n"
+                f"INSIGHTS TO SYNTHESIZE:\n"
+                f"{insights_str}\n\n"
+            )
+            fall_back = {"thematic_summary": ""}
+
+            json_schema = {
+                "name": "theme_populator",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "thematic_summary": {"type": "string"}
+                    },
+                    "required": ["thematic_summary"],
+                    "additionalProperties": False
+                }
+            }
+
+            response = utils.call_chat_completion(
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                llm_client=self.llm_client,
+                ai_model=self.ai_model,
+                fall_back=fall_back,
+                return_json=True,
+                json_schema=json_schema
+            )
+            
+            thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
+            thematic_summary["question_id"] = rq_id
+            thematic_summary["theme_id"] = theme_id
+            thematic_summary["theme_label"] = theme_label
+            thematic_summary["theme_description"] = theme_description
+            thematic_summary["allocated_length"] = allocated_length
+
+            thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
+            thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
+            
+            populated_themes.append(thematic_summary)
+
+        
+        populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+
+    
+
+
+        
+        
+        
+
+
+        self.populated_theme_list.append(populated_themes_df)
+        os.makedirs(self.summary_save_location, exist_ok=True)
+        for idx, df in enumerate(self.populated_theme_list):
+            df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+        
+        return self.populated_theme_list[-1]
+
+
+
+
+
+
+
+
+
+
+        
+        
         # utils
         def build_frozen_block(frozen_content: list[dict]) -> str:
             if not frozen_content:
