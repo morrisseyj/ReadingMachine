@@ -1,4 +1,6 @@
 
+import random
+
 class Prompts:
     def __init__(self):
         pass
@@ -638,6 +640,226 @@ class Prompts:
             '  "thematic_summary": "The formal, synthesized narrative including citations."\n'
             "}\n"
         )
+    
+
+    def identify_orphans(self):
+        return(
+            '# ROLE\n'
+            'You are a Research Auditor. Your task is to verify the "groundedness" of a thematic summary by mapping source insights to the text.\n\n'
+
+            '# TASK\n'
+            'I will provide you with:\n'
+            '1. A THEMATIC SUMMARY (a synthesis of the text).\n'
+            '2. A LIST OF SOURCE INSIGHTS (numbered with unique IDs).\n\n'
+
+            '# INPUT FORMAT\n'
+            'THEMATIC SUMMARY:\n'
+            '<thematic_summary_text>\n\n'
+            'SOURCE INSIGHTS:\n'
+            '<insight_id_1>: <insight_text_1>\n'
+            '<insight_id_2>: <insight_text_2>\n'
+            '...\n\n'
+
+            'You must determine which specific insights are reflected in the summary.\n\n'
+
+            '# DEFINITION OF "MENTIONED"\n'
+            'An insight is considered "mentioned" if:\n'
+            '- Its core finding is present in the summary, even if the language is more abstract or generalized.\n'
+            '- It provides supporting evidence for a claim made in the summary.\n'
+            '- It is part of a group of insights that have been synthesized into a single broader sentence.\n\n'
+
+            'An insight is "omitted" ONLY if:\n'
+            '- The summary completely ignores the specific data point or observation.\n'
+            '- The summary contradicts the insight without acknowledging the tension.\n\n'
+
+            '# OUTPUT PROTOCOL\n'
+            '- Return ONLY a JSON object.\n'
+            '- The object must contain a single key "mentioned_insight_ids" containing an array of strings.\n'
+            '- Only include IDs from the provided list that are reflected in the summary.\n'
+            '- Do not provide explanations or commentary.\n\n'
+
+            '# JSON SCHEMA\n'
+            '{\n'
+            '  "mentioned_insight_ids": ["ID_1", "ID_2", ...]\n'
+            '}\n\n'
+        )
+    
+    def integrate_orphans(self):
+        return (
+            '# ROLE\n'
+            'You are a Research Synthesizer. Your task is to update an existing thematic summary to include specific insights that were previously omitted.\n\n'
+
+            '# TASK\n'
+            'I will provide you with:\n'
+            '1. THEMATIC CONTEXT: The Theme Label, theme Description, and research question the theme forms a partial answer to.\n'
+            '2. ORIGINAL SUMMARY: The current version of the summary.\n'
+            '3. ORPHAN INSIGHTS: A list of relevant insights that MUST be integrated.\n\n'
+
+            '# INPUT FORMAT\n'
+            'RESEARCH QUESTION: <question_text>\n'
+            'THEME LABEL: <theme_label>\n'
+            'THEME DESCRIPTION:\n'
+            '<theme_description>\n'
+            'ORIGINAL SUMMARY:\n'
+            '<original_summary_text>\n'
+            'ORPHAN INSIGHTS:\n'
+            '<insight_text_1>\n'
+            '<insight_text_2>\n'
+            '...\n\n'
+
+            '# INTEGRATION GUIDELINES\n'
+            '- DO NOT remove or contradict existing findings in the original summary.\n'
+            '- EXPAND the narrative to weave in the new insights naturally.\n'
+            '- MAINTAIN the original level of abstraction; do not just "tack on" a list of facts.\n'
+            '- ENSURE the final summary remains a cohesive, grounded synthesis.\n'
+            '- If the new insights introduce a contradiction or a nuance, explicitly state that tension within the theme summary. Do not hide or smooth over contradictions.\n'
+            '- Preserve all citations exactly as they appear in the source insights. If multiple insights support a single claim, list all relevant citations together.\n'
+            '- Use the research questions and theme description as guiding "North Stars" to ensure the integrated summary remains focused and coherent.\n\n'
+
+            '# OUTPUT PROTOCOL\n'
+            '- Return ONLY a JSON object.\n'
+            '- The object must contain a single key "updated_summary" containing the full, revised text.\n'
+            '- Do not provide explanations, preamble, or commentary.\n\n'
+
+            '# JSON SCHEMA\n'
+            '{\n'
+            '  "updated_summary": "The full revised text of the thematic summary..."\n'
+            '}'
+        )
+
+    def address_redundancy(self):
+        return (
+            "# ROLE\n"
+            "You are a Research Editor performing a structural redundancy reduction pass.\n\n"
+
+            "# PURPOSE\n"
+            "The themes have already been generated independently from their assigned insights. "
+            "Because some insights are assigned to multiple themes, portions of this theme may "
+            "substantively repeat material already expressed in earlier themes.\n\n"
+
+            "Your task is to reduce unnecessary surface-level redundancy while preserving:\n"
+            "- Full structural coverage of assigned insights.\n"
+            "- All citations exactly as written.\n"
+            "- All substantive claims.\n\n"
+
+            "# IMPORTANT CONSTRAINTS\n"
+            "1. Zero Information Loss: Do NOT remove or alter any substantive claim.\n"
+            "2. Do NOT introduce new claims or interpretations.\n"
+            "3. Do NOT alter theme scope or structure.\n"
+            "4. Preserve all citation markers exactly as written.\n\n"
+
+            "# REDUNDANCY DEFINITION\n"
+            "Redundancy refers only to repeated full articulation of substantively identical claims "
+            "that already appear in previously written themes.\n\n"
+
+            "# HOW TO HANDLE REDUNDANCY\n"
+            "- If a claim has already been fully articulated in earlier themes, do NOT restate it verbatim.\n"
+            "- Instead, provide a concise reference-based expression (e.g., "
+            "\"As discussed in earlier sections, ...\") while preserving its presence.\n"
+            "- Maintain the logical integrity of this theme.\n"
+            "- Ensure that all assigned insights remain substantively represented.\n\n"
+
+            "# INPUT FORMAT\n"
+            "RESEARCH QUESTION: <question_text>\n"
+            "THEME LABEL: <theme_label>\n"
+            "PREVIOUSLY CLEANED THEMES:\n"
+            "<previous_theme_text>\n\n"
+            "CURRENT THEME TO REFINE:\n"
+            "<current_theme_text>\n\n"
+
+            "# OUTPUT\n"
+            "Return ONLY a JSON object with the following structure:\n"
+            "{\n"
+            "  \"refined_theme\": \"<Your refined theme text here>\"\n"
+            "}\n"
+            
+            "Return ONLY a JSON object with key 'refined_theme'. "
+            "Do not include commentary."
+        )
+
+    # def address_redundancy(self, label: str):
+        
+    #     style_guidelines = {
+    #         "dominant": [
+    #             "Focus on the weight of evidence (e.g., 'The most prominent narrative identified...')",
+    #             "Use a structural framing (e.g., 'A primary pillar of the feedback relates to...')",
+    #             "Use an empirical lens (e.g., 'Participant responses were most densely clustered around...')",
+    #             "Use a centralizing opener (e.g., 'At the core of the user experience was...')",
+    #             "Focus on the frequency of observation (e.g., 'A recurring point of emphasis across the data was...')",
+    #             "Use a foundational approach (e.g., 'Fundamental to the participants\' perspective was...')",
+    #             "Highlight a consistent trend (e.g., 'A highly consistent pattern emerged regarding...')",
+    #             "Frame as a primary driver (e.g., 'The analysis suggests that the primary driver of participant sentiment was...')"
+    #         ],
+    #         "other": [
+    #             "Frame as divergent data (e.g., 'While not forming part of the dominant narrative, several minority positions emerged...')",
+    #             "Use a 'breadth' framing (e.g., 'The analysis also captured a series of distinct, outlier observations...')",
+    #             "Frame as complementary nuance (e.g., 'Beyond the main thematic clusters, participant feedback also touched upon...')",
+    #             "Use a 'niche' framing (e.g., 'Less frequent, but nonetheless significant, were reports regarding...')",
+    #             "Frame as localized insight (e.g., 'A subset of the data provided more localized insights into...')",
+    #             "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy perspectives also highlighted...')",
+    #             "Use a 'peripheral' framing (e.g., 'On the periphery of the core themes, some participants also raised...')",
+    #             "Frame as granular detail (e.g., 'Providing further granularity to the report, distinct observations were made regarding...')"
+    #         ],
+    #         "conflict": [
+    #             "Frame as a stark polarization (e.g., 'The research revealed a significant tension in participant feedback regarding...')",
+    #             "Use an 'internal friction' lens (e.g., 'A notable point of contradiction emerged where...')",
+    #             "Use a 'divergence' framing (e.g., 'Participant perspectives were sharply divided when discussing...')",
+    #             "Focus on the nuance of disagreement (e.g., 'The data reflects a complex landscape of conflicting views concerning...')",
+    #             "Frame as a lack of consensus (e.g., 'Consensus was noticeably absent regarding the topic of...')",
+    #             "Use a 'dualistic' framing (e.g., 'The feedback was characterized by a clear dichotomy between...')",
+    #             "Frame as an interpretative struggle (e.g., 'The data presents an interpretative challenge, as participants provided conflicting accounts of...')",
+    #             "Highlight competing priorities (e.g., 'A friction was identified between competing priorities, specifically...')"
+    #         ]
+    #     }
+
+    #     label_lower = label.lower()
+    #     if any(word in label_lower for word in ["other", "minority", "outlier"]):
+    #         category = "other"
+    #     elif any(word in label_lower for word in ["conflict", "tension", "contradiction"]):
+    #         category = "conflict"
+    #     else:
+    #         category = "dominant"
+
+    #     guidelines = random.choice(style_guidelines[category])
+
+    #     return (
+    #         '# ROLE\n'
+    #         f'You are an Academic Research Editor. Your task is to refine a {category.upper()} thematic summary into a cohesive, non-redundant narrative.\n\n'
+
+    #         '# TASK\n'
+    #         'You will receive a thematic summary that potentially contains some redundancy with other themes due to overlapping insights in the generation of these summaries. '
+    #         'Your task is to refine the thematic summary into a cohesive, non-redundant narrative.\n'
+    #         'To achieve this task you will recieve previously cleaned up summaries as frozen conext as well as the summary to clean.\n'
+
+    #         '# INPUT FORMAT\n'
+    #         'RESEARCH QUESTION: <question_text>\n'
+    #         f'THEME LABEL: {label}\n'
+    #         'FROZEN CONTEXT:\n'
+    #         '<frozen_context>\n'
+    #         'SUMMARY TO CLEAN:\n'
+    #         '<summary_to_clean>\n\n'
+
+    #         '# MANDATORY OPENING STYLE\n'
+    #         f'You MUST open this theme by invoking a relevant spin on this specific guidance: {guidelines}\n\n'
+
+    #         '# EDITORIAL GUIDELINES\n'
+    #         '- **Zero Information Loss**: Every data point, finding, and citation from the TARGET THEME must be retained. Do not prune.\n'
+    #         '- **Explicit Linkage**: Use the FROZEN CONTEXT (previously written themes) to create narrative bridges. If information is repeated, do not delete it; instead, make the connection explicit (e.g., "As noted in the previous section..." or "Consistent with earlier findings...").\n'
+    #         '- **Academic Tone**: Use creative, professional academic prose. Avoid monotonic "Theme X is..." structures.\n'
+    #         '- **Citation Integrity**: Preserve all citations [ID_1, ID_2] exactly as they appear.\n\n'
+
+    #         '# NOTES\n'
+    #         '- This is a refinement process, not a rewrite. The core content must remain intact; your role is to enhance clarity and coherence while eliminating redundancy.\n'
+    #         '- If there is no frozen context (i.e., this is the first theme), simply follow the opening style guidance and ensure a strong, engaging introduction to the theme.\n\n'
+
+    #         '# OUTPUT PROTOCOL\n'
+    #         '- Return ONLY a JSON object with the key "refined_summary".\n'
+    #         '- Do not provide preamble or commentary.'
+    #     )
+
+
+
+
 
     def exec_summary(self, token_length: int):
         return (

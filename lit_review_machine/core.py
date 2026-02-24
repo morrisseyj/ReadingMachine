@@ -1640,6 +1640,7 @@ class Summarize:
         self.theme_schema_list = self._reload_summary_outputs("theme_schema")
         self.mapped_theme_list = self._reload_summary_outputs("mapped_theme")
         self.populated_theme_list = self._reload_summary_outputs("populated_theme")
+        self.orphans_list = self._reload_summary_outputs("orphans")
         self.redundancy = self._reload_summary_outputs("redundancy_pass")      
         
         # Ensure summary save location exists
@@ -2062,6 +2063,8 @@ class Summarize:
         
         # Concat all the questions
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
+        # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
+        output["theme_id"] = [i + 1 for i in range(len(output))] 
         # Append to the list of schemas
         self.theme_schema_list.append(output)
         # Save all the schemas in the list to capture the new one and maintain the order on disk in case we need to reload later for any reason
@@ -2375,6 +2378,8 @@ class Summarize:
             populated_themes.append(thematic_summary)
         # Concat the final list of dfs and return
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+        # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative
+        populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         return(populated_themes_df)
 
     def populate_themes(self, 
@@ -2450,7 +2455,9 @@ class Summarize:
                 df_len_ok = pd.concat([df_len_ok, df_len_flagged], ignore_index=True)
                 df_len_flagged = None
                 pass
-
+        
+        # Make sure the final df of populated themes is in the same order as the theme schema for easier comparison and so that it can be exported to the narrative in the correct order
+        df_len_ok = df_len_ok.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         # Now save df_len_ok to the populated theme list and to disk as the final output of this function
         self.populated_theme_list.append(df_len_ok)
         os.makedirs(self.summary_save_location, exist_ok=True)
@@ -2460,7 +2467,269 @@ class Summarize:
         return self.populated_theme_list[-1]
 
 
-    def address_orphans():
+    def _identify_orphans(self, batch_size=75) -> pd.DataFrame:
+        
+        question_insights_found_df_list = []
+        
+        for _, row in self.populated_theme_list[-1].iterrows():
+            t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
+            
+            theme_map = self.mapped_theme_list[-1]
+            relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
+            relevant_insights = self.state.insights[self.state.insights["insight_id"].isin(relevant_ids)]
+
+            theme_insights_found = []
+            for i in range(0, len(relevant_insights), batch_size):
+                batch = relevant_insights.iloc[i : i + batch_size]
+                insight_str = "\n".join(f"{rid}: {itxt}" for rid, itxt in zip(batch["insight_id"], batch["insight"]))
+
+                sys_prompt = Prompts().identify_orphans()
+                user_prompt = (
+                    "THEMATIC SUMMARY:\n"
+                    f"{thematic_summary}\n\n"
+                    "SOURCE INSIGHTS:\n"
+                    f"{insight_str}\n\n"
+                )
+                fall_back = {"mentioned_insight_ids": []}
+                json_schema = {
+                    "name": "mention_audit",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                        "mentioned_insight_ids": {
+                            "type": "array",
+                            "description": "The list of unique IDs for the insights that are reflected in the thematic summary.",
+                            "items": {
+                            "type": "string"
+                            }
+                        }
+                        },
+                        "required": ["mentioned_insight_ids"],
+                        "additionalProperties": false
+                        }
+                    }
+
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    fall_back=fall_back,
+                    return_json=True,
+                    json_schema=json_schema
+                )
+
+                theme_insights_found.extend(response.get("mentioned_insight_ids", []))
+
+            found_df = pd.DataFrame(theme_insights_found, columns=["insight_id"])
+            found_df["theme_id"], found_df["question_id"] = t_id, q_id
+            question_insights_found_df_list.append(found_df)
+        
+        question_insights_found_df = pd.concat(question_insights_found_df_list, ignore_index=True)
+
+        orphans_df = (
+            self.mapped_theme_list[-1][["insight_id", "question_id"]].merge(
+                question_insights_found_df[["insight_id", "question_id"]],  
+                on=["insight_id", "question_id"],
+                how="left",
+                indicator=True
+            ).query('_merge == "left_only"').drop(columns=["_merge"])
+        )
+
+        return(orphans_df)
+    
+    def _integrate_orphans(self, 
+                           orphans_df: pd.DataFrame) -> pd.DataFrame:
+
+        updated_summary_df_lst = []
+        # Iterate over your populated themes (one row per theme)
+        for _, row in self.populated_theme_list[-1].iterrows():
+            theme_id = row["theme_id"]
+            theme_label = row["theme_label"]
+            question_id = row["question_id"]
+            question_text = row["question_text"]
+            theme_description = row["theme_description"]
+            thematic_summary = row["thematic_summary"] # Stuck to your name here
+            
+            # Check if this specific theme has orphans in the orphan_df
+            theme_orphans = orphans_df[(orphans_df["theme_id"] == theme_id) & (orphans_df["question_id"] == question_id)]
+            
+            if not theme_orphans.empty:
+                # Fetch the actual text for the orphans from self.state.insights
+                orphan_data = self.state.insights[self.state.insights["insight_id"].isin(theme_orphans["insight_id"])]
+                orphan_insights_for_theme_str = "\n".join([f"- {r['insight']}" for _, r in orphan_data.iterrows()])
+                
+                if thematic_summary != "" and thematic_summary is not None:
+                    sys_prompt = Prompts().integrate_orphans()
+                    user_prompt = (
+                        f"RESEARCH QUESTION: {question_text}\n"
+                        f"THEME LABEL: {theme_label}\n"
+                        "THEME DESCRIPTION:\n"
+                        f"{theme_description}\n"
+                        "ORIGINAL SUMMARY:\n"
+                        f"{thematic_summary}\n"
+                        "ORPHAN INSIGHTS:\n"
+                        f"{orphan_insights_for_theme_str}\n\n"
+                    )
+                    fall_back = {"updated_summary": thematic_summary}
+                    json_schema = {
+                        "name": "orphan_integrator",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "updated_summary": {"type": "string"}
+                            },
+                            "required": ["updated_summary"],
+                            "additionalProperties": False
+                        }
+                    }
+                    response = utils.call_chat_completion(
+                        sys_prompt=sys_prompt,
+                        user_prompt=user_prompt,
+                        llm_client=self.llm_client,
+                        ai_model=self.ai_model,
+                        fall_back=fall_back,
+                        return_json=True,
+                        json_schema=json_schema
+                    )
+                    
+                    # Create the result row using your schema
+                    updated_row = pd.DataFrame([{
+                        "thematic_summary": response.get("updated_summary", thematic_summary),
+                        "question_id": question_id,
+                        "theme_id": theme_id,
+                        "theme_label": theme_label,
+                        "theme_description": theme_description,
+                        "question_text": question_text
+                    }])
+                else:
+                    updated_row = pd.DataFrame([row])
+            else:
+                # If no orphans for this theme, just use the original row
+                updated_row = pd.DataFrame([row])
+
+            updated_summary_df_lst.append(updated_row)
+                
+        # Final result contains one row per theme with orphans integrated
+        theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
+        # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative in the correct order
+        theme_no_orphans = theme_no_orphans.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+
+        return(theme_no_orphans)
+
+    def address_orphans(self):
+
+        # Check whether themes have been populated at all before running this function. If not make the user run populate_themes first.
+        if self.populated_theme_list is None or len(self.populated_theme_list) == 0:
+            raise ValueError("No populated themes found. Please run populate_themes() first.")
+        
+        # Now check if an orphan pass has already been run and whether the user just wants to reload or run again on the lastest populated themes
+        if self.orphans_list is not None and len(self.orphans_list) > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Orphan insights have already been identified and addressed. Do you want to:\n"
+                    "(1) reload the existing addressed orphans\n"
+                    "(2) re-run the orphan identification and addressing process on the current populated themes (NOTE:this will overwrite the existing addressed orphans)? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+            if new == "1":
+                print(
+                    "Addressed orphans loaded. Inspect them via variable.orphans_list[-1]\n"
+                )
+                return(None) # Return to exit the function and avoid re-running the process
+            else:
+                print("Re-running orphan identification and addressing process...")
+                # Set the orphans list to the length of the populated theme list minus one so that we are running on the last populated themes and our run lengths match
+                self.orphans_list = self.orphans_list[:len(self.populated_theme_list) - 1]
+
+        orphans_df = self._identify_orphans()
+        self.orphans_list.append(orphans_df)
+
+        if orphans_df.shape[0] == 0:
+            print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
+            return(self.populated_theme_list[-1])
+        else:
+            updated_summary_df = self._integrate_orphans(orphans_df)
+            self.populated_theme_list[-1] = updated_summary_df
+            os.makedirs(self.summary_save_location, exist_ok=True)
+            for idx, df in enumerate(self.populated_theme_list):
+                df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+            return(self.populated_theme_list[-1])
+        
+    
+    def address_redundancy(self) -> pd.DataFrame:
+        # Ensure ordering is respected for the narrative flow
+        ordered_themes = self.populated_theme_list[-1].sort_values(by=["question_id", "theme_order"])
+        refined_rows = []
+
+        for q_id, q_group in ordered_themes.groupby("question_id"):
+            previous_theme_text = "" # Reset for each Research Question
+            
+            for _, row in q_group.iterrows():
+                # Prepare the Payload
+                question_text = row["question_text"]
+                theme_label = row["theme_label"]
+                current_theme_text = row["thematic_summary"]
+
+                # System Prompt (Your structural version)
+                sys_prompt = Prompts().address_redundancy()
+                
+                # User Prompt (Matching your INPUT FORMAT)
+                user_prompt = (
+                    f"RESEARCH QUESTION: {question_text}\n"
+                    f"THEME LABEL: {theme_label}\n"
+                    f"PREVIOUSLY CLEANED THEMES:\n{previous_theme_text if previous_theme_text else 'None.'}\n\n"
+                    f"CURRENT THEME TO REFINE:\n{current_theme_text}"
+                )
+
+                # Execute the reduction
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    return_json=True,
+                    json_schema={
+                        "name": "redundancy_reduction",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "properties": {"refined_theme": {"type": "string"}},
+                            "required": ["refined_theme"],
+                            "additionalProperties": False
+                        }
+                    }
+                )
+
+                refined_text = response.get("refined_theme", current_theme_text)
+                
+                # Update context for the next theme in this RQ
+                previous_theme_text += f"\n\n{refined_text}"
+
+                # Preserve the row data
+                refined_row = row.copy()
+                refined_row["thematic_summary"] = refined_text
+                refined_rows.append(refined_row)
+
+        # Push to State
+        refined_df = pd.DataFrame(refined_rows)
+        self.populated_theme_list.append(refined_df)
+        return refined_df
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

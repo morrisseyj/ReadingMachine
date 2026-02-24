@@ -13,7 +13,7 @@ from docx import Document
 import json
 
 
-class Summaries:
+class Render:
     def __init__(
         self, 
         llm_client: Any,

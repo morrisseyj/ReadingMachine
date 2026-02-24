@@ -1,6 +1,6 @@
 from typing import List
 
-from lit_review_machine import core, utils, state
+from lit_review_machine import core, utils, state, render
 
 
 from dotenv import load_dotenv
@@ -12,11 +12,12 @@ import pandas as pd
 
 #---------
 import importlib
-from lit_review_machine import core, utils, state
+from lit_review_machine import core, utils, state, render
 
 importlib.reload(utils)
 importlib.reload(core)
 importlib.reload(state)
+importlib.reload(render)
 
 
 #---------
@@ -167,8 +168,26 @@ summarize = core.Summarize(state=latest_state,
 # Specifically we calculate the shortest path between the cluster centroids and feed them to the LLM in that order with already summarized clusters passed as frozen context for the next summariation
 # This maximizes semantic coherence when asking the LLM to summarize clusters and will better enable conceptual coheremce when we undertake theme mapping
 summarize.summarize_clusters()
-# Next we move to map themes
+# Next we build a schema of the themes that will be used to allocate insight to themes
+summarize.gen_theme_schema()
+# Then we apply the schema to actually map the insights to themes
+summarize.map_insights_to_themes()
+# Then we populate the themes based on the insights that have been allocated to them bu the mapping process
+summarize.populate_themes()
+# Then we check for any orphans that might have been dropped in the process - this captures insights that might not have been exposed via the cluster summaries that drove the firt mapping process
+summarize.address_orphans()
 
+# Now we iterate the above process to improve the schema - so that orphans are likely accounted for in a more complete manner than was possible with the cluster summaries
+summarize.gen_theme_schema()
+summarize.map_insights_to_themes()
+summarize.populate_themes()
+
+# Finally we handle redundancy
+summarize.address_redundancy()
+
+#THen we pass the output of the redudancy check to the render class
+
+render.Render()
 
 
 
