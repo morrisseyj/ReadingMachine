@@ -1,8 +1,8 @@
 # Import custom libraries and modules
-from state import QuestionState
-from prompts import Prompts
-import config
-import utils
+from lit_review_machine.state import QuestionState
+from lit_review_machine.prompts import Prompts
+import lit_review_machine.config
+import lit_review_machine.utils
 
 # Import standard libraries
 from typing import Any, Dict, List, Optional, Tuple, Union

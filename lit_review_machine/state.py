@@ -339,11 +339,11 @@ class QuestionState:
                         )
                 setattr(self, attr_name, attr_value)
 
-    def normalize_list_columns(self, columns):
-        for attr_name, attr_value in self.__dict__.items():
-            if isinstance(attr_value, pd.DataFrame):
-                for col in columns:
-                    if col in attr_value.columns:
-                        attr_value[col] = attr_value[col].apply(utils.ensure_list_of_strings)
-                setattr(self, attr_name, attr_value)
+    # def normalize_list_columns(self, columns):
+    #     for attr_name, attr_value in self.__dict__.items():
+    #         if isinstance(attr_value, pd.DataFrame):
+    #             for col in columns:
+    #                 if col in attr_value.columns:
+    #                     attr_value[col] = attr_value[col].apply(utils.ensure_list_of_strings)
+    #             setattr(self, attr_name, attr_value)
      

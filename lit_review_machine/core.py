@@ -3,18 +3,17 @@
 
 from lit_review_machine import config, utils
 from lit_review_machine.state import QuestionState
-from lit_review_machine.render import Summaries
+from lit_review_machine.render import Render
 from lit_review_machine.prompts import Prompts
 
 # import standard libraries
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 import pandas as pd
 import numpy as np
 from copy import deepcopy
 import os
 from pathlib import Path
 from collections import defaultdict
-import json
 import pymupdf
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -26,6 +25,7 @@ from sklearn.cluster import HDBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 import itertools
 import networkx as nx
+import math
 
 
 class Ingestor:
@@ -1636,13 +1636,13 @@ class Summarize:
 
         # Reload any runs that might have already happened, or create place holders for that data. 
         # These are in a different form to state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
-        self.cluster_summary_list = self._reload_summary_outputs("cluster_summary") 
-        self.theme_schema_list = self._reload_summary_outputs("theme_schema")
-        self.mapped_theme_list = self._reload_summary_outputs("mapped_theme")
-        self.populated_theme_list = self._reload_summary_outputs("populated_theme")
-        self.orphans_list = self._reload_summary_outputs("orphans")
-        self.redundancy = self._reload_summary_outputs("redundancy_pass")      
-        
+        self.cluster_summary_list = self._reload_summary_outputs(config.cluster_summaries) # List of len(1) containing the cluster summaries
+        self.theme_schema_list = self._reload_summary_outputs(config.theme_schemas) # List of len(n) containing the theme schemas for each re-theming pass
+        self.mapped_theme_list = self._reload_summary_outputs(config.mapped_themes) # List of len(n) containing the mapped themes for each theme mapping pass
+        self.populated_theme_list = self._reload_summary_outputs(config.populated_themes) # List of len(n) containing the populated themes for each theme population pass
+        self.orphans_list = self._reload_summary_outputs(config.orphans) # List of len(n) containing the orphaned insights for each theme population pass
+        self.redundancy = self._reload_summary_outputs(config.redundancy_pass) # List of len(1) containing the output of the final redundancy pass
+
         # Ensure summary save location exists
         if not os.path.exists(self.summary_save_location):
             os.makedirs(self.summary_save_location, exist_ok=True)
@@ -1670,7 +1670,7 @@ class Summarize:
         paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
 
         if not paths:
-            return None
+            return []
 
         # 2. Sort by creation/birth time
         # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
@@ -1705,39 +1705,49 @@ class Summarize:
                 # deletes the file between globbing and unlinking
                 file_path.unlink(missing_ok=True)
 
-    def _calculate_summary_length(self) -> pd.DataFrame:
-        """
-        Calculate approximate word length for each cluster relative to the total paper
+    
+    #### I DON"T THINK I WANT THIS ANYMORE BECAUSE I DON"T CARE ABOUT THE CLUSTER SUMMARIES, ONLY THE THEME SUMMARIES. 
+    # def _calculate_summary_length(self) -> pd.DataFrame:
+    #     """
+    #     Allocate summary length proportionally by insight count
+    #     and enforce a 300-word minimum per theme.
+    #     """
 
-        Returns:
-            DataFrame of insights with additional 'length_str' column for prompting the LLM.
-        """
-        # Count number of insights per cluster
-        length_df: pd.DataFrame = (
-            self.state.insights
-            .dropna(subset = ["cluster"]) # remove any cases where chunks revealed no insights and therefore have no cluster
-            .groupby(["question_id", "cluster"])
-            .size()
-            .reset_index(name="count")
-        )
+    #     MIN_THEME_WORDS = 300
+    #     MAX_THEME_WORDS = 2800
 
-        # Compute proportion of total insights and allocate word length per cluster
-        length_df["prop"] = length_df["count"] / length_df["count"].sum()
-        length_df["length"] = length_df["prop"] * self.paper_output_length
-        length_df["length_str"] = np.where(
-            length_df["length"] > 2800,
-            "2800 words (approx 4000 tokens)",
-            length_df["length"].astype(int).astype(str) + " words"
-        )
+    #     # Count insights per cluster
+    #     length_df: pd.DataFrame = (
+    #         self.state.insights
+    #         .dropna(subset=["cluster"])
+    #         .groupby(["question_id", "cluster"])
+    #         .size()
+    #         .reset_index(name="count")
+    #     )
 
-        # Merge length info back to original insights DataFrame
-        insights_with_length: pd.DataFrame = self.state.insights.merge(
-            length_df[["question_id", "cluster", "length_str"]],
-            how="left",
-            on=["question_id", "cluster"]
-        )
+    #     # Proportional allocation
+    #     length_df["prop"] = length_df["count"] / length_df["count"].sum()
+    #     length_df["raw_length"] = length_df["prop"] * self.paper_output_length
 
-        return insights_with_length
+    #     # Apply minimum floor (no renormalization)
+    #     length_df["length"] = length_df["raw_length"].clip(lower=MIN_THEME_WORDS)
+
+    #     # Optional max cap safeguard
+    #     length_df["length"] = length_df["length"].clip(upper=MAX_THEME_WORDS)
+
+    #     # Format for prompt
+    #     length_df["length_str"] = (
+    #         length_df["length"].astype(int).astype(str) + " words"
+    #     )
+
+    #     # Merge back into insights
+    #     insights_with_length: pd.DataFrame = self.state.insights.merge(
+    #         length_df[["question_id", "cluster", "length_str"]],
+    #         how="left",
+    #         on=["question_id", "cluster"]
+    #     )
+
+    #     return insights_with_length
 
     def _calculate_centroid(self, col="full_insight_embedding"):
         rows = []
@@ -1810,7 +1820,7 @@ class Summarize:
         return shortest_paths
     
 
-    def summarize_clusters(self) -> Summaries:
+    def summarize_clusters(self):
         """
         Generate summaries for all clusters across all research questions.
 
@@ -1830,7 +1840,7 @@ class Summarize:
             if new == "1":
                 print(
                     "Summaries loaded.\n" \
-                    "Summaries can be accessed via the cluster_summary_list attribute of this class. There is only one item in the list thus: `variable.cluster_summary_list[0]`."
+                    "Summaries can be accessed via the variable.cluster_summary_list attribute of this class. There is only one item in the list thus: `variable.cluster_summary_list[0]`."
                     )
                 return(None) # Return to exit the function and avoid re-running summarization
             else:
@@ -1848,14 +1858,11 @@ class Summarize:
         # It will also aid in the applicaion of the sliding window for summary clean up
         shortest_paths = self._estimate_shortest_path()
         
-        # Add calculated lengths to insights
-        self.state.insights = self._calculate_summary_length()
-        
         # Create list to populate with summaries from the LLM
         summaries_dict_lst: List[dict] = []
 
         # Get the numbers to show progress 
-        total_clusters = len(self.state.insights.groupby("question_id")["cluster"].nunique(dropna=False))
+        total_clusters = sum(len(shortest_paths[rq_id]["order"]) for rq_id in shortest_paths)
         count = 1
 
         # Loop over unique research questions
@@ -1866,14 +1873,13 @@ class Summarize:
 
             # Loop over clusters for this research question - in shortest path order
             for cluster in shortest_paths[rq_id]["order"]:
-                print(f"Summarizing cluster {cluster} for research question {rq_id} ({count} of {total_clusters})...")
+                print(f"Summarizing cluster {cluster} for research question {rq_id} (total progress: {count} of {total_clusters})...")
                 count += 1
                 # Skip any cases where chunks might have had no insights (and therefore no cluster)
                 if pd.isna(cluster) or cluster == "NA":
                     continue
 
                 cluster_df: pd.DataFrame = rq_df[rq_df["cluster"] == cluster]
-                length_str: str = cluster_df["length_str"].iloc[0]
                 # get the insights, they are list of single strings. So make sure they are valid string to send to the LLM
                 insights: List[str] = cluster_df["insight"].apply(
                     lambda x: x if isinstance(x, str) else (
@@ -1884,7 +1890,7 @@ class Summarize:
                     raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
 
                 # Build system prompt from predefined method
-                sys_prompt: str = Prompts().summarize(summary_length=length_str)
+                sys_prompt: str = Prompts().summarize_clusters()
 
                 # Get the summaries frozen so far if there are any
                 frozen_summaries = pd.DataFrame(summaries_dict_lst)["summary"].tolist() if summaries_dict_lst else []
@@ -1939,12 +1945,12 @@ class Summarize:
 
         # Save summaries as this is LLM output we may want to reuse later - save as parquet
         os.makedirs(self.summary_save_location, exist_ok=True)
-        [i.to_parquet(os.path.join(self.summary_save_location, "cluster_summary.parquet")) for i in self.cluster_summary_list]
+        [i.to_parquet(os.path.join(self.summary_save_location, config.cluster_summaries + ".parquet")) for i in self.cluster_summary_list]
 
         return self.cluster_summary_list
     
 
-    def gen_theme_schema(self, save_file_name="theme_schema.parquet") -> pd.DataFrame:
+    def gen_theme_schema(self) -> pd.DataFrame:
         # First check that summaries exist
         if self.cluster_summary_list is None or len(self.cluster_summary_list) == 0:
             raise ValueError("No summaries found. Please run summarize() first.")
@@ -1953,7 +1959,7 @@ class Summarize:
         # There are actually three options here: 1) start the mapping process afresh, 2) load previously generated maps, 3) run another mapping iteration on top of a populated theme. We have to handle all
         # First we check if there are theme maps (which get loaded on class init if they exist)
         new = None
-        if self.theme_map_list is not None and len(self.theme_map_list) > 0:
+        if self.theme_schema_list is not None and len(self.theme_schema_list) > 0:
             while new not in ['1', '2', '3']:
                 new = input("Theme mapping already exists. " \
                 "Theme maps already exist. Please select what you want to do:\n" \
@@ -1963,7 +1969,7 @@ class Summarize:
                 "Enter either 1, 2, or 3:\n").lower()
             
             if new == '1':
-                print("Theme mapping available via .theme_map_list, orderd by creation time if multiple exist.")
+                print("Theme mapping available via .theme_schema_list, orderd by creation time if multiple exist.")
                 return(None)
             
             elif new == '2':
@@ -1989,7 +1995,7 @@ class Summarize:
         # First check new or full re-write. 
         if new == '1' or self.theme_schema_list is None or new == '2':
             # Grab data from summaries
-            source_df = self.summaries_list[0]
+            source_df = self.cluster_summary_list[0]
             source_df.rename(columns={"cluster": "id", "summary": "text_to_theme"}, inplace=True)
         else:
             # if its an iteration we get data from the last populated theme and convert the columsn to a generic form to send to the llm
@@ -1998,7 +2004,8 @@ class Summarize:
         
         out_df_list = []
 
-        for _, row in self.state.questions.iterrows():
+        for idx, row in self.state.questions.iterrows():
+            print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.state.questions)})...")
             question_id = row["question_id"]
             question_text = row["question_text"]
             rq_df = source_df[source_df["question_id"] == question_id].copy()
@@ -2066,114 +2073,162 @@ class Summarize:
         # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
         output["theme_id"] = [i + 1 for i in range(len(output))] 
         # Append to the list of schemas
+        self.theme_schema_list = [] if self.theme_schema_list is None else self.theme_schema_list
         self.theme_schema_list.append(output)
         # Save all the schemas in the list to capture the new one and maintain the order on disk in case we need to reload later for any reason
-        os.makedirs(save_dir, exist_ok=True)
+        os.makedirs(self.summary_save_location, exist_ok=True)
         for idx, df in enumerate(self.theme_schema_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"theme_schema_{idx+1}.parquet"))
+            df.to_parquet(os.path.join(self.summary_save_location, f"{config.theme_schemas}_{idx+1}.parquet"))
 
         return self.theme_schema_list[-1]
 
     
     def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
-        #### RESUMPTION/RECOVER/REPOPULATE LOGIC #### ---------------------------
+        #### --------------------------------------------------
+    #### RESUMPTION / RECOVERY LOGIC
+    #### --------------------------------------------------
 
-        # First check whether a partial mapping took place - this is a process with a large number of calls so we are going to log to pickle as we go so that resume is possible
-        # Create a default variable that can be populated if partial run exists
         mapped_insights_df_list = None
-        
-        # Now check for pickle file
-        if os.path.exists(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle")):
-            resume = None
-            while resume not in ["1", "2"]:
-                resume = input("A partial mapping process was detected. Do you want to:\n"
-                               "1) resume from the last saved point? \n"
-                               "2) start a new mapping process? \n"
-                               "Enter 1 or 2:\n").lower()
-            if resume == "1":
-                with open(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"), "rb") as f:
+        already_mapped_insight_ids = []
+
+        in_progress_path = os.path.join(
+            self.summary_save_location,
+            "mapped_theme_in_progress.pickle"
+        )
+
+        # Check for existing in-progress file
+        if os.path.exists(in_progress_path):
+
+            resume_choice = None
+            while resume_choice not in ["1", "2"]:
+                resume_choice = input(
+                    "A partial mapping process was detected. Do you want to:\n"
+                    "1) resume from the last saved point? \n"
+                    "2) start a new mapping process? \n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+
+            if resume_choice == "1":
+                with open(in_progress_path, "rb") as f:
                     mapped_insights_df_list = pickle.load(f)
-                    mapped_insights = pd.concat(mapped_insights_df_list, ignore_index=True)["insight_id"].tolist()
-                    
+
+                if mapped_insights_df_list:
+                    recovered_df = pd.concat(
+                        mapped_insights_df_list,
+                        ignore_index=True
+                    )
+                    already_mapped_insight_ids = (
+                        recovered_df["insight_id"].unique().tolist()
+                    )
+
                 print("Resuming mapping process from last saved point...")
 
             else:
-                print("Starting new mapping process and deleting the in progress pickle...")
-                os.remove(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"))
+                os.remove(in_progress_path)
+                print("Deleted in-progress file. Starting new mapping process.")
 
-        # Then check that theme schema exists
+        #### --------------------------------------------------
+        #### PRE-RUN VALIDATION
+        #### --------------------------------------------------
+
         if self.theme_schema_list is None or len(self.theme_schema_list) == 0:
-            raise ValueError("No theme schema found. Please run gen_theme_schema() first.")
-        
-        # Then check that theme mapping is not ahead of theme population (as you don't want to map multiple times without populating)
-        if len(self.theme_schema_list) > len(self.populated_theme_list):
-            raise ValueError("Your theme schema is already ahead of your theme population. Please run populate_themes() before mapping insights to themes.")
-        
-        # Now check whether the user just want to re-load thier existing mappings of re-run the mapping on the latest schema
+            raise ValueError(
+                "No theme schema found. Please run gen_theme_schema() first."
+            )
+
+        if len(self.populated_theme_list) > len(self.theme_schema_list):
+            raise ValueError(
+                "Your populated themes are already the same length or ahead "
+                "of your theme schema. Please run populate_themes() before mapping."
+            )
+
+        # Check if mappings already exist
         if self.mapped_theme_list is not None and len(self.mapped_theme_list) > 0:
-            new = None
-            while new not in ["1", "2"]:
-                new = input(
+
+            new_choice = None
+            while new_choice not in ["1", "2"]:
+                new_choice = input(
                     "Mapped themes already exist on disk. Do you want to:\n"
                     "(1) reload existing mapped themes\n"
-                    "(2) remap insights to the current themes again (NOTE:this will overwrite existing mapped themes)? \n"
+                    "(2) remap insights to the current themes again "
+                    "(NOTE: this will overwrite existing mapped themes)? \n"
                     "Enter 1 or 2:\n"
-                ).lower()
-            if new == "1":
-                print(
-                    "Mapped themes loaded. Inspect them via variable.mapped_theme_list[-1]\n"
-                )
-                return(None) # Return to exit the function and avoid re-running the mapping
-            else:
-                # If re-running make sure that the number of theme maps is equal to the one less than the number of schemas (so we are mapping to the last one)
-                schema_len = len(self.theme_schema_list)
-                self.mapped_theme_list = self.mapped_theme_list[:schema_len - 1]             
+                ).strip()
 
-        #### MAPPING LOGIC ####----------------------------
-        # create the output for the loop using the recovered list if it exists, otherwise create an empty list to populate with the mapping results as we go
-        mapped_insights_df_list = [] if mapped_insights_df_list is None else mapped_insights_df_list
-        # Create a temporary copy of the insights to work with so that we can drop mapped insights as we go without affecting the original state
+            if new_choice == "1":
+                print(
+                    "Mapped themes loaded. Inspect them via "
+                    "variable.mapped_theme_list[-1]"
+                )
+                return None
+
+            # Trim to match schema state
+            schema_len = len(self.theme_schema_list)
+            self.mapped_theme_list = self.mapped_theme_list[: schema_len - 1]
+
+        #### --------------------------------------------------
+        #### MAPPING LOGIC
+        #### --------------------------------------------------
+
+        # Initialize list safely
+        if mapped_insights_df_list is None:
+            mapped_insights_df_list = []
+
+        # Work on a temporary copy
         temp_state_insights = self.state.insights.copy()
-        # If we are resuming we need to drop the already mapped insights
-        temp_state_insights = temp_state_insights[~temp_state_insights["insight_id"].isin(mapped_insights)] if mapped_insights_df_list is not None else temp_state_insights
-        
+
+        # Remove already mapped insights if resuming
+        if already_mapped_insight_ids:
+            temp_state_insights = temp_state_insights[
+                ~temp_state_insights["insight_id"].isin(
+                    already_mapped_insight_ids
+                )
+            ]
+
         # Iterate through each research question
         for _, q_row in self.state.questions.iterrows():
+
             question_id = q_row["question_id"]
             question_text = q_row["question_text"]
 
-            # Filter insights for this question and drop empty/NaN values immediately
+            # Filter insights for this question
             q_insights_df = temp_state_insights[
-                (temp_state_insights["question_id"] == question_id) & 
-                (temp_state_insights["insight"].notna()) & 
+                (temp_state_insights["question_id"] == question_id) &
+                (temp_state_insights["insight"].notna()) &
                 (temp_state_insights["insight"] != "")
             ].copy()
 
-            # Get the schema for this specific question
+            if q_insights_df.empty:
+                continue
+
+            # Get schema for this question
             q_schema_df = self.theme_schema_list[-1][
                 self.theme_schema_list[-1]["question_id"] == question_id
             ].copy()
-            q_schema_json = q_schema_df[["id", "label", "criteria"]].to_json(orient="records", indent=2)
 
-            # create json schema for the llm call so i don't recreate it every call
+            q_schema_json = q_schema_df[
+                ["theme_id", "theme_label", "instructions"]
+            ].to_json(orient="records", indent=2)
+
+            # Pre-build JSON schema (explicit)
             json_schema = {
                 "name": "insight_to_theme_mapper",
                 "strict": True,
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "mapped_data": { # Match prompt: "mapped_data"
+                        "mapped_data": {
                             "type": "array",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "insight_id": {"type": "string"},
-                                    "theme_ids": { # Match prompt: "theme_ids"
+                                    "theme_id": {
                                         "type": "array",
                                         "items": {"type": "string"}
                                     }
                                 },
-                                "required": ["insight_id", "theme_ids"],
+                                "required": ["insight_id", "theme_id"],
                                 "additionalProperties": False
                             }
                         }
@@ -2182,110 +2237,194 @@ class Summarize:
                     "additionalProperties": False
                 }
             }
-            
-            # CHUNKING LOGIC: Process the filtered insights in batches
-            for i in range(0, len(q_insights_df), batch_size):
-                batch_df = q_insights_df.iloc[i : i + batch_size]
-                
-                # Format insights for the prompt: "id: text"
-                current_batch_str = "\n".join(
-                    [f"{row.insight_id}: {row.insight}" for row in batch_df.itertuples()]
+
+            # Calculate total batches for this question
+            total_batches_for_question = math.ceil(
+                len(q_insights_df) / batch_size
+            )
+
+            # Batch loop
+            for batch_index, start_index in enumerate(
+                range(0, len(q_insights_df), batch_size),
+                start=1
+            ):
+
+                print(
+                    f"Mapping insights to themes for question "
+                    f"{question_id} - batch "
+                    f"{batch_index} of "
+                    f"{total_batches_for_question}..."
                 )
 
-                sys_prompt = self.theme_map_to_schema() # Assuming this is your prompt method
+                batch_df = q_insights_df.iloc[
+                    start_index : start_index + batch_size
+                ]
+
+                if batch_df.empty:
+                    continue
+
+                current_batch_str = "\n".join(
+                    f"{row.insight_id}: {row.insight}"
+                    for row in batch_df.itertuples()
+                )
+
+                sys_prompt = Prompts().theme_map_to_schema()
+
                 user_prompt = (
                     f"RESEARCH QUESTION: {question_text}\n"
                     "THEMATIC CODEBOOK:\n"
                     f"{q_schema_json}\n\n"
-                    f"INSIGHTS TO MAP:\n"
+                    "INSIGHTS TO MAP:\n"
                     f"{current_batch_str}\n\n"
                 )
 
-            response = utils.call_chat_completion(
-                sys_prompt=sys_prompt,  
-                user_prompt=user_prompt,
-                llm_client=self.llm_client,
-                ai_model=self.ai_model,
-                fall_back={"mappings": []}, # Match your schema key
-                return_json=True, 
-                json_schema=json_schema
-            )
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    fall_back={"mapped_data": []},
+                    return_json=True,
+                    json_schema=json_schema
+                )
 
-            # Convert response to DF and tag with metadata
-            batch_results_df = pd.DataFrame(response.get("mapped_data", []))
+                batch_results_df = pd.DataFrame(
+                    response.get("mapped_data", [])
+                )
 
-            if not batch_results_df.empty:
-                # 1. Assignment is required (explode is not in-place)
-                # 2. Use the correct key "theme_ids"
-                batch_results_df = batch_results_df.explode("theme_ids")
-                
+                if batch_results_df.empty:
+                    continue
+
+                # Expand theme_id
+                batch_results_df = batch_results_df.explode("theme_id")
                 batch_results_df["question_id"] = question_id
+
                 mapped_insights_df_list.append(batch_results_df)
 
-                with open(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"), "wb") as f:
+                # Save progress safely after each batch
+                with open(in_progress_path, "wb") as f:
                     pickle.dump(mapped_insights_df_list, f)
 
-        # Concat everything
+        #### --------------------------------------------------
+        #### FINALIZATION
+        #### --------------------------------------------------
+
         if not mapped_insights_df_list:
             mapped_insights_df = pd.DataFrame()
         else:
-            mapped_insights_df = pd.concat(mapped_insights_df_list, ignore_index=True)
+            mapped_insights_df = pd.concat(
+                mapped_insights_df_list,
+                ignore_index=True
+            )
 
         self.mapped_theme_list.append(mapped_insights_df)
+
         os.makedirs(self.summary_save_location, exist_ok=True)
-        # delete the in progress pickle as we have now saved the final output to the mapped theme list and we don't want to accidentally resume from a mid mapping point when we have a full mapping saved
-        if os.path.exists(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle")):
-            os.remove(os.path.join(self.summary_save_location, "mapped_theme_in_progress.pickle"))
 
-        for idx, i in enumerate(self.mapped_theme_list):
-            i.to_parquet(os.path.join(self.summary_save_location, f"mapped_themes_{idx+1}.parquet"), index=False)
+        # Remove in-progress file now that mapping is complete
+        if os.path.exists(in_progress_path):
+            os.remove(in_progress_path)
 
-        return(self.mapped_theme_list[-1])
+        # Persist parquet versions
+        for idx, df in enumerate(self.mapped_theme_list):
+            df.to_parquet(
+                os.path.join(
+                    self.summary_save_location,
+                    f"{config.mapped_themes}_{idx+1}.parquet"
+                ),
+                index=False
+            )
+
+        return self.mapped_theme_list[-1]
 
 
-    def _estimate_theme_lengths(self, paper_len: int):
-        # 1. Get the full list of expected themes from the schema
-        full_schema = self.theme_schema_list[-1][["question_id", "theme_id"]].copy()
+    def _estimate_theme_lengths(self, paper_len: int, max_model_output_words: int = 2800) -> pd.DataFrame:
 
-        # 2. Get the count of insights mapped to each theme
-        theme_counts = self.mapped_theme_list[-1].copy()
-        theme_counts = theme_counts.groupby(["question_id", "theme_id"]).size().reset_index(name="count")
+        MIN_THEME_WORDS = 375
+        MAX_THEME_WORDS = max_model_output_words
 
-        # 3. Merge schema with counts so themes with 0 insights are included as NaN
-        theme_counts = full_schema.merge(theme_counts, on=["question_id", "theme_id"], how="left")
+        # --- Full list of expected themes (anchor) ---
+        full_schema = (
+            self.theme_schema_list[-1][["theme_id"]]
+            .copy()
+            .astype({"theme_id": str})
+            .drop_duplicates()
+        )
+
+        # --- Count mapped insights per theme ---
+        theme_counts = (
+            self.mapped_theme_list[-1]
+            .copy()
+            .astype({"theme_id": str})
+            .groupby("theme_id")
+            .size()
+            .reset_index(name="count")
+        )
+
+        # --- Merge to preserve zero-hit themes ---
+        theme_counts = full_schema.merge(
+            theme_counts,
+            on="theme_id",
+            how="left"
+        )
+
         theme_counts["count"] = theme_counts["count"].fillna(0)
 
-        # 4. Calculate total insights per question (for proportions)
-        total_counts = theme_counts.groupby("question_id")["count"].sum().reset_index(name="total_count")
+        # --- Compute global proportions ---
+        total_count = theme_counts["count"].sum()
 
-        # 5. Merge total counts back
-        theme_counts = theme_counts.merge(total_counts, on="question_id")
+        if total_count > 0:
+            theme_counts["proportion"] = (
+                theme_counts["count"] / total_count
+            )
+        else:
+            theme_counts["proportion"] = 0
 
-        # 6. Calculate proportion and allocate length
-        # Use np.where to handle the division by zero case if a question has NO insights at all
-        theme_counts["proportion"] = np.where(
-            theme_counts["total_count"] > 0, 
-            theme_counts["count"] / theme_counts["total_count"], 
-            0
+        # --- Allocate proportionally ---
+        theme_counts["allocated_length"] = np.ceil(
+            theme_counts["proportion"] * paper_len
+        ).astype(int)
+
+        # --- Apply hard floor and hard ceiling ---
+        theme_counts["allocated_length"] = (
+            theme_counts["allocated_length"]
+            .clip(lower=MIN_THEME_WORDS, upper=MAX_THEME_WORDS)
         )
-        
-        theme_counts["allocated_length"] = np.ceil(theme_counts["proportion"] * paper_len).astype(int)
 
-        # Ensure even themes with 0 hits have a 0 integer value (redundant but safe)
-        theme_counts["allocated_length"] = theme_counts["allocated_length"].fillna(0).astype(int)
+        return theme_counts[["theme_id", "allocated_length"]]
 
 
     def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float) -> pd.DataFrame:
-        # Take a dataframe and check whether the current lengh of the summary exceeds some proportion of the allocated length
-        df["length_flag"] = df.apply(
-            lambda row: 0 if row["current_length"] <= row["allocated_length"] * max_prop else 1,
-            axis=1
-        )
-        # Return two dataframes - one with the flagged themes and one with the themes that are within the length limits so that they can be treated differently in the next steps
+        """
+        Flag themes whose current length exceeds a given proportion of their allocated length,
+        except when:
+        - allocated_length == 2800 (model ceiling)
+        - current_length is NaN (treated as not flagged)
+        """
+
+        MAX_THEME_WORDS = 2800
+
+        def flag_row(row):
+            # Treat missing summaries as not flagged
+            if pd.isna(row["current_length"]):
+                return 0
+
+            # Do not flag if theme is already at hard ceiling
+            if row["allocated_length"] == MAX_THEME_WORDS:
+                return 0
+            
+            # Standard proportional check
+            if row["current_length"] <= row["allocated_length"] * max_prop:
+                return 0
+            else:
+                return 1
+
+        df["length_flag"] = df.apply(flag_row, axis=1)
+
         df_len_ok = df[df["length_flag"] == 0]
         df_len_flagged = df[df["length_flag"] == 1]
-        
-        return(df_len_ok, df_len_flagged)
+
+        return df_len_ok, df_len_flagged
     
     def _run_theme_pop(self, 
                        schema_df: pd.DataFrame,
@@ -2294,8 +2433,16 @@ class Summarize:
 
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
+        # Normalise the id columsn as they come back from the LLM so could be str
+        schema_df["question_id"] = schema_df["question_id"].astype(str)
+        schema_df["theme_id"] = schema_df["theme_id"].astype(str)
+        
         if "allocated_length" not in schema_df.columns:
-            schema_df = schema_df.merge(self._estimate_theme_lengths(paper_len), on=["question_id", "theme_id"], how="left")
+            schema_df = schema_df.merge(
+            self._estimate_theme_lengths(paper_len),
+            on="theme_id",
+            how="left"
+        )
 
         # Iterate over the themes from the schema to get the data for the LLM call
         populated_themes = []
@@ -2462,24 +2609,85 @@ class Summarize:
         self.populated_theme_list.append(df_len_ok)
         os.makedirs(self.summary_save_location, exist_ok=True)
         for idx, df in enumerate(self.populated_theme_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+            df.to_parquet(os.path.join(self.summary_save_location, f"{config.populated_themes}_{idx+1}.parquet"), index=False)
 
         return self.populated_theme_list[-1]
 
 
     def _identify_orphans(self, batch_size=75) -> pd.DataFrame:
-        
-        question_insights_found_df_list = []
-        
-        for _, row in self.populated_theme_list[-1].iterrows():
-            t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
-            
-            theme_map = self.mapped_theme_list[-1]
-            relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
-            relevant_insights = self.state.insights[self.state.insights["insight_id"].isin(relevant_ids)]
 
-            theme_insights_found = []
+        pickle_resume_path = os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_identification_in_progress.pickle")
+        checked_insights_df = None
+
+        # First check whether there was a orphan audit in progress. If there was, offer the option to resume
+
+        if os.path.exists(pickle_resume_path):
+            resume = None
+            while resume not in ["1", "2"]:
+                resume = input("A partial orphan identification process was detected. Do you want to:\n"
+                               "1) resume from the last saved point? \n"
+                               "2) start a new orphan identification process? \n"
+                               "Enter 1 or 2:\n").lower()
+            if resume == "1":
+                with open(pickle_resume_path, "rb") as f:
+                    checked_insights_df = pickle.load(f)
+                print("Resuming orphan identification process from last saved point...")
+
+            else:
+                print("Starting new orphan identification process and deleting the in progress pickle...")
+                os.remove(pickle_resume_path)
+
+        # Now check if they want to reload previously saved orphan audits or if they want to iterate the process
+
+        if self.orphans_list is not None and len(self.orphans_list) > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Previously identified orphans already exist on disk. Do you want to:\n"
+                    "(1) reload existing orphan identification audits\n"
+                    "(2) re-run the orphan identification process on the current populated themes (NOTE:this will overwrite then most recent orphan audit and any subsequent audits)? \n"
+                    "Enter 1 or 2:\n"
+                ).lower()
+            if new == "1":
+                print(
+                    "Orphan audits loaded. Inspect them via variable.orphans_list[-1]\n"
+                )
+                return(None) # Return to exit the function and avoid re-running the process
+            else:
+                # If re-running make sure that the number of orphan audits does not exceed the number of populated themes as we don't want to run repeated audits without populating new themes in between
+                if len(self.orphans_list) >= len(self.populated_theme_list):
+                    raise ValueError(
+                        "Your existing orphan audits are already equal to or ahead of your current populated themes. " 
+                        "Please run populate_themes() to generate new populated themes before re-running the orphan identification process."
+                    )
+                
+                                    
+                # Now delete the orphan list that we are overwriting and any subsequent ones to make sure the user doesn't accidentally reload an audit that is ahead of their current populated themes in the future which would cause confusion. We don't delete the orphan audits that are behind the current populated theme because they are still valid for those themes and it might be useful to keep them for reference or comparison.
+                self.orphans_list = self.orphans_list[:len(self.populated_themes_list)- 1]
+                print("Re-running orphan identification process...")
+        
+        
+        total_batches_to_check = len(self.mapped_theme_list[-1]) // batch_size + 1
+        count = (checked_insights_df.shape[0] // batch_size) + 1 if checked_insights_df is not None else 0
+        # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
+        checked_insights_df = pd.DataFrame(columns=["question_id", "theme_id", "insight_id", "found"]) if checked_insights_df is None else checked_insights_df
+        checked_insight_id_list = checked_insights_df["insight_id"].tolist() if not checked_insights_df.empty else []
+        
+        # Now call the loop on these temp dataframes which will allow me to skip the insights that have already been checked and saved in the checked_insights_df which is being updated and saved to pickle as we go to allow for resumption if the process is interupted
+        for _, row in temp_populated_theme_df.iterrows():
+            # This runs question by question so first we iterate over those
+            t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
+            # Then we get the insights that were iniitally allocaed to that question - as we are checking whether these got allocated
+            theme_map = temp_theme_map
+            relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
+            relevant_insights = self.state.insights[
+                (self.state.insights["insight_id"].isin(relevant_ids)) & # Get the insight text for the insight_ids that were mapped
+                (~self.state.insights["insight_id"].isin(checked_insight_id_list)) # SKIP checked insights
+            ].dropna(subset=["insight_id"]).copy()
+
             for i in range(0, len(relevant_insights), batch_size):
+                print(f"Checking insights for theme {t_id} and question {q_id}, batch {count} of {total_batches_to_check}...")
+                count += 1
                 batch = relevant_insights.iloc[i : i + batch_size]
                 insight_str = "\n".join(f"{rid}: {itxt}" for rid, itxt in zip(batch["insight_id"], batch["insight"]))
 
@@ -2493,7 +2701,7 @@ class Summarize:
                 fall_back = {"mentioned_insight_ids": []}
                 json_schema = {
                     "name": "mention_audit",
-                    "strict": true,
+                    "strict": True,
                     "schema": {
                         "type": "object",
                         "properties": {
@@ -2506,7 +2714,7 @@ class Summarize:
                         }
                         },
                         "required": ["mentioned_insight_ids"],
-                        "additionalProperties": false
+                        "additionalProperties": False
                         }
                     }
 
@@ -2519,32 +2727,64 @@ class Summarize:
                     return_json=True,
                     json_schema=json_schema
                 )
+                # get all the found insights as sets for subtraction to get missed insights (i.e. orphans)
+                insights_found = response.get("mentioned_insight_ids", [])
+                insights_found_set = set(insights_found)
+                insights_found_set = {str(i) for i in insights_found}
+                # Get the batch to a set of strings to match the found insights set
+                batch_set = set(batch["insight_id"].tolist())
+                batch_set = {str(i) for i in batch["insight_id"]}
+                # Get the missed insights - the orphans
+                insights_missed_set = batch_set - insights_found_set
+                insights_missed = list(insights_missed_set)
+                # create separate dfs with diff bool conditions for found
+                batch_found_df = pd.DataFrame({
+                    "question_id": q_id,
+                    "theme_id": t_id,
+                    "insight_id": list(insights_missed),
+                    "found": False
+                })   
+                batch_missed_df = pd.DataFrame({
+                    "question_id": q_id,
+                    "theme_id": t_id,
+                    "insight_id": insights_found,
+                    "found": True
+                })
+                # Get all the results together for the batch
+                batch_results_df = pd.concat([batch_found_df, batch_missed_df], ignore_index=True)
+                # Append the batch to the list
+                checked_insights_df = pd.concat([checked_insights_df, batch_results_df], ignore_index=True)
+                # save the checked insights to pickle to allow for resume if the process crashes
+                os.makedirs(config.PICKLE_SAVE_LOCATION, exist_ok=True)
+                with open(os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_check_in_progress.pickle"), "wb") as f:
+                    pickle.dump(checked_insights_df, f)
 
-                theme_insights_found.extend(response.get("mentioned_insight_ids", []))
+        orphans_df = checked_insights_df[checked_insights_df["found"] == False].copy()
 
-            found_df = pd.DataFrame(theme_insights_found, columns=["insight_id"])
-            found_df["theme_id"], found_df["question_id"] = t_id, q_id
-            question_insights_found_df_list.append(found_df)
-        
-        question_insights_found_df = pd.concat(question_insights_found_df_list, ignore_index=True)
+        self.orphans_list.append(orphans_df)
+        # Save the orphans to disk so that they can be inspected and used for the next step of integrating them back into the themes. We save them as a list of dataframes with one dataframe per populated theme run, as this allows us to maintain the order and progression of the runs and easily pick up where we left off if needed.
+        os.makedirs(self.summary_save_location, exist_ok=True) 
+        for idx, df in enumerate(self.orphans_list):
+            df.to_parquet(os.path.join(self.summary_save_location, f"{config.orphans}_{idx+1}.parquet"), index=False)
 
-        orphans_df = (
-            self.mapped_theme_list[-1][["insight_id", "question_id"]].merge(
-                question_insights_found_df[["insight_id", "question_id"]],  
-                on=["insight_id", "question_id"],
-                how="left",
-                indicator=True
-            ).query('_merge == "left_only"').drop(columns=["_merge"])
-        )
+        # Clear the resume pickle as the process is now saved as parquet
+        os.remove(pickle_resume_path)
 
         return(orphans_df)
     
     def _integrate_orphans(self, 
-                           orphans_df: pd.DataFrame) -> pd.DataFrame:
+                        orphans_df: pd.DataFrame) -> pd.DataFrame:
 
         updated_summary_df_lst = []
+        
+        # --- Added Counter Logic ---
+        populated_themes = self.populated_theme_list[-1]
+        total_themes = len(populated_themes)
+        count = 1
+        # ---------------------------
+
         # Iterate over your populated themes (one row per theme)
-        for _, row in self.populated_theme_list[-1].iterrows():
+        for _, row in populated_themes.iterrows():
             theme_id = row["theme_id"]
             theme_label = row["theme_label"]
             question_id = row["question_id"]
@@ -2556,6 +2796,8 @@ class Summarize:
             theme_orphans = orphans_df[(orphans_df["theme_id"] == theme_id) & (orphans_df["question_id"] == question_id)]
             
             if not theme_orphans.empty:
+                print(f"Integrating orphans for theme {count} of {total_themes} (Theme ID: {theme_id})...")
+                
                 # Fetch the actual text for the orphans from self.state.insights
                 orphan_data = self.state.insights[self.state.insights["insight_id"].isin(theme_orphans["insight_id"])]
                 orphan_insights_for_theme_str = "\n".join([f"- {r['insight']}" for _, r in orphan_data.iterrows()])
@@ -2608,9 +2850,11 @@ class Summarize:
                     updated_row = pd.DataFrame([row])
             else:
                 # If no orphans for this theme, just use the original row
+                print(f"No orphans found for theme {count} of {total_themes}. Skipping integration.")
                 updated_row = pd.DataFrame([row])
 
             updated_summary_df_lst.append(updated_row)
+            count += 1 # Increment counter
                 
         # Final result contains one row per theme with orphans integrated
         theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
@@ -2652,6 +2896,7 @@ class Summarize:
             print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
             return(self.populated_theme_list[-1])
         else:
+            print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
             updated_summary_df = self._integrate_orphans(orphans_df)
             self.populated_theme_list[-1] = updated_summary_df
             os.makedirs(self.summary_save_location, exist_ok=True)
@@ -2745,95 +2990,95 @@ class Summarize:
 
 
 
-        # Utility function to estimate the length of each theme based on the number of insights mapped to it, relative to the total number of insights for that research question, and allocate a proportion of the total paper length to each theme accordingly. This will be used to prompt the LLM on how much to write for each theme when we get to the population stage.
+        # # Utility function to estimate the length of each theme based on the number of insights mapped to it, relative to the total number of insights for that research question, and allocate a proportion of the total paper length to each theme accordingly. This will be used to prompt the LLM on how much to write for each theme when we get to the population stage.
         
         
-        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
-        # Prior to doing the caluclation remove any wordcounts that might have been calculated on prior runs
-        self.theme_schema_list[-1] = self.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
-        # Then populate the new lengths and merge to the theme schema
-        self.theme_schema_list[-1] = (
-            self.theme_schema_list[-1].
-            merge(
-                self._estimate_theme_lengths(),
-                on=["question_id", "theme_id"],
-                how="left"
-                )
-            )
+        # # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
+        # # Prior to doing the caluclation remove any wordcounts that might have been calculated on prior runs
+        # self.theme_schema_list[-1] = self.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
+        # # Then populate the new lengths and merge to the theme schema
+        # self.theme_schema_list[-1] = (
+        #     self.theme_schema_list[-1].
+        #     merge(
+        #         self._estimate_theme_lengths(),
+        #         on=["question_id", "theme_id"],
+        #         how="left"
+        #         )
+        #     )
         
-        populated_themes = []    
-        for _, row in self.theme_schema_list[-1].iterrows():
-            rq_id = row["question_id"]
-            rq_text = row["question_text"]
-            theme_id = row["theme_id"]
-            theme_label = row["theme_label"]
-            theme_description = row["theme_description"]
-            allocated_length = row["allocated_length"]
-            insight_ids = self.mapped_theme_list[-1][
-                (self.mapped_theme_list[-1]["question_id"] == rq_id) & 
-                (self.mapped_theme_list[-1]["theme_id"] == theme_id)
-            ]["insight_id"].tolist()
-            insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
-            if len(insights) == 0:
-                no_insight_df = pd.DataFrame([{
-                    "thematic_summary": "",
-                    "question_id": rq_id,
-                    "theme_id": theme_id,
-                    "theme_label": theme_label,
-                    "theme_description": theme_description,
-                    "allocated_length": allocated_length
-                }])
-                populated_themes.append(no_insight_df)
-                continue
-            insights_str = "\n".join(insights)
+        # populated_themes = []    
+        # for _, row in self.theme_schema_list[-1].iterrows():
+        #     rq_id = row["question_id"]
+        #     rq_text = row["question_text"]
+        #     theme_id = row["theme_id"]
+        #     theme_label = row["theme_label"]
+        #     theme_description = row["theme_description"]
+        #     allocated_length = row["allocated_length"]
+        #     insight_ids = self.mapped_theme_list[-1][
+        #         (self.mapped_theme_list[-1]["question_id"] == rq_id) & 
+        #         (self.mapped_theme_list[-1]["theme_id"] == theme_id)
+        #     ]["insight_id"].tolist()
+        #     insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+        #     if len(insights) == 0:
+        #         no_insight_df = pd.DataFrame([{
+        #             "thematic_summary": "",
+        #             "question_id": rq_id,
+        #             "theme_id": theme_id,
+        #             "theme_label": theme_label,
+        #             "theme_description": theme_description,
+        #             "allocated_length": allocated_length
+        #         }])
+        #         populated_themes.append(no_insight_df)
+        #         continue
+        #     insights_str = "\n".join(insights)
 
-            sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
-            user_prompt = (
-                f"RESEARCH QUESTION: {rq_text}\n"
-                f"THEME LABEL: {theme_label}\n"
-                f"THEME DESCRIPTION: {theme_description}\n"
-                f"INSIGHTS TO SYNTHESIZE:\n"
-                f"{insights_str}\n\n"
-            )
-            fall_back = {"thematic_summary": ""}
+        #     sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
+        #     user_prompt = (
+        #         f"RESEARCH QUESTION: {rq_text}\n"
+        #         f"THEME LABEL: {theme_label}\n"
+        #         f"THEME DESCRIPTION: {theme_description}\n"
+        #         f"INSIGHTS TO SYNTHESIZE:\n"
+        #         f"{insights_str}\n\n"
+        #     )
+        #     fall_back = {"thematic_summary": ""}
 
-            json_schema = {
-                "name": "theme_populator",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "thematic_summary": {"type": "string"}
-                    },
-                    "required": ["thematic_summary"],
-                    "additionalProperties": False
-                }
-            }
+        #     json_schema = {
+        #         "name": "theme_populator",
+        #         "strict": True,
+        #         "schema": {
+        #             "type": "object",
+        #             "properties": {
+        #                 "thematic_summary": {"type": "string"}
+        #             },
+        #             "required": ["thematic_summary"],
+        #             "additionalProperties": False
+        #         }
+        #     }
 
-            response = utils.call_chat_completion(
-                sys_prompt=sys_prompt,
-                user_prompt=user_prompt,
-                llm_client=self.llm_client,
-                ai_model=self.ai_model,
-                fall_back=fall_back,
-                return_json=True,
-                json_schema=json_schema
-            )
+        #     response = utils.call_chat_completion(
+        #         sys_prompt=sys_prompt,
+        #         user_prompt=user_prompt,
+        #         llm_client=self.llm_client,
+        #         ai_model=self.ai_model,
+        #         fall_back=fall_back,
+        #         return_json=True,
+        #         json_schema=json_schema
+        #     )
             
-            thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
-            thematic_summary["question_id"] = rq_id
-            thematic_summary["theme_id"] = theme_id
-            thematic_summary["theme_label"] = theme_label
-            thematic_summary["theme_description"] = theme_description
-            thematic_summary["allocated_length"] = allocated_length
+        #     thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
+        #     thematic_summary["question_id"] = rq_id
+        #     thematic_summary["theme_id"] = theme_id
+        #     thematic_summary["theme_label"] = theme_label
+        #     thematic_summary["theme_description"] = theme_description
+        #     thematic_summary["allocated_length"] = allocated_length
 
-            thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
-            thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
+        #     thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
+        #     thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
             
-            populated_themes.append(thematic_summary)
+        #     populated_themes.append(thematic_summary)
 
         
-        populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+        # populated_themes_df = pd.concat(populated_themes, ignore_index=True)
 
     
 
@@ -2843,12 +3088,12 @@ class Summarize:
         
 
 
-        self.populated_theme_list.append(populated_themes_df)
-        os.makedirs(self.summary_save_location, exist_ok=True)
-        for idx, df in enumerate(self.populated_theme_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+        # self.populated_theme_list.append(populated_themes_df)
+        # os.makedirs(self.summary_save_location, exist_ok=True)
+        # for idx, df in enumerate(self.populated_theme_list):
+        #     df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
         
-        return self.populated_theme_list[-1]
+        # return self.populated_theme_list[-1]
 
 
 
@@ -2861,128 +3106,128 @@ class Summarize:
 
         
         
-        # utils
-        def build_frozen_block(frozen_content: list[dict]) -> str:
-            if not frozen_content:
-                return "(none)\n"
-            parts = []
-            for t in frozen_content:
-                parts.append(
-                    f"Theme ID: {t.get('theme_id','')}\n"
-                    f"Label: {t.get('label','')}\n"
-                    f"Criteria: {t.get('criteria','')}\n"
-                    f"Content:\n{t.get('contents','')}\n"
-                    "--- END THEME ---"
-                )
-            return "\n".join(parts) + "\n"
+        # # utils
+        # def build_frozen_block(frozen_content: list[dict]) -> str:
+        #     if not frozen_content:
+        #         return "(none)\n"
+        #     parts = []
+        #     for t in frozen_content:
+        #         parts.append(
+        #             f"Theme ID: {t.get('theme_id','')}\n"
+        #             f"Label: {t.get('label','')}\n"
+        #             f"Criteria: {t.get('criteria','')}\n"
+        #             f"Content:\n{t.get('contents','')}\n"
+        #             "--- END THEME ---"
+        #         )
+        #     return "\n".join(parts) + "\n"
 
-        def build_remaining_themes_block(rq_df: pd.DataFrame, current_theme_id: str, processed_ids: set[str]) -> str:
-            # remaining = all themes for this RQ not yet processed, excluding the current one
-            rem = rq_df.loc[~rq_df["id"].isin(processed_ids | {current_theme_id}), ["label", "criteria"]]
-            if rem.empty:
-                return "(none)\n"
-            parts = []
-            for _, r in rem.iterrows():
-                parts.append(
-                    f"Theme label: {r['label']}\n"
-                    f"Criteria: {r['criteria']}\n"
-                    "--- END THEME ---"
-                )
-            return "\n".join(parts) + "\n"
+        # def build_remaining_themes_block(rq_df: pd.DataFrame, current_theme_id: str, processed_ids: set[str]) -> str:
+        #     # remaining = all themes for this RQ not yet processed, excluding the current one
+        #     rem = rq_df.loc[~rq_df["id"].isin(processed_ids | {current_theme_id}), ["label", "criteria"]]
+        #     if rem.empty:
+        #         return "(none)\n"
+        #     parts = []
+        #     for _, r in rem.iterrows():
+        #         parts.append(
+        #             f"Theme label: {r['label']}\n"
+        #             f"Criteria: {r['criteria']}\n"
+        #             "--- END THEME ---"
+        #         )
+        #     return "\n".join(parts) + "\n"
 
-        # guard
-        if not hasattr(self, "summary_themes"):
-            raise ValueError("No summary themes found. Please run identify_themes() first.")
+        # # guard
+        # if not hasattr(self, "summary_themes"):
+        #     raise ValueError("No summary themes found. Please run identify_themes() first.")
 
-        save_dir = self.summary_save_location
-        save_path = os.path.join(save_dir, save_file_name)
+        # save_dir = self.summary_save_location
+        # save_path = os.path.join(save_dir, save_file_name)
 
-        if os.path.exists(save_path):
-            recover = None
-            while recover not in ['r', 'n']:
-                recover = input("Populated themes already exist on disk. Recover (r) or generate new (n)? ").lower()
-            if recover == 'r':
-                self.populated_themes = pd.read_parquet(save_path)
-                return self.populated_themes
-            else:
-                print("Re-running population of themes...")
+        # if os.path.exists(save_path):
+        #     recover = None
+        #     while recover not in ['r', 'n']:
+        #         recover = input("Populated themes already exist on disk. Recover (r) or generate new (n)? ").lower()
+        #     if recover == 'r':
+        #         self.populated_themes = pd.read_parquet(save_path)
+        #         return self.populated_themes
+        #     else:
+        #         print("Re-running population of themes...")
 
-        out_rows = []
-        total_themes = len(self.summary_themes)
-        counter = 0
+        # out_rows = []
+        # total_themes = len(self.summary_themes)
+        # counter = 0
 
-        # iterate per research question
-        for question_id, rq_df in self.summary_themes.groupby("question_id", sort=False):
-            # reset frozen content per question to avoid leakage
-            frozen_content: list[dict] = []
-            processed_ids: set[str] = set()
+        # # iterate per research question
+        # for question_id, rq_df in self.summary_themes.groupby("question_id", sort=False):
+        #     # reset frozen content per question to avoid leakage
+        #     frozen_content: list[dict] = []
+        #     processed_ids: set[str] = set()
 
-            # source text for this RQ
-            summary_text_list = self.summaries.loc[self.summaries["question_id"] == question_id, "summary"].tolist()
-            summary_text = "\n\n".join(summary_text_list)
+        #     # source text for this RQ
+        #     summary_text_list = self.summaries.loc[self.summaries["question_id"] == question_id, "summary"].tolist()
+        #     summary_text = "\n\n".join(summary_text_list)
 
-            # iterate themes for this question in the given order
-            for _, row in rq_df.iterrows():
-                counter += 1
-                print(f"Populating theme {counter} of {total_themes}")
+        #     # iterate themes for this question in the given order
+        #     for _, row in rq_df.iterrows():
+        #         counter += 1
+        #         print(f"Populating theme {counter} of {total_themes}")
 
-                question_text = row["question_text"]
-                theme_id = row["id"]
-                theme_label = row["label"]
-                theme_criteria = row["criteria"]
+        #         question_text = row["question_text"]
+        #         theme_id = row["id"]
+        #         theme_label = row["label"]
+        #         theme_criteria = row["criteria"]
 
-                frozen_block = build_frozen_block(frozen_content)
-                remaining_theme_block = build_remaining_themes_block(rq_df, theme_id, processed_ids)
+        #         frozen_block = build_frozen_block(frozen_content)
+        #         remaining_theme_block = build_remaining_themes_block(rq_df, theme_id, processed_ids)
 
-                sys_prompt = Prompts().populate_themes()
-                user_prompt = (
-                    f"Research question id: {question_id}\n"
-                    f"Research question text: {question_text}\n"
-                    "FROZEN CONTENT (read-only; text already assigned to themes):\n"
-                    f"{frozen_block}"
-                    "---CURRENT THEME TO POPULATE:---\n"
-                    f"Theme ID: {theme_id}\n"
-                    f"Theme label: {theme_label}\n"
-                    f"Criteria: {theme_criteria}\n\n"
-                    "CLUSTER SUMMARY TEXT (source material):\n"
-                    f"{summary_text}\n\n"
-                    "--- THEMES STILL TO PROCESS (context only):---\n"
-                    f"{remaining_theme_block}"
-                )
+        #         sys_prompt = Prompts().populate_themes()
+        #         user_prompt = (
+        #             f"Research question id: {question_id}\n"
+        #             f"Research question text: {question_text}\n"
+        #             "FROZEN CONTENT (read-only; text already assigned to themes):\n"
+        #             f"{frozen_block}"
+        #             "---CURRENT THEME TO POPULATE:---\n"
+        #             f"Theme ID: {theme_id}\n"
+        #             f"Theme label: {theme_label}\n"
+        #             f"Criteria: {theme_criteria}\n\n"
+        #             "CLUSTER SUMMARY TEXT (source material):\n"
+        #             f"{summary_text}\n\n"
+        #             "--- THEMES STILL TO PROCESS (context only):---\n"
+        #             f"{remaining_theme_block}"
+        #         )
 
-                fall_back = {"question_id": question_id, "theme_id": theme_id, "assigned_content": ""}
+        #         fall_back = {"question_id": question_id, "theme_id": theme_id, "assigned_content": ""}
 
-                resp = utils.call_chat_completion(
-                    sys_prompt=sys_prompt,
-                    user_prompt=user_prompt,
-                    llm_client=self.llm_client,
-                    ai_model=self.ai_model,
-                    return_json=True,
-                    fall_back=fall_back,
-                )
+        #         resp = utils.call_chat_completion(
+        #             sys_prompt=sys_prompt,
+        #             user_prompt=user_prompt,
+        #             llm_client=self.llm_client,
+        #             ai_model=self.ai_model,
+        #             return_json=True,
+        #             fall_back=fall_back,
+        #         )
 
-                assigned = (resp.get("assigned_content") or "").strip()
+        #         assigned = (resp.get("assigned_content") or "").strip()
 
-                out_row = {
-                    "question_id": question_id,
-                    "question_text": question_text,
-                    "theme_id": theme_id,
-                    "label": theme_label,
-                    "criteria": theme_criteria,
-                    "contents": assigned,
-                }
-                out_rows.append(out_row)
+        #         out_row = {
+        #             "question_id": question_id,
+        #             "question_text": question_text,
+        #             "theme_id": theme_id,
+        #             "label": theme_label,
+        #             "criteria": theme_criteria,
+        #             "contents": assigned,
+        #         }
+        #         out_rows.append(out_row)
 
-                # update frozen and processed sets
-                frozen_content.append(out_row)
-                processed_ids.add(theme_id)
+        #         # update frozen and processed sets
+        #         frozen_content.append(out_row)
+        #         processed_ids.add(theme_id)
 
-        output = pd.DataFrame(
-            out_rows, columns=["question_id", "question_text", "theme_id", "label", "criteria", "contents"]
-        )
+        # output = pd.DataFrame(
+        #     out_rows, columns=["question_id", "question_text", "theme_id", "label", "criteria", "contents"]
+        # )
 
-        self.populated_themes = output
-        os.makedirs(save_dir, exist_ok=True)
-        self.populated_themes.to_parquet(save_path)
-        return self.populated_themes
+        # self.populated_themes = output
+        # os.makedirs(save_dir, exist_ok=True)
+        # self.populated_themes.to_parquet(save_path)
+        # return self.populated_themes
         

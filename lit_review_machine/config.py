@@ -10,3 +10,11 @@ SUMMARY_SAVE_LOCATION = os.path.join(STATE_SAVE_LOCATION, "summaries")
 
 # Location in which the paper chunks are saved after the chunking step of the pipeline completes
 PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
+
+# Filenames for summary objects:
+cluster_summaries = "cluster_summary"
+theme_schemas = "theme_schema"
+mapped_themes = "mapped_theme"
+populated_themes = "populated_theme"
+orphans = "orphans"
+redundancy_pass = "redundancy_pass"     
