@@ -1641,7 +1641,7 @@ class Summarize:
         self.mapped_theme_list = self._reload_summary_outputs(config.mapped_themes) # List of len(n) containing the mapped themes for each theme mapping pass
         self.populated_theme_list = self._reload_summary_outputs(config.populated_themes) # List of len(n) containing the populated themes for each theme population pass
         self.orphans_list = self._reload_summary_outputs(config.orphans) # List of len(n) containing the orphaned insights for each theme population pass
-        self.redundancy = self._reload_summary_outputs(config.redundancy_pass) # List of len(1) containing the output of the final redundancy pass
+        self.redundancy_list = self._reload_summary_outputs(config.redundancy_pass) # List of len(1) containing the output of the final redundancy pass
 
         # Ensure summary save location exists
         if not os.path.exists(self.summary_save_location):
@@ -1704,6 +1704,37 @@ class Summarize:
                 # missing_ok=True prevents crashes if another process 
                 # deletes the file between globbing and unlinking
                 file_path.unlink(missing_ok=True)
+
+    def _save_summary_outputs(self, file_prefixes: List[str]):
+
+        possible_prefixes = [
+            config.cluster_summaries,
+            config.theme_schemas,
+            config.mapped_themes,
+            config.populated_themes,
+            config.orphans,
+            config.redundancy,
+        ]
+
+        if not set(file_prefixes).issubset(possible_prefixes):
+            raise ValueError("Invalid file prefix provided.")
+        
+        
+        file_loc_dict = {
+            config.cluster_summaries: self.cluster_summary_list,
+            config.theme_schemas: self.theme_schema_list,
+            config.mapped_themes: self.mapped_theme_list,
+            config.populated_themes: self.populated_theme_list,
+            config.orphans: self.orphans_list,
+            config.redundancy: self.redundancy_list
+        }
+
+        obj_to_save = [file_loc_dict[prefix] for prefix in file_prefixes]
+
+        for obj, prefix in zip(obj_to_save, file_prefixes):
+            for idx, df in enumerate(obj, start=1):
+                df.to_parquet(os.path.join(self.summary_save_location, f"{prefix}_{idx}.parquet"), index=False) 
+
 
     
     #### I DON"T THINK I WANT THIS ANYMORE BECAUSE I DON"T CARE ABOUT THE CLUSTER SUMMARIES, ONLY THE THEME SUMMARIES. 
@@ -1846,12 +1877,13 @@ class Summarize:
             else:
                 # If we are regenerating summeries we need to delete all existing outputs and reset the attributes to none as they are loaed on init if they exist
                 print("Re-running summarization of clusters...")
-                self._delete_summary_outputs(file_prefixes=["cluster_summary", "theme_schema", "populated_theme", "orphan", "redundancy_pass"])
-                self.cluster_summary_list = None
-                self.theme_schema_list = None
-                self.populated_theme_list = None
-                self.orphans = None
-                self.redundancy = None
+                self._delete_summary_outputs(file_prefixes=[config.cluster_summaries, config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
+                self.cluster_summary_list = []
+                self.theme_schema_list = []
+                self.mapped_theme_list = []
+                self.populated_theme_list = []
+                self.orphans = []
+                self.redundancy = []
 
         # We are going to send the insights to the LLM in the order of the shortest path, so that the most similar clusters are summarized close together
         # This will add coherence to the final paper when the summaries are stitched together
@@ -1949,58 +1981,23 @@ class Summarize:
 
         return self.cluster_summary_list
     
-
-    def gen_theme_schema(self) -> pd.DataFrame:
-        # First check that summaries exist
-        if self.cluster_summary_list is None or len(self.cluster_summary_list) == 0:
-            raise ValueError("No summaries found. Please run summarize() first.")
-
-        # Next we want to confirm that the user wants to run the mapping again, rather tha possibly accessing previoulsy generated and saved mappings
-        # There are actually three options here: 1) start the mapping process afresh, 2) load previously generated maps, 3) run another mapping iteration on top of a populated theme. We have to handle all
-        # First we check if there are theme maps (which get loaded on class init if they exist)
-        new = None
-        if self.theme_schema_list is not None and len(self.theme_schema_list) > 0:
-            while new not in ['1', '2', '3']:
-                new = input("Theme mapping already exists. " \
-                "Theme maps already exist. Please select what you want to do:\n" \
-                "1: Load existing maps\n" \
-                "2: Fully recreate your theme mapping (i.e. start again). NOTE this will delete all existing theme maps as well as any populated themes, orphans and redundancy passes\n" \
-                "3: Run another mapping iteration on top of a populated theme\n" \
-                "Enter either 1, 2, or 3:\n").lower()
-            
-            if new == '1':
-                print("Theme mapping available via .theme_schema_list, orderd by creation time if multiple exist.")
-                return(None)
-            
-            elif new == '2':
-                print("Re-running theme mapping from scratch...")
-                self._delete_summary_outputs(file_prefixes=["theme_schema", "populated_theme", "orphan", "redundancy_pass"])
-                self.theme_schema_list = None
-                self.populated_theme_list = None
-                self.orphans = None
-                self.redundancy = None
-
-            else:
-                # Make sure the user is not iterating theme mapping without first populating themes for whatever iteration of this they are on.
-                if len(self.theme_schema_list) > len(self.populated_theme_list):
-                    raise ValueError("Your theme schema is already ahead of your theme population. Please run populate_themes() before generating theme schema again")
-                # Make sure they have populated themes before they try to iterate the theme schema
-                if len(self.populated_theme_list) == 0:
-                    raise ValueError("No populated themes found. Please run populate_themes() before tying to iterate your theme schema.")
-                
-                # Run new mapping
-                print("Running additional theme mapping...")
-
-        # Now we create a generic dataframe from eithe the summaries or the populated themes depending on whether the user is starting fresh or iterating
-        # First check new or full re-write. 
-        if new == '1' or self.theme_schema_list is None or new == '2':
+    def _run_llm_schema_gen(self, source: pd.DataFrame) -> pd.DataFrame:
+        """
+        Run the llm call to generate the theme schema based on the provided source data (either cluster summaries or populated themes).
+        Function first gets the correct data via the source param then loops through the data to gen the schema
+        
+        """
+        if source not in ["cluster summaries", "populated themes"]:
+            raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
+        
+        if source == "cluster summaries":
             # Grab data from summaries
-            source_df = self.cluster_summary_list[0]
+            source_df = self.cluster_summary_list[0].copy()
             source_df.rename(columns={"cluster": "id", "summary": "text_to_theme"}, inplace=True)
         else:
             # if its an iteration we get data from the last populated theme and convert the columsn to a generic form to send to the llm
-            source_df = self.populated_theme_list[-1]
-            source_df.rename(columns={"theme_id": "id", "theme_text": "text_to_theme"}, inplace=True) ##########################DOUBLE CHECK THIS RENAME TO MAKE SURE IT FITS WITH THE EXPECTED PROMPT AND LLM RESPONSE
+            source_df = self.populated_theme_list[-1].copy()
+            source_df.rename(columns={"theme_id": "id", "thematic_summary": "text_to_theme"}, inplace=True)
         
         out_df_list = []
 
@@ -2072,15 +2069,97 @@ class Summarize:
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
         # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
         output["theme_id"] = [i + 1 for i in range(len(output))] 
-        # Append to the list of schemas
-        self.theme_schema_list = [] if self.theme_schema_list is None else self.theme_schema_list
-        self.theme_schema_list.append(output)
-        # Save all the schemas in the list to capture the new one and maintain the order on disk in case we need to reload later for any reason
-        os.makedirs(self.summary_save_location, exist_ok=True)
-        for idx, df in enumerate(self.theme_schema_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"{config.theme_schemas}_{idx+1}.parquet"))
 
-        return self.theme_schema_list[-1]
+        return(output)
+
+    def gen_theme_schema(self) -> pd.DataFrame:
+        
+        """
+        Generate or regenerate a theme schema pass.
+
+        Modes:
+        1. First pass (no existing schema) → use cluster summaries.
+        2. Iterative pass → requires orphan incorporation.
+        3. Regenerate last pass → overwrite most recent schema.
+        """
+        
+         # --- Root validation ---
+        if not self.cluster_summary_list:
+            raise ValueError(
+                "No cluster summaries found. Please run cluster summarization first."
+            )
+
+        schema_len = len(self.theme_schema_list)
+        populate_len = len(self.populated_theme_list)
+        orphan_len = len(self.orphans_list)
+
+        # Determine the input source (from cluster summaries or from orphan handling):
+        # --- CASE 1: First schema pass, build from clusters
+        if schema_len == 0:
+            source_name = "cluster summaries"
+            new_schema = self._run_llm_schema_gen(source=source_name)
+            self.theme_schema_list.append(new_schema)
+            self._save_summary_outputs([config.theme_schemas])
+            return new_schema  
+
+        # --- Existing schema passes, check what user wants---
+        choice = None
+        while choice not in ["1", "2", "3"]:
+            choice = input(
+                f"You currently have {schema_len} theme schema pass(es).\n"
+                "Choose an option:\n"
+                "(1) Load the latest schema pass\n"
+                "(2) Generate a NEW schema pass (requires orphan incorporation)\n"
+                "(3) Regenerate the LATEST schema pass (overwrite last pass)\n"
+                "Enter 1, 2, or 3:\n"
+            ).strip()
+
+        # --- Option 1: Reload ---
+        if choice == "1":
+            print("Latest schema loaded.")
+            return None
+
+        # --- Option 2: Append new iteration ---
+        if choice == "2":
+
+            # Enforce full structural cycle completion
+            if populate_len == 0:
+                raise ValueError(
+                    "No populated themes found. Please run populate_themes() first."
+                )
+
+            if populate_len != orphan_len:
+                raise ValueError(
+                    "You must run handle_orphans() before generating a new schema pass."
+                )
+
+            source_name = "populated themes"
+            new_schema = self._run_llm_schema_gen(source=source_name)
+            self.theme_schema_list.append(new_schema)
+
+            self._save_summary_outputs([config.theme_schemas])
+            return new_schema
+
+        # --- Option 3: Regenerate last pass ---
+        if choice == "3":
+
+            # Rewind to just before the last schema pass
+            last_index = schema_len - 1
+            self.rewind_to("schema", last_index)
+
+            source_name = (
+                "cluster summaries"
+                if last_index == 0 and populate_len == 0
+                else "populated themes"
+            )
+
+            new_schema = self._run_llm_schema_gen(source=source_name)
+
+            # Replace last schema pass
+            self.theme_schema_list[-1] = new_schema
+
+            self._save_summary_outputs([config.theme_schemas])
+            return new_schema
 
     
     def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
@@ -2131,40 +2210,41 @@ class Summarize:
         #### PRE-RUN VALIDATION
         #### --------------------------------------------------
 
-        if self.theme_schema_list is None or len(self.theme_schema_list) == 0:
+        if not self.theme_schema_list:
             raise ValueError(
                 "No theme schema found. Please run gen_theme_schema() first."
             )
 
-        if len(self.populated_theme_list) > len(self.theme_schema_list):
-            raise ValueError(
-                "Your populated themes are already the same length or ahead "
-                "of your theme schema. Please run populate_themes() before mapping."
-            )
+        schema_len = len(self.theme_schema_list)
+        mapped_len = len(self.mapped_theme_list)
 
-        # Check if mappings already exist
-        if self.mapped_theme_list is not None and len(self.mapped_theme_list) > 0:
+        # If mappings exist, offer choice
+        if mapped_len > 0:
 
             new_choice = None
             while new_choice not in ["1", "2"]:
                 new_choice = input(
                     "Mapped themes already exist on disk. Do you want to:\n"
                     "(1) reload existing mapped themes\n"
-                    "(2) remap insights to the current themes again "
-                    "(NOTE: this will overwrite existing mapped themes)? \n"
+                    "(2) remap insights to the latest theme schema. "
+                    "This will realign schema and mapping history.\n"
                     "Enter 1 or 2:\n"
                 ).strip()
 
             if new_choice == "1":
-                print(
-                    "Mapped themes loaded. Inspect them via "
-                    "variable.mapped_theme_list[-1]"
-                )
+                print("Mapped themes loaded.")
                 return None
 
-            # Trim to match schema state
-            schema_len = len(self.theme_schema_list)
-            self.mapped_theme_list = self.mapped_theme_list[: schema_len - 1]
+            # Realign to last coherent pre-mapping state
+            min_len = min(schema_len, mapped_len)
+            self.theme_schema_list = self.theme_schema_list[:min_len + 1]
+            self.mapped_theme_list = self.mapped_theme_list[:min_len]
+
+        else:
+            # No mappings exist — ensure we are in valid pre-mapping state
+            if schema_len < 1:
+                raise ValueError("No schema available to map.")
+        
 
         #### --------------------------------------------------
         #### MAPPING LOGIC
@@ -2533,31 +2613,38 @@ class Summarize:
                         paper_len: int = 8000, 
                         max_prop: float = 0.9) -> pd.DataFrame:
         
+        # Check that themes have been mapped before we try to populate
+        if not self.mapped_theme_list:
+            raise ValueError("No mapped themes found. Please run map_insights_to_themes() first.")
         
-        # First check whether the user wants to re-run the population or load existing populated themes if they exist
-        if self.populated_theme_list is not None and len(self.populated_theme_list) > 0:
+        mapped_len = len(self.mapped_theme_list)
+        populate_len = len(self.populated_theme_list)
+
+        # If populated themes exist, offer choice
+        if populate_len > 0:
             new = None
             while new not in ["1", "2"]:
                 new = input(
                     "Populated themes already exist on disk. Do you want to:\n"
                     "(1) reload existing populated themes\n"
-                    "(2) repopulate themes based on the current theme schema and mapped insights (NOTE:this will overwrite the most recent existing populated theme)? \n"
+                    "(2) repopulate themes based on the current theme schema and mapped insights. This will realign mapping and population history.\n"
                     "Enter 1 or 2:\n"
-                ).lower()
+                ).strip()
             if new == "1":
                 print(
                     "Populated themes loaded. Inspect them via variable.populated_theme_list[-1]\n"
                 )
                 return(None) # Return to exit the function and avoid re-running the population
-            else:
-                # If rerunning make sure that the number of populated themes is not ahead of the theme mapping
-                if len(self.populated_theme_list) > len(self.mapped_theme_list):
-                    raise ValueError("Your theme population is already ahead of your theme mapping. Please run map_insights_to_themes() before re-running populate_themes()")
-                              
-                # If re-running make sure that the number of populated themes runs is equal to the one less than the number of schemas (so we are populating based on the last one)
-                schema_len = len(self.theme_schema_list)
-                self.populated_theme_list = self.populated_theme_list[:schema_len - 1] 
-                print("Re-running theme population...")
+            
+            # Realign to last coherent pre-population state
+            min_len = min(mapped_len - 1, populate_len)
+            self.mapped_theme_list = self.mapped_theme_list[:min_len + 1]
+            self.populated_theme_list = self.populated_theme_list[:min_len]
+            
+        else:
+            # No populated themes exist — ensure we are in valid pre-population state
+            if mapped_len < 1:
+                raise ValueError("No mapped themes available to populate from. Please run map_insights_to_themes() first.")
         
         
         # Populate the themes with the insights mapped to them 
@@ -2616,12 +2703,12 @@ class Summarize:
 
     def _identify_orphans(self, batch_size=75) -> pd.DataFrame:
 
-        pickle_resume_path = os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_identification_in_progress.pickle")
+        self.orphan_pickle_resume_path = os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_check_in_progress.pickle")
         checked_insights_df = None
 
         # First check whether there was a orphan audit in progress. If there was, offer the option to resume
 
-        if os.path.exists(pickle_resume_path):
+        if os.path.exists(self.orphan_pickle_resume_path):
             resume = None
             while resume not in ["1", "2"]:
                 resume = input("A partial orphan identification process was detected. Do you want to:\n"
@@ -2629,56 +2716,30 @@ class Summarize:
                                "2) start a new orphan identification process? \n"
                                "Enter 1 or 2:\n").lower()
             if resume == "1":
-                with open(pickle_resume_path, "rb") as f:
+                with open(self.orphan_pickle_resume_path, "rb") as f:
                     checked_insights_df = pickle.load(f)
                 print("Resuming orphan identification process from last saved point...")
 
             else:
                 print("Starting new orphan identification process and deleting the in progress pickle...")
-                os.remove(pickle_resume_path)
+                os.remove(self.orphan_pickle_resume_path)
 
-        # Now check if they want to reload previously saved orphan audits or if they want to iterate the process
-
-        if self.orphans_list is not None and len(self.orphans_list) > 0:
-            new = None
-            while new not in ["1", "2"]:
-                new = input(
-                    "Previously identified orphans already exist on disk. Do you want to:\n"
-                    "(1) reload existing orphan identification audits\n"
-                    "(2) re-run the orphan identification process on the current populated themes (NOTE:this will overwrite then most recent orphan audit and any subsequent audits)? \n"
-                    "Enter 1 or 2:\n"
-                ).lower()
-            if new == "1":
-                print(
-                    "Orphan audits loaded. Inspect them via variable.orphans_list[-1]\n"
-                )
-                return(None) # Return to exit the function and avoid re-running the process
-            else:
-                # If re-running make sure that the number of orphan audits does not exceed the number of populated themes as we don't want to run repeated audits without populating new themes in between
-                if len(self.orphans_list) >= len(self.populated_theme_list):
-                    raise ValueError(
-                        "Your existing orphan audits are already equal to or ahead of your current populated themes. " 
-                        "Please run populate_themes() to generate new populated themes before re-running the orphan identification process."
-                    )
-                
-                                    
-                # Now delete the orphan list that we are overwriting and any subsequent ones to make sure the user doesn't accidentally reload an audit that is ahead of their current populated themes in the future which would cause confusion. We don't delete the orphan audits that are behind the current populated theme because they are still valid for those themes and it might be useful to keep them for reference or comparison.
-                self.orphans_list = self.orphans_list[:len(self.populated_themes_list)- 1]
-                print("Re-running orphan identification process...")
+        # Handling for iteration, or reload is in the orchestrator .handle_orphans() which calls this func
+        # So set up for the orphan id process
         
-        
-        total_batches_to_check = len(self.mapped_theme_list[-1]) // batch_size + 1
+        total_batches_to_check = math.ceil(len(self.mapped_theme_list[-1]) / batch_size)
         count = (checked_insights_df.shape[0] // batch_size) + 1 if checked_insights_df is not None else 0
+
         # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
         checked_insights_df = pd.DataFrame(columns=["question_id", "theme_id", "insight_id", "found"]) if checked_insights_df is None else checked_insights_df
         checked_insight_id_list = checked_insights_df["insight_id"].tolist() if not checked_insights_df.empty else []
         
         # Now call the loop on these temp dataframes which will allow me to skip the insights that have already been checked and saved in the checked_insights_df which is being updated and saved to pickle as we go to allow for resumption if the process is interupted
-        for _, row in temp_populated_theme_df.iterrows():
+        theme_map = self.mapped_theme_list[-1].copy() # we need this in the loop, but to prevent copying each loop, i put it here
+        for _, row in self.populated_theme_list[-1].iterrows():
             # This runs question by question so first we iterate over those
             t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
             # Then we get the insights that were iniitally allocaed to that question - as we are checking whether these got allocated
-            theme_map = temp_theme_map
             relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
             relevant_insights = self.state.insights[
                 (self.state.insights["insight_id"].isin(relevant_ids)) & # Get the insight text for the insight_ids that were mapped
@@ -2756,20 +2817,10 @@ class Summarize:
                 checked_insights_df = pd.concat([checked_insights_df, batch_results_df], ignore_index=True)
                 # save the checked insights to pickle to allow for resume if the process crashes
                 os.makedirs(config.PICKLE_SAVE_LOCATION, exist_ok=True)
-                with open(os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_check_in_progress.pickle"), "wb") as f:
+                with open(self.orphan_pickle_resume_path, "wb") as f:
                     pickle.dump(checked_insights_df, f)
 
-        orphans_df = checked_insights_df[checked_insights_df["found"] == False].copy()
-
-        self.orphans_list.append(orphans_df)
-        # Save the orphans to disk so that they can be inspected and used for the next step of integrating them back into the themes. We save them as a list of dataframes with one dataframe per populated theme run, as this allows us to maintain the order and progression of the runs and easily pick up where we left off if needed.
-        os.makedirs(self.summary_save_location, exist_ok=True) 
-        for idx, df in enumerate(self.orphans_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"{config.orphans}_{idx+1}.parquet"), index=False)
-
-        # Clear the resume pickle as the process is now saved as parquet
-        os.remove(pickle_resume_path)
-
+        orphans_df = checked_insights_df[checked_insights_df["found"] == False]
         return(orphans_df)
     
     def _integrate_orphans(self, 
@@ -2864,47 +2915,168 @@ class Summarize:
         return(theme_no_orphans)
 
     def address_orphans(self):
+        populate_len = len(self.populated_theme_list)
 
-        # Check whether themes have been populated at all before running this function. If not make the user run populate_themes first.
-        if self.populated_theme_list is None or len(self.populated_theme_list) == 0:
-            raise ValueError("No populated themes found. Please run populate_themes() first.")
-        
-        # Now check if an orphan pass has already been run and whether the user just wants to reload or run again on the lastest populated themes
-        if self.orphans_list is not None and len(self.orphans_list) > 0:
-            new = None
-            while new not in ["1", "2"]:
-                new = input(
-                    "Orphan insights have already been identified and addressed. Do you want to:\n"
-                    "(1) reload the existing addressed orphans\n"
-                    "(2) re-run the orphan identification and addressing process on the current populated themes (NOTE:this will overwrite the existing addressed orphans)? \n"
+        if populate_len == 0:
+            raise ValueError(
+                "No populated themes found. Please run populate_themes() first."
+            )
+
+        # --- Realign orphan list to coherent state ---
+        min_len = min(len(self.populated_theme_list), len(self.orphans_list))
+        self.orphans_list = self.orphans_list[:min_len]
+
+        # --- Determine behavior ---
+        if len(self.populated_theme_list) == len(self.orphans_list):
+            # Orphan already exists for latest populate
+            choice = None
+            while choice not in ["1", "2"]:
+                choice = input(
+                    "Orphan handling already exists for the latest populated themes.\n"
+                    "(1) Reload existing orphan audit\n"
+                    "(2) Re-run orphan identification and incorporation\n"
                     "Enter 1 or 2:\n"
-                ).lower()
-            if new == "1":
-                print(
-                    "Addressed orphans loaded. Inspect them via variable.orphans_list[-1]\n"
-                )
-                return(None) # Return to exit the function and avoid re-running the process
-            else:
-                print("Re-running orphan identification and addressing process...")
-                # Set the orphans list to the length of the populated theme list minus one so that we are running on the last populated themes and our run lengths match
-                self.orphans_list = self.orphans_list[:len(self.populated_theme_list) - 1]
+                ).strip()
 
+            if choice == "1":
+                print("Latest orphan audit loaded.")
+                return None
+
+            replace_mode = True
+
+        else:
+            replace_mode = False
+
+        # --- Run orphan logic ---
+        # Get the orphans and replace or append
         orphans_df = self._identify_orphans()
-        self.orphans_list.append(orphans_df)
+        if replace_mode:
+            self.orphans_list[-1] = orphans_df
+        else:
+            self.orphans_list.append(orphans_df)
+        # Save the orphans_list
+        self._save_summary_outputs([config.orphans])
+        # Now that i have saved, i can clear the resume pickle as the process is now saved as parquet
+        os.remove(self.orphan_pickle_resume_path)
 
+        # Now check for integration     
         if orphans_df.shape[0] == 0:
             print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
             return(self.populated_theme_list[-1])
+        
         else:
             print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
+            # Get the new populated theme summaries
             updated_summary_df = self._integrate_orphans(orphans_df)
+            # Always replace because its a repair on the existing theme summaries
             self.populated_theme_list[-1] = updated_summary_df
-            os.makedirs(self.summary_save_location, exist_ok=True)
-            for idx, df in enumerate(self.populated_theme_list):
-                df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
+            # Save the updated theme summaries
+            self._save_summary_outputs([config.populated_themes])
             return(self.populated_theme_list[-1])
-        
-    
+
+    def rewind_to(self, stage: str, index: int):
+
+        stage_order = {
+            "schema": 0,
+            "mapping": 1,
+            "populate": 2,
+            "orphan": 3,
+        }
+
+        if stage not in stage_order:
+            raise ValueError("Invalid stage name.")
+
+        target_depth = stage_order[stage]
+
+        structural = [
+            self.theme_schema_list,
+            self.mapped_theme_list,
+            self.populated_theme_list,
+            self.orphans_list,
+        ]
+
+        if index < 0:
+            raise ValueError("Index must be >= 0.")
+
+        target_list = structural[target_depth]
+        if index >= len(target_list):
+            raise ValueError("Index exceeds available passes.")
+
+        # Now realign explicitly
+        if target_depth == 0:  # schema
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index]
+            self.populated_theme_list = self.populated_theme_list[:index]
+            self.orphans_list = self.orphans_list[:index]
+
+        elif target_depth == 1:  # mapping
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index]
+            self.orphans_list = self.orphans_list[:index]
+
+        elif target_depth == 2:  # populate
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index+1]
+            self.orphans_list = self.orphans_list[:index]
+
+        elif target_depth == 3:  # orphan
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index+1]
+            self.orphans_list = self.orphans_list[:index+1]
+
+        # Always clear redundancy
+        self.redundancy_list = []
+
+        self._delete_summary_outputs([
+            config.theme_schemas,
+            config.mapped_themes,
+            config.populated_themes,
+            config.orphans,
+            config.redundancy,
+        ])
+
+        self._save_summary_outputs([
+            config.theme_schemas,
+            config.mapped_themes,
+            config.populated_themes,
+            config.orphans,
+        ])
+
+        def restart(self):
+            confirm = None
+            while confirm not in ["yes", "no"]:
+                confirm = input(
+                    "Are you sure you want to restart the process? This will clear all existing themes schemas, mappings, populated themes, orphan audits and redundancy passes. Enter 'yes' to confirm or 'no' to cancel.\n"
+                ).lower()
+            
+            if confirm == "yes":
+                self.theme_schema_list = []
+                self.mapped_theme_list = []
+                self.populated_theme_list = []
+                self.orphans_list = []
+                self.redundancy_list = []
+
+                self._delete_summary_outputs(file_prefixes=[config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
+
+            else:
+                print("Restart cancelled. Existing data preserved.")
+
+    def status(self):
+        print("Current Status:")
+        print(f"Cluster summary: {len(self.cluster_summary_list)}")
+        print(f"Theme schemas: {len(self.theme_schema_list)}")
+        print(f"Mapped themes: {len(self.mapped_theme_list)}")
+        print(f"Populated themes: {len(self.populated_theme_list)}")
+        print(f"Orphan audits: {len(self.orphans_list)}")
+        if len(self.redundancy_list) > 0:
+            print(f"Redundancy passes: applied")
+        else:
+            print(f"Redundancy passes: not applied")
+
+
     def address_redundancy(self) -> pd.DataFrame:
         # Ensure ordering is respected for the narrative flow
         ordered_themes = self.populated_theme_list[-1].sort_values(by=["question_id", "theme_order"])

@@ -12,12 +12,14 @@ import pandas as pd
 
 #---------
 import importlib
-from lit_review_machine import core, utils, state, render
+###########
+def reload():
+    from lit_review_machine import core, utils, state, render
 
-importlib.reload(utils)
-importlib.reload(core)
-importlib.reload(state)
-importlib.reload(render)
+    importlib.reload(utils)
+    importlib.reload(core)
+    importlib.reload(state)
+    importlib.reload(render)    
 
 
 #---------
@@ -156,6 +158,11 @@ cluster.cum_prop_cluster.to_html("cum_prop_cluster.html")
 # For this small corpus i am happy with the way the clusters look so i don't pass any dict.
 cluster.clean_clusters()
 
+#####
+reload()
+####
+
+
 # Now we move to summarizing the clusters and generating the themes. 
 # Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
 latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
@@ -163,6 +170,12 @@ summarize = core.Summarize(state=latest_state,
                            llm_client=llm_client,
                            ai_model="gpt-4o",
                            paper_output_length=14000)
+
+#########
+import builtins
+real_input = builtins.input
+builtins.input = lambda _: "1"  # Automatically choose to recover existing summaries
+##########
 
 # First we summarize the clusters. This only happens once
 # Specifically we calculate the shortest path between the cluster centroids and feed them to the LLM in that order with already summarized clusters passed as frozen context for the next summariation
@@ -180,8 +193,13 @@ summarize.map_insights_to_themes() # Insight mapping can be examined via summari
 # Then we populate the themes based on the insights that have been allocated to them bu the mapping process
 summarize.populate_themes() # Populated themes can be examined via summarize.populated_theme_list
 
+
 # Then we check for any orphans that might have been dropped in the process - this captures insights that might not have been exposed via the cluster summaries that drove the firt mapping process
 summarize.address_orphans() # Orphans can be examined via summarize.orphans_list. Note that the orphans are not necessarily "orphans" in the sense that they have no thematic home, but rather they are insights that were not captured in the initial cluster summaries and therefore were not mapped to themes in the first pass. The orphans are then fed back into the theme schema generation and mapping process to see if they can be allocated to existing themes or if new themes need to be generated to accommodate them. This iterative process helps to ensure that we are capturing as many insights as possible and that we are not losing important information that might have been missed in the initial cluster summarization and theme mapping steps.
+
+#########
+builtins.input = real_input
+#######
 
 # Now we iterate the above process to improve the schema - so that orphans are likely accounted for in a more complete manner than was possible with the cluster summaries
 summarize.gen_theme_schema()
