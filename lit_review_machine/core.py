@@ -1680,7 +1680,15 @@ class Summarize:
         )
 
         # 3. Load and return the list of DataFrames
-        return [pd.read_parquet(p.absolute()) for p in paths_sorted]
+        output = [pd.read_parquet(p.absolute()) for p in paths_sorted]
+        self._assert_summarize_state_integrity(output)
+        return output
+    
+    def _assert_summarize_state_integrity(self, save_obj: list):
+        for obj in save_obj:
+            if "theme_id" in obj.columns:
+                if not pd.api.types.is_integer_dtype(obj["theme_id"]):
+                    print("WARNING STATE IS UNSTABLE:'theme_id' column is not integer type. This may cause issues with downstream processing. You should correct before proceding.")
 
     def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
         """
@@ -1733,7 +1741,15 @@ class Summarize:
 
         for obj, prefix in zip(obj_to_save, file_prefixes):
             for idx, df in enumerate(obj, start=1):
-                df.to_parquet(os.path.join(self.summary_save_location, f"{prefix}_{idx}.parquet"), index=False) 
+                df.to_parquet(os.path.join(self.summary_save_location, f"{prefix}_{idx}.parquet"), index=False)
+
+        self._assert_summarize_state_integrity(obj_to_save)
+
+
+    
+
+
+
 
 
     
@@ -2062,12 +2078,14 @@ class Summarize:
             themes_df = pd.DataFrame(theme_list, columns=["theme_id", "theme_label", "theme_description", "instructions"])
             themes_df["question_id"] = question_id
             themes_df["question_text"] = question_text
+            themes_df["theme_id"] = themes_df["theme_id"].astype(int)  # Ensure theme_id is numeric for sorting later
 
             out_df_list.append(themes_df)
         
         # Concat all the questions
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
         # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
+        # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.
         output["theme_id"] = [i + 1 for i in range(len(output))] 
 
         return(output)
@@ -2378,6 +2396,8 @@ class Summarize:
                 # Expand theme_id
                 batch_results_df = batch_results_df.explode("theme_id")
                 batch_results_df["question_id"] = question_id
+                # Ensure that theme_id is numeric for consistency with the schema and to allow for subsequent sorting
+                batch_results_df["theme_id"] = batch_results_df["theme_id"].astype(int)
 
                 mapped_insights_df_list.append(batch_results_df)
 
@@ -2427,7 +2447,7 @@ class Summarize:
         full_schema = (
             self.theme_schema_list[-1][["theme_id"]]
             .copy()
-            .astype({"theme_id": str})
+            .astype({"theme_id": int})
             .drop_duplicates()
         )
 
@@ -2435,7 +2455,7 @@ class Summarize:
         theme_counts = (
             self.mapped_theme_list[-1]
             .copy()
-            .astype({"theme_id": str})
+            .astype({"theme_id": int})
             .groupby("theme_id")
             .size()
             .reset_index(name="count")
@@ -2471,10 +2491,13 @@ class Summarize:
             .clip(lower=MIN_THEME_WORDS, upper=MAX_THEME_WORDS)
         )
 
+        # Defensively ensure that theme_id remains an int to allow for sorting
+        theme_counts["theme_id"] = theme_counts["theme_id"].astype(int)
+
         return theme_counts[["theme_id", "allocated_length"]]
 
 
-    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float) -> pd.DataFrame:
+    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float, max_model_output_words: int = 2800) -> pd.DataFrame:
         """
         Flag themes whose current length exceeds a given proportion of their allocated length,
         except when:
@@ -2482,7 +2505,7 @@ class Summarize:
         - current_length is NaN (treated as not flagged)
         """
 
-        MAX_THEME_WORDS = 2800
+        MAX_THEME_WORDS = max_model_output_words
 
         def flag_row(row):
             # Treat missing summaries as not flagged
@@ -2514,8 +2537,9 @@ class Summarize:
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
-        schema_df["question_id"] = schema_df["question_id"].astype(str)
-        schema_df["theme_id"] = schema_df["theme_id"].astype(str)
+        # Copy the df because this could be called on a state object
+        schema_df["question_id"] = schema_df["question_id"].astype(int).copy()
+        schema_df["theme_id"] = schema_df["theme_id"].astype(int).copy()
         
         if "allocated_length" not in schema_df.columns:
             schema_df = schema_df.merge(
@@ -2592,7 +2616,7 @@ class Summarize:
             # Get the summary from the response and tag with metadata in a dataframe
             thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
             thematic_summary["question_id"] = rq_id
-            thematic_summary["theme_id"] = theme_id
+            thematic_summary["theme_id"] = int(theme_id)
             thematic_summary["theme_label"] = theme_label
             thematic_summary["theme_description"] = theme_description
             thematic_summary["allocated_length"] = allocated_length
@@ -2606,6 +2630,7 @@ class Summarize:
         # Concat the final list of dfs and return
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
         # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative
+        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         return(populated_themes_df)
 
@@ -2649,8 +2674,8 @@ class Summarize:
         
         # Populate the themes with the insights mapped to them 
         populated_themes_df = self._run_theme_pop(
-            schema_df=self.theme_schema_list[-1],
-            mapped_themes_df=self.mapped_theme_list[-1],
+            schema_df=self.theme_schema_list[-1].copy(),
+            mapped_themes_df=self.mapped_theme_list[-1].copy(),
             paper_len=paper_len
         )
 
@@ -2670,34 +2695,37 @@ class Summarize:
                     "Enter 1 or 2:\n"
                 ).lower()
 
-            if expand_count == "1":
-                # If the user wants to expand, we re run the theme populator on the flagged themes
+            
+            if expand_count == "2":
+                # If the user is happy, end the loop. Populated themes is in tact and we keep it. 
+                break
+
+            else:
+                # If the user wants to expand, we re run the theme populator on the flagged themes with increased allocation and update populated themes with the longer theme summaries
                 # First get the schema map for the flagged themes and expand the allocated length by 20%
                 df_len_flagged["allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
                 # Then get the ids and the corresponding insights
                 length_check_theme_ids = df_len_flagged["theme_id"].tolist()
-                rerun_mapped_df = self.mapped_theme_list[-1][self.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)]
+                rerun_mapped_df = self.mapped_theme_list[-1][self.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
                 # Rerun on the flagged themes with the expanded length and get new summaries for those themes
                 rerun_populated_themes_df = self._run_theme_pop(df_len_flagged, rerun_mapped_df, paper_len)
                 rerun_len_ok, df_len_flagged = self._check_length_and_flag(rerun_populated_themes_df, max_prop)
+                # If this produced any themes for which the length is now ok we replace the odl summaries in populated_theme_list with these updates
                 if rerun_len_ok.shape[0] > 0:
-                    # If any of the rerun themes are now under the threshold we update those in the main df of populated themes and the loop will continue checking if there are flagged themes
-                    df_len_ok = pd.concat([df_len_ok, rerun_len_ok], ignore_index=True)
-
-            else:
-                # if the user does not want to expand the word count, concat the flagged and ok themes and set flagged themes to None to exit the loop
-                df_len_ok = pd.concat([df_len_ok, df_len_flagged], ignore_index=True)
-                df_len_flagged = None
-                pass
-        
+                    # Since theme_id is globally unique i can just replace on it
+                    # get the theme_ids that are now ok
+                    corrected_theme_ids = rerun_len_ok["theme_id"].tolist()
+                    # Drop those themes from the populated_theme_df
+                    populated_themes_df = populated_themes_df[~populated_themes_df["theme_id"].isin(corrected_theme_ids)]
+                    # Concat with the rerun_len_ok_themes
+                    populated_themes_df = pd.concat([populated_themes_df, rerun_len_ok], ignore_index=True)
+                    
         # Make sure the final df of populated themes is in the same order as the theme schema for easier comparison and so that it can be exported to the narrative in the correct order
-        df_len_ok = df_len_ok.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-        # Now save df_len_ok to the populated theme list and to disk as the final output of this function
-        self.populated_theme_list.append(df_len_ok)
-        os.makedirs(self.summary_save_location, exist_ok=True)
-        for idx, df in enumerate(self.populated_theme_list):
-            df.to_parquet(os.path.join(self.summary_save_location, f"{config.populated_themes}_{idx+1}.parquet"), index=False)
-
+        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
+        populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+        # Now add populated_themes_df to the populated theme list and save to disk. Return the updated themes
+        self.populated_theme_list.append(populated_themes_df)
+        self._save_summary_outputs([config.populated_themes])
         return self.populated_theme_list[-1]
 
 
@@ -2821,6 +2849,7 @@ class Summarize:
                     pickle.dump(checked_insights_df, f)
 
         orphans_df = checked_insights_df[checked_insights_df["found"] == False]
+        orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema
         return(orphans_df)
     
     def _integrate_orphans(self, 
@@ -2836,7 +2865,7 @@ class Summarize:
 
         # Iterate over your populated themes (one row per theme)
         for _, row in populated_themes.iterrows():
-            theme_id = row["theme_id"]
+            theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
             question_text = row["question_text"]
@@ -2892,7 +2921,7 @@ class Summarize:
                     updated_row = pd.DataFrame([{
                         "thematic_summary": response.get("updated_summary", thematic_summary),
                         "question_id": question_id,
-                        "theme_id": theme_id,
+                        "theme_id": int(theme_id),
                         "theme_label": theme_label,
                         "theme_description": theme_description,
                         "question_text": question_text
@@ -2910,6 +2939,7 @@ class Summarize:
         # Final result contains one row per theme with orphans integrated
         theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
         # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative in the correct order
+        theme_no_orphans["theme_id"] = theme_no_orphans["theme_id"].astype(int) # Before sorting defensively make sure this is int
         theme_no_orphans = theme_no_orphans.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
 
         return(theme_no_orphans)
