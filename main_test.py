@@ -206,17 +206,20 @@ summarize.map_insights_to_themes() # Insight mapping can be examined via summari
 # Then we populate the themes based on the insights that have been allocated to them bu the mapping process
 summarize.populate_themes() # Populated themes can be examined via summarize.populated_theme_list
 
-#########
-builtins.input = real_input
-#######
-
 # Then we check for any orphans that might have been dropped in the process - this captures insights that might not have been exposed via the cluster summaries that drove the firt mapping process
 summarize.address_orphans() # Orphans can be examined via summarize.orphans_list. Note that the orphans are not necessarily "orphans" in the sense that they have no thematic home, but rather they are insights that were not captured in the initial cluster summaries and therefore were not mapped to themes in the first pass. The orphans are then fed back into the theme schema generation and mapping process to see if they can be allocated to existing themes or if new themes need to be generated to accommodate them. This iterative process helps to ensure that we are capturing as many insights as possible and that we are not losing important information that might have been missed in the initial cluster summarization and theme mapping steps.
 
 
-
 # Now we iterate the above process to improve the schema - so that orphans are likely accounted for in a more complete manner than was possible with the cluster summaries
 summarize.gen_theme_schema()
+
+NOW WE ARE HERE
+
+#########
+builtins.input = real_input
+#######
+
+#################
 summarize.map_insights_to_themes()
 summarize.populate_themes()
 

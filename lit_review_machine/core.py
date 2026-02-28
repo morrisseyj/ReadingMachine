@@ -2038,13 +2038,11 @@ class Summarize:
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "theme_id": { "type": "string" },
                                     "theme_label": { "type": "string" },
                                     "theme_description": { "type": "string" },
                                     "instructions": { "type": "string" }
                                 },
                                 "required": [
-                                    "theme_id", 
                                     "theme_label", 
                                     "theme_description", 
                                     "instructions"
@@ -2069,10 +2067,9 @@ class Summarize:
             )
 
             theme_list = response.get("themes", [])
-            themes_df = pd.DataFrame(theme_list, columns=["theme_id", "theme_label", "theme_description", "instructions"])
+            themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
             themes_df["question_id"] = question_id
             themes_df["question_text"] = question_text
-            themes_df["theme_id"] = themes_df["theme_id"].astype(int)  # Ensure theme_id is numeric for sorting later
 
             out_df_list.append(themes_df)
         
