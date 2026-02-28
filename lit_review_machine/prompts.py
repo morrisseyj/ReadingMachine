@@ -553,7 +553,18 @@ class Prompts:
             "- **Theme Optimization:** You have full authority to merge, split, or revise themes/clusters to best serve the research question. You are not tethered to the original structure of the provided text."
         )
     
-    def theme_map_to_schema(self):
+    def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
+
+        allowed_ids_str = ", ".join(str(id) for id in allowed_ids)
+        if other_theme_id is not None:
+            other_theme = f"- **The Residual Override:** If no substantive theme applies, assign the insight to theme_id {other_theme_id}. Do NOT return the string 'other' as the theme_id.\n"
+        else:
+           other_theme = ""
+        if conflicts_theme_id is not None:
+            conflicts_theme = f"- **Conflict Flagging:** If the insight refelcts substantive discursive conflict and explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it to the theme_id {conflicts_theme_id}. Do NOT return the string 'conflicts' as the theme_id. As above all insights may be tagged to multiple themes.\n"
+        else:       
+            conflicts_theme = ""
+
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
@@ -562,8 +573,7 @@ class Prompts:
             "## THEMATIC SCHEMA STRUCTURE\n"
             "You will be provided with a JSON 'codebook' representing the thematic pillars. Each theme follows this structure:\n"
             "{\n"
-            "  'theme_id': 'Unique identifier (e.g., 1, other, conflicts)',\n"
-            "  'theme_label': 'The conceptual name of the category',\n"
+            "  'theme_id': '<numeric identifier (e.g., 1, 2, 3)>',\n"
             "  'theme_description': 'A concise summary of the theme’s core intent and semantic territory',\n"
             "  'instructions': 'Detailed instructions (either INCLUDE/EXCLUDE logic or DETECTION TRIGGERS)'\n"
             "}\n\n"
@@ -578,12 +588,12 @@ class Prompts:
             "...\n\n"
             
             "## MAPPING LAWS\n"
-            "1. **Active Best-Match:** Evaluate every insight against the 'theme_description' and 'instructions' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent and narrative defined in the description.\n"
-            "2. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
-            "3. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant theme_ids.\n"
-            "4. **The Residual Override ('other'):** 'other' is the mandatory exit valve. If an insight fails the specific criteria for all substantive themes (either no inclusion or explicit exclusion), you MUST assign it to 'other'. In this override scenario, the requirement for full data coverage supersedes the specific instructions for 'other'.\n"
-            "5. **Conflict Flagging:** If there is a 'conflicts' theme and an insight explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it the 'conflicts' flag. As above all insights may be tagged to multiple themes.\n"
-            "6. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
+            "-. **Active Best-Match:** Evaluate every insight against the 'theme_description' and 'instructions' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent and narrative defined in the description.\n"
+            "-. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
+            "-. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant theme_ids.\n"
+            f"{other_theme}"
+            f"{conflicts_theme}"
+            "-. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
             "Return ONLY a JSON object. No preamble, no commentary, no conversational filler. Structure:\n"
@@ -595,8 +605,16 @@ class Prompts:
 
             "RULES FOR theme_ids:\n"
             "- **Always return an array**, even if there is only one theme (e.g., ['1']).\n"
-            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['1', 'conflicts']).\n"
-            "- Never return a null, a single string, or an empty array."
+            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['1', '2', '3']).\n"
+            "- You MUST use only the numeric theme_id values provided in the THEMATIC CODEBOOK.\n"
+            "- You MUST return the theme_id exactly as provided.\n"
+            "- Do NOT return theme_label.\n"
+            "- Do NOT return text such as 'other' or 'conflicts'.\n"
+            "- Do NOT invent new IDs.\n"
+            "- Any ID not present in the codebook is invalid.\n"
+            "- Never return a null, a single string, or an empty array.\n"
+
+            f"The only valid theme_id values are: [{allowed_ids_str}].\n\n"
         )
 
 

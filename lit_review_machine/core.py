@@ -1641,7 +1641,7 @@ class Summarize:
         self.mapped_theme_list = self._reload_summary_outputs(config.mapped_themes) # List of len(n) containing the mapped themes for each theme mapping pass
         self.populated_theme_list = self._reload_summary_outputs(config.populated_themes) # List of len(n) containing the populated themes for each theme population pass
         self.orphans_list = self._reload_summary_outputs(config.orphans) # List of len(n) containing the orphaned insights for each theme population pass
-        self.redundancy_list = self._reload_summary_outputs(config.redundancy_pass) # List of len(1) containing the output of the final redundancy pass
+        self.redundancy_list = self._reload_summary_outputs(config.redundancy) # List of len(1) containing the output of the final redundancy pass
 
         # Ensure summary save location exists
         if not os.path.exists(self.summary_save_location):
@@ -1684,11 +1684,55 @@ class Summarize:
         self._assert_summarize_state_integrity(output)
         return output
     
-    def _assert_summarize_state_integrity(self, save_obj: list):
-        for obj in save_obj:
-            if "theme_id" in obj.columns:
-                if not pd.api.types.is_integer_dtype(obj["theme_id"]):
-                    print("WARNING STATE IS UNSTABLE:'theme_id' column is not integer type. This may cause issues with downstream processing. You should correct before proceding.")
+    def _assert_summarize_state_integrity(self, df_list: list, context: str = ""):
+        """
+        Developer-facing integrity check for summarize pipeline state.
+
+        - Ensures structural keys like `theme_id` maintain expected dtype.
+        - Prints loud warnings but does NOT raise errors.
+        - Intended as a guardrail during development and refactoring.
+
+        Args:
+            df_list: A list of pandas DataFrames to validate.
+            context: Optional string indicating where this check is being run
+                    (e.g., 'reload', 'save', 'post-populate').
+        """
+
+        if not isinstance(df_list, list):
+            print(
+                f"⚠️ STATE WARNING [{context}]: Expected list of DataFrames, "
+                f"received {type(df_list)}"
+            )
+            return
+
+        for idx, df in enumerate(df_list):
+
+            if df is None:
+                print(
+                    f"⚠️ STATE WARNING [{context}]: "
+                    f"DataFrame at index {idx} is None."
+                )
+                continue
+
+            if not hasattr(df, "columns"):
+                print(
+                    f"⚠️ STATE WARNING [{context}]: "
+                    f"Object at index {idx} is not a DataFrame "
+                    f"(type={type(df)})."
+                )
+                continue
+
+            # Check structural identity key
+            if "theme_id" in df.columns:
+                if not pd.api.types.is_integer_dtype(df["theme_id"]):
+                    print(
+                        f"\n🚨 STATE WARNING [{context}] 🚨\n"
+                        f"DataFrame index: {idx}\n"
+                        f"'theme_id' dtype is {df['theme_id'].dtype}, "
+                        f"expected integer.\n"
+                        f"This may cause ordering or join errors downstream.\n"
+                        f"Correct dtype drift before proceeding.\n"
+                    )
 
     def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
         """
@@ -1745,56 +1789,6 @@ class Summarize:
 
         self._assert_summarize_state_integrity(obj_to_save)
 
-
-    
-
-
-
-
-
-    
-    #### I DON"T THINK I WANT THIS ANYMORE BECAUSE I DON"T CARE ABOUT THE CLUSTER SUMMARIES, ONLY THE THEME SUMMARIES. 
-    # def _calculate_summary_length(self) -> pd.DataFrame:
-    #     """
-    #     Allocate summary length proportionally by insight count
-    #     and enforce a 300-word minimum per theme.
-    #     """
-
-    #     MIN_THEME_WORDS = 300
-    #     MAX_THEME_WORDS = 2800
-
-    #     # Count insights per cluster
-    #     length_df: pd.DataFrame = (
-    #         self.state.insights
-    #         .dropna(subset=["cluster"])
-    #         .groupby(["question_id", "cluster"])
-    #         .size()
-    #         .reset_index(name="count")
-    #     )
-
-    #     # Proportional allocation
-    #     length_df["prop"] = length_df["count"] / length_df["count"].sum()
-    #     length_df["raw_length"] = length_df["prop"] * self.paper_output_length
-
-    #     # Apply minimum floor (no renormalization)
-    #     length_df["length"] = length_df["raw_length"].clip(lower=MIN_THEME_WORDS)
-
-    #     # Optional max cap safeguard
-    #     length_df["length"] = length_df["length"].clip(upper=MAX_THEME_WORDS)
-
-    #     # Format for prompt
-    #     length_df["length_str"] = (
-    #         length_df["length"].astype(int).astype(str) + " words"
-    #     )
-
-    #     # Merge back into insights
-    #     insights_with_length: pd.DataFrame = self.state.insights.merge(
-    #         length_df[["question_id", "cluster", "length_str"]],
-    #         how="left",
-    #         on=["question_id", "cluster"]
-    #     )
-
-    #     return insights_with_length
 
     def _calculate_centroid(self, col="full_insight_embedding"):
         rows = []
@@ -2179,6 +2173,20 @@ class Summarize:
             self._save_summary_outputs([config.theme_schemas])
             return new_schema
 
+    def _validate_and_cast_theme_ids(self, df, allowed_ids):
+        allowed_set = set(str(i) for i in allowed_ids)
+        returned_set = set(df["theme_id"].astype(str))
+
+        invalid_ids = returned_set - allowed_set
+        if invalid_ids:
+            raise ValueError(
+                f"Invalid theme_id(s) returned by LLM: {invalid_ids}. "
+                f"Allowed IDs: {sorted(allowed_set)}"
+            )
+
+        df["theme_id"] = df["theme_id"].astype(int)
+        return df
+
     
     def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
         #### --------------------------------------------------
@@ -2366,8 +2374,19 @@ class Summarize:
                     for row in batch_df.itertuples()
                 )
 
-                sys_prompt = Prompts().theme_map_to_schema()
+                # Get the inputs to the sys prompt call: the list of allowd theme_ids to tag to, the other theme id and the conflict theme id
+                allowed_theme_ids = q_schema_df["theme_id"].astype(int).tolist()
+                other_theme_rows = q_schema_df[q_schema_df["theme_label"].str.contains("other", case=False, na=False)]["theme_id"].astype(str)
+                other_theme_id = other_theme_rows.iloc[0] if not other_theme_rows.empty else None
+                conflicts_theme_rows = q_schema_df[q_schema_df["theme_label"].str.contains("conflict", case=False, na=False)]["theme_id"].astype(str)
+                conflicts_theme_id = conflicts_theme_rows.iloc[0] if not conflicts_theme_rows.empty else None
 
+                sys_prompt = Prompts().theme_map_to_schema(
+                    allowed_ids=allowed_theme_ids,
+                    other_theme_id=other_theme_id,
+                    conflicts_theme_id=conflicts_theme_id
+                    )
+                
                 user_prompt = (
                     f"RESEARCH QUESTION: {question_text}\n"
                     "THEMATIC CODEBOOK:\n"
@@ -2396,6 +2415,12 @@ class Summarize:
                 # Expand theme_id
                 batch_results_df = batch_results_df.explode("theme_id")
                 batch_results_df["question_id"] = question_id
+                # Validate that all returned theme_ids are valid
+                batch_results_df = self._validate_and_cast_theme_ids(
+                    batch_results_df,
+                    allowed_theme_ids
+                )
+                
                 # Ensure that theme_id is numeric for consistency with the schema and to allow for subsequent sorting
                 batch_results_df["theme_id"] = batch_results_df["theme_id"].astype(int)
 
@@ -2538,7 +2563,7 @@ class Summarize:
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
         # Copy the df because this could be called on a state object
-        schema_df["question_id"] = schema_df["question_id"].astype(int).copy()
+        schema_df["question_id"] = schema_df["question_id"].copy()
         schema_df["theme_id"] = schema_df["theme_id"].astype(int).copy()
         
         if "allocated_length" not in schema_df.columns:
@@ -2708,7 +2733,27 @@ class Summarize:
                 length_check_theme_ids = df_len_flagged["theme_id"].tolist()
                 rerun_mapped_df = self.mapped_theme_list[-1][self.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
                 # Rerun on the flagged themes with the expanded length and get new summaries for those themes
-                rerun_populated_themes_df = self._run_theme_pop(df_len_flagged, rerun_mapped_df, paper_len)
+                rerun_theme_ids = df_len_flagged["theme_id"].tolist()
+                rerun_schema_df = (
+                    self.theme_schema_list[-1][self.theme_schema_list[-1]["theme_id"].isin(rerun_theme_ids)] # First filter the schema to just the themes we want to rerun
+                    .drop(columns=["allocated_length"], errors="ignore") # Drop allocated length as we will get the updated length from df_len_flagged 
+                    .copy() # Copy so that we are not modifying state
+                )
+                # Now get the updated allocated length via a merge
+                rerun_schema_df = ( 
+                    rerun_schema_df
+                    .merge(df_len_flagged[["theme_id", "allocated_length"]], 
+                           on="theme_id", 
+                           how="left")
+                )
+                # Add a sanity check to make sure the allocated length came through in the merge, as this is critical for the rerun. Fail loudly if there is a problem
+                if rerun_schema_df["allocated_length"].isna().any():
+                    raise ValueError(
+                        "Expanded allocated_length missing for some rerun themes."
+                    )
+                
+                # Rerun the theme populater on the theme_schema_df
+                rerun_populated_themes_df = self._run_theme_pop(rerun_schema_df, rerun_mapped_df, paper_len)
                 rerun_len_ok, df_len_flagged = self._check_length_and_flag(rerun_populated_themes_df, max_prop)
                 # If this produced any themes for which the length is now ok we replace the odl summaries in populated_theme_list with these updates
                 if rerun_len_ok.shape[0] > 0:
@@ -2868,7 +2913,7 @@ class Summarize:
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
-            question_text = row["question_text"]
+            question_text = self.state.questions[self.state.questions["question_id"] == question_id]["question_text"].iloc[0] # Get the question text from the state questions df using the question id in the row
             theme_description = row["theme_description"]
             thematic_summary = row["thematic_summary"] # Stuck to your name here
             
@@ -2980,6 +3025,10 @@ class Summarize:
         # --- Run orphan logic ---
         # Get the orphans and replace or append
         orphans_df = self._identify_orphans()
+
+        # We want to make sure integrate orphans completes before we update the orphan list and before we save. 
+        # This is because a failure on integration should force the user back to re-run the orphan id and insertion, not leave them with an orphan list that has not been intergated. 
+
         if replace_mode:
             self.orphans_list[-1] = orphans_df
         else:
@@ -2987,12 +3036,12 @@ class Summarize:
         # Save the orphans_list
         self._save_summary_outputs([config.orphans])
         # Now that i have saved, i can clear the resume pickle as the process is now saved as parquet
-        os.remove(self.orphan_pickle_resume_path)
+        
 
         # Now check for integration     
         if orphans_df.shape[0] == 0:
             print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
-            return(self.populated_theme_list[-1])
+
         
         else:
             print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
@@ -3001,8 +3050,18 @@ class Summarize:
             # Always replace because its a repair on the existing theme summaries
             self.populated_theme_list[-1] = updated_summary_df
             # Save the updated theme summaries
-            self._save_summary_outputs([config.populated_themes])
-            return(self.populated_theme_list[-1])
+        
+        # Now update the orphan list (populated_summary updated with integrated orphans in the else branch above)
+        if replace_mode:
+            self.orphans_list[-1] = orphans_df
+        else:
+            self.orphans_list.append(orphans_df)
+        # Save both
+        self._save_summary_outputs([config.populated_themes, config.orphans])
+        # delete pickle after save   
+        os.remove(self.orphan_pickle_resume_path) 
+        # Return updated populated themes with orphans integrated
+        return(self.populated_theme_list[-1])
 
     def rewind_to(self, stage: str, index: int):
 
@@ -3075,24 +3134,24 @@ class Summarize:
             config.orphans,
         ])
 
-        def restart(self):
-            confirm = None
-            while confirm not in ["yes", "no"]:
-                confirm = input(
-                    "Are you sure you want to restart the process? This will clear all existing themes schemas, mappings, populated themes, orphan audits and redundancy passes. Enter 'yes' to confirm or 'no' to cancel.\n"
-                ).lower()
-            
-            if confirm == "yes":
-                self.theme_schema_list = []
-                self.mapped_theme_list = []
-                self.populated_theme_list = []
-                self.orphans_list = []
-                self.redundancy_list = []
+    def restart(self):
+        confirm = None
+        while confirm not in ["yes", "no"]:
+            confirm = input(
+                "Are you sure you want to restart the process? This will clear all existing themes schemas, mappings, populated themes, orphan audits and redundancy passes. Enter 'yes' to confirm or 'no' to cancel.\n"
+            ).lower()
+        
+        if confirm == "yes":
+            self.theme_schema_list = []
+            self.mapped_theme_list = []
+            self.populated_theme_list = []
+            self.orphans_list = []
+            self.redundancy_list = []
 
-                self._delete_summary_outputs(file_prefixes=[config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
+            self._delete_summary_outputs(file_prefixes=[config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
 
-            else:
-                print("Restart cancelled. Existing data preserved.")
+        else:
+            print("Restart cancelled. Existing data preserved.")
 
     def status(self):
         print("Current Status:")
@@ -3105,6 +3164,8 @@ class Summarize:
             print(f"Redundancy passes: applied")
         else:
             print(f"Redundancy passes: not applied")
+
+################
 
 
     def address_redundancy(self) -> pd.DataFrame:
