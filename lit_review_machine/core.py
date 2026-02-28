@@ -2373,9 +2373,9 @@ class Summarize:
 
                 # Get the inputs to the sys prompt call: the list of allowd theme_ids to tag to, the other theme id and the conflict theme id
                 allowed_theme_ids = q_schema_df["theme_id"].astype(int).tolist()
-                other_theme_rows = q_schema_df[q_schema_df["theme_label"].str.contains("other", case=False, na=False)]["theme_id"].astype(str)
+                other_theme_rows = q_schema_df[q_schema_df["theme_label"].str.lower() == "other"]["theme_id"].astype(str)
                 other_theme_id = other_theme_rows.iloc[0] if not other_theme_rows.empty else None
-                conflicts_theme_rows = q_schema_df[q_schema_df["theme_label"].str.contains("conflict", case=False, na=False)]["theme_id"].astype(str)
+                conflicts_theme_rows = q_schema_df[q_schema_df["theme_label"].str.lower() == "conflict"]["theme_id"].astype(str)
                 conflicts_theme_id = conflicts_theme_rows.iloc[0] if not conflicts_theme_rows.empty else None
 
                 sys_prompt = Prompts().theme_map_to_schema(
@@ -2600,9 +2600,17 @@ class Summarize:
                 populated_themes.append(no_insight_df)
                 continue
             insights_str = "\n".join(insights)
-            
+
+            # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
+            if "conflict" == theme_label.lower():
+                theme_type = "conflicts"
+            elif "other" == theme_label.lower():
+                theme_type = "other"
+            else:
+                theme_type = "general"
+                
             # Build the prompt
-            sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
+            sys_prompt = Prompts().populate_themes(theme_len=allocated_length, theme_type=theme_type)
             user_prompt = (
                 f"RESEARCH QUESTION: {rq_text}\n"
                 f"THEME LABEL: {theme_label}\n"
@@ -3022,24 +3030,11 @@ class Summarize:
         # --- Run orphan logic ---
         # Get the orphans and replace or append
         orphans_df = self._identify_orphans()
-
-        # We want to make sure integrate orphans completes before we update the orphan list and before we save. 
-        # This is because a failure on integration should force the user back to re-run the orphan id and insertion, not leave them with an orphan list that has not been intergated. 
-
-        if replace_mode:
-            self.orphans_list[-1] = orphans_df
-        else:
-            self.orphans_list.append(orphans_df)
-        # Save the orphans_list
-        self._save_summary_outputs([config.orphans])
-        # Now that i have saved, i can clear the resume pickle as the process is now saved as parquet
-        
-
+        # Note we don't append to the state list yet because integration has yet to happen and we don't want the state to update and have integration crash. So we hold of for now.
         # Now check for integration     
         if orphans_df.shape[0] == 0:
             print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
 
-        
         else:
             print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
             # Get the new populated theme summaries

@@ -512,54 +512,74 @@ class Prompts:
     def gen_theme_schema(self):
        return(
            "## ROLE\n"
-        "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
-        "Your task is to analyze the provided text and design a 'Thematic Codebook' "
-        "that maps the semantic landscape while ensuring total coverage of the ideas expressed.\n"
-        "The text provided is either a semantically clustered set of insights or the output of a prior theme population exercise.\n\n"
+            "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
+            "Your task is to analyze the provided text and design a 'Thematic Codebook' "
+            "that maps the semantic landscape while ensuring total coverage of the ideas expressed.\n"
+            "The text provided is either a semantically clustered set of insights or the output of a prior theme population exercise.\n\n"
 
-        "## THE TASK\n"
-        "1. **Identify Major Themes:** Determine the recurring, dominant topics. Themes must be **conceptually exclusive**—each should represent a distinct semantic territory.\n"
-        "2. **Identify Discursive Conflicts (Conditional):** If the text indicates contradictions or trade-offs (e.g., 'views are mixed'), create a 'conflicts' category. This is a **Relational Flagger** used to identify tension within or across themes. **If no tension exists, OMIT this category.**\n"
-        "3. **Identify 'Other' Category (Conditional):** A bucket for relevant but minority concepts to ensure full semantic coverage without inducing theme bloat. **If no minority concepts exist, OMIT this category.**\n"
-        "4. **Establish Precise Instructions:** Every category must have bespoke instructions. Use the following logic styles:\n"
-        "   - **For Substantive Themes/Other:** 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
-        "   - **For Conflicts:** 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+            "## THE TASK\n"
+            "1. **Identify Major Themes:** Determine the recurring, dominant topics. "
+            "Themes must be conceptually exclusive—each should represent a distinct semantic territory.\n\n"
 
-        "## INPUT\n"
-        "RESEARCH QUESTION: <question_text>\n"
-        "TEXT TO ANALYZE: <text_content>\n\n"
+            "2. **Identify Discursive Conflicts (Conditional):** "
+            "If the text indicates structured disagreement, contradiction, or trade-offs, "
+            "you MUST create a theme object where the field \"theme_label\" is exactly \"Conflicts\". "
+            "Do NOT paraphrase this label. Do NOT rename it. Use exactly \"Conflicts\". "
+            "If no meaningful tension exists, OMIT this theme entirely.\n\n"
 
-        "## OUTPUT FORMAT (STRICT JSON)\n"
-        "Return a JSON object with a single key 'themes' containing an array of objects. "
-        "All identified categories must follow this structure:\n"
-        "{\n"
-        '  "themes": [\n'
-        "    {\n"
-        '      "theme_label": <string>,\n'
-        '      "theme_description": <string>,\n'
-        '      "instructions": <string>\n'
-        "    }\n"
-        "  ]\n"
-        "}\n\n"
+            "3. **Identify 'Other' Category (Conditional):** "
+            "If necessary to ensure full semantic coverage without inducing theme bloat, "
+            "you MUST create a theme object where the field \"theme_label\" is exactly \"Other\". "
+            "Do NOT paraphrase this label. Do NOT rename it. Use exactly \"Other\". "
+            "If no minority or residual concepts exist, OMIT this theme entirely.\n\n"
 
-        "## ARCHITECTURAL CONSTRAINTS\n"
-        "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
-        "This provides the conceptual narrative for the theme, serving as a reference point for both the tagger and the final summary population.\n"
-        "- **Conceptual Mutuality (Themes):** Themes must have distinct boundaries. "
-        "The 'EXCLUDE' criteria for a theme should explicitly point to the territories of other themes to prevent conceptual overlap.\n"
-        "- **Relational Flagger (Conflicts):** The 'Conflicts' category is a secondary overlay. "
-        "It must NOT use standard 'Exclusion' logic. Use **DETECTION TRIGGERS** to name specific fault lines. "
-        "Content can be assigned to a substantive theme AND the Conflicts flag simultaneously.\n"
-        "- **The 'Other' Bucket:** This category exists to prevent 'Theme Bloat.' "
-        "It should house valid, relevant ideas that do not have the frequency to warrant a standalone theme. "
-        "It requires standard INCLUDE/EXCLUDE logic.\n"
-        "- **Multi-Labeling:** Design the codebook with the understanding that categories are not mutually exclusive. "
-        "A single point of data may satisfy the criteria for multiple themes or flags.\n"
-        "- **Anti-Smoothing:** If the input text indicates multiple points of view, the 'Conflicts' triggers must explicitly define those opposing views to ensure the tension is preserved.\n"
-        "- **Total Coverage:** Every concept in the input must be addressable by the substantive themes or the 'Other' category.\n"
-        "- **Theme Optimization:** You have full authority to merge, split, or revise themes/clusters to best serve the research question. "
-        "You are not tethered to the original structure of the provided text."
-       )
+            "4. **Establish Precise Instructions:** Every category must have bespoke instructions. "
+            "Use the following logic styles:\n"
+            "   - For Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
+            "   - For Conflicts: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+            "## INPUT\n"
+            "RESEARCH QUESTION: <question_text>\n"
+            "TEXT TO ANALYZE: <text_content>\n\n"
+
+            "## OUTPUT FORMAT (STRICT JSON)\n"
+            "Return a JSON object with a single key 'themes' containing an array of objects. "
+            "All identified categories must follow this structure exactly:\n"
+            "{\n"
+            "  \"themes\": [\n"
+            "    {\n"
+            "      \"theme_label\": <string>,\n"
+            "      \"theme_description\": <string>,\n"
+            "      \"instructions\": <string>\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+
+            "## ARCHITECTURAL CONSTRAINTS\n"
+            "- **Structural Identity:** Do NOT generate numeric identifiers. "
+            "theme_id values will be assigned programmatically outside this step. "
+            "Focus only on semantic design (theme_label, theme_description, instructions).\n"
+            "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
+            "This provides the conceptual narrative for the theme and serves as the North Star logic "
+            "for downstream tagging and summary population.\n"
+            "- **Conceptual Mutuality (Themes):** Themes must have distinct boundaries. "
+            "The 'EXCLUDE' criteria for a theme should explicitly reference the territories of other themes "
+            "to prevent conceptual overlap.\n"
+            "- **Relational Flagger (Conflicts):** The theme whose \"theme_label\" is \"Conflicts\" "
+            "is a secondary overlay. It must NOT use standard 'Exclusion' logic. "
+            "Use DETECTION TRIGGERS to explicitly define opposing positions or fault lines. "
+            "When generating a Conflicts category, preserve polarity rather than harmonizing positions.\n"
+            "- **The 'Other' Bucket:** The theme whose \"theme_label\" is \"Other\" prevents theme bloat. "
+            "It should house valid but lower-frequency ideas that do not warrant a standalone theme. "
+            "It requires standard INCLUDE/EXCLUDE logic.\n"
+            "- **Multi-Labeling Awareness:** Categories are not mutually exclusive. "
+            "A single point of data may satisfy criteria for multiple themes or the Conflicts flag.\n"
+            "- **Anti-Smoothing:** If the input text indicates multiple viewpoints, explicitly preserve those distinctions. "
+            "Do not collapse opposing positions into neutralized consensus language.\n"
+            "- **Total Coverage:** Every concept in the input must be addressable by the substantive themes or the 'Other' category.\n"
+            "- **Theme Optimization:** You have full authority to merge, split, or revise themes to best serve the research question. "
+            "You are not tethered to the original structure of the provided text."
+        )
        
     
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
@@ -627,8 +647,59 @@ class Prompts:
         )
 
 
-    def populate_themes(self, theme_len: int):
-        return(
+    def populate_themes(self, theme_len: int, theme_type: str):
+               
+        # -----------------------------------------------------
+        # Specific instructions for different theme types
+        # -----------------------------------------------------
+
+        general_theme_instructions = (
+            "## STRUCTURAL INSTRUCTION — GENERAL THEME\n\n"
+            "Organize the section as a coherent thematic narrative.\n"
+            "Integrate related insights into a logically structured synthesis.\n"
+            "Avoid list-like presentation.\n"
+            "Preserve conceptual distinctions while maintaining flow.\n\n"
+        )
+
+        other_theme_instructions = (
+            "## STRUCTURAL INSTRUCTION — 'OTHER' THEME\n\n"
+            "This theme captures valid but lower-frequency or residual claims.\n\n"
+
+            "REQUIREMENTS:\n"
+            "- Organize minority claims coherently.\n"
+            "- Treat them as substantively meaningful but less dominant.\n"
+            "- Preserve conceptual distinctions among minority claims.\n"
+            "- Do NOT inflate their weight relative to dominant themes.\n\n"
+        )
+
+        conflict_theme_instructions = (
+            "## STRUCTURAL INSTRUCTION — DISCURSIVE CONFLICT THEME\n\n"
+            "This theme captures structured disagreement, tension, or fault lines.\n"
+            "Organize the section explicitly around opposing positions.\n\n"
+
+            "REQUIREMENTS:\n"
+            "- Present opposing arguments in contrastive form (e.g., 'Proponents argue… while critics contend…').\n"
+            "- Structure the narrative around identifiable fault lines.\n"
+            "- Do NOT resolve the disagreement.\n"
+            "- Preserve tension rather than harmonizing positions.\n"
+            "- Make asymmetries in evidentiary weight visible using analytic language "
+            "(e.g., widely supported, frequently cited, minority view).\n"
+            "- Avoid smoothing language that implies convergence unless explicitly supported by the insights.\n\n"
+        )
+
+        instructions_dict = {
+            "general": general_theme_instructions,
+            "other": other_theme_instructions,
+            "conflicts": conflict_theme_instructions
+            }
+        
+        if theme_type not in instructions_dict:
+            raise ValueError("Invalid theme_type. Must be one of: 'general', 'other', 'conflicts'.")
+        
+        specific_instructions = instructions_dict[theme_type]
+
+
+        return (
             "## ROLE\n"
             "You are a Qualitative Research Lead specializing in High-Fidelity Synthesis. "
             "Your task is to analyze a collection of Research Insights mapped to a specific theme "
@@ -666,8 +737,8 @@ class Prompts:
             "Prioritize preservation of conceptual distinctions and salience structure "
             "over stylistic elaboration.\n\n"
 
-            "5. Length Constraint:\n"
-            "   Do not exceed {theme_len} words.\n\n"
+            f"5. Length Constraint:\n"
+            f"   Do not exceed {theme_len} words.\n\n"
 
             "6. Fidelity:\n"
             "   Preserve all factual details and citations exactly as they appear in the source text. "
@@ -676,16 +747,7 @@ class Prompts:
             "7. Tone:\n"
             "   Maintain a formal, academic, analytic tone.\n\n"
 
-            "8. Handling \"Other\" Themes:\n"
-            "   Treat contents as salient minority claims. Organize them coherently "
-            "rather than presenting them as residual noise.\n\n"
-
-            "9. Handling \"Conflict\" Themes:\n"
-            "   Organize discursive disagreements without resolving them. "
-            "Reflect relative weight using analytic language "
-            "(e.g., widely supported, frequently mentioned, a few citations). "
-            "Do not use raw numerical counts. "
-            "Use author-date citations consistently.\n\n"
+            f"{specific_instructions}"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n\n"
             "Return ONLY a JSON object. No commentary.\n\n"
@@ -693,6 +755,7 @@ class Prompts:
             "  \"thematic_summary\": \"The synthesized thematic narrative including citations.\"\n"
             "}\n"
         )
+
     
 
     def identify_orphans(self):

@@ -172,18 +172,6 @@ summarize = core.Summarize(state=latest_state,
                            paper_output_length=14000)
 
 
-for idx, i in enumerate([summarize.cluster_summary_list, summarize.theme_schema_list, summarize.mapped_theme_list, summarize.populated_theme_list, summarize.orphans_list]):
-    for j in i:
-        if "theme_id" in j.columns:
-            if j["theme_id"].dtype != "int64":
-                print(f"WARNING: 'theme_id' column in {idx} is not integer type. This may cause issues with downstream processing. You should correct before proceding.")
-
-
-summarize.theme_schema_list[-1]["theme_id"].unique()
-summarize.mapped_theme_list[-1]["theme_id"].unique()
-
-
-
 #########
 import builtins
 real_input = builtins.input
@@ -212,19 +200,22 @@ summarize.address_orphans() # Orphans can be examined via summarize.orphans_list
 
 # Now we iterate the above process to improve the schema - so that orphans are likely accounted for in a more complete manner than was possible with the cluster summaries
 summarize.gen_theme_schema()
-
-NOW WE ARE HERE
+summarize.map_insights_to_themes()
+summarize.populate_themes()
+summarize.address_orphans() # This will be the final pass for orphans before we check for redundancy and then finally repair with orphan handling
 
 #########
 builtins.input = real_input
 #######
 
 #################
-summarize.map_insights_to_themes()
-summarize.populate_themes()
+NOW WE ARE HERE
+#################
 
 # Finally we handle redundancy
 summarize.address_redundancy()
+
+summarize.address_orphans() # This will be the final pass for orphans after redundancy check, as some insights that were previously orphans may now be able to be allocated to themes after the redundancy check has removed some of the noise from the populated themes.
 
 #THen we pass the output of the redudancy check to the render class
 
