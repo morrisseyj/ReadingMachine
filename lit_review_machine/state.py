@@ -1,6 +1,7 @@
 
 # Import custom libraries
 from lit_review_machine import utils
+from lit_review_machine import config
 
 # Import standard libraries
 import pandas as pd
@@ -11,8 +12,9 @@ import pyarrow.parquet as pq
 import numpy as np
 import ast
 from pathlib import Path
+import shutil
 
-class QuestionState:
+class CorpusState:
     """
     Container for managing research pipeline state.
 
@@ -86,7 +88,7 @@ class QuestionState:
     
     def save(self, save_location: str) -> None:
         """
-        Save the entire QuestionState object as Parquet files (one per DataFrame attribute).
+        Save the entire CorpusState object as Parquet files (one per DataFrame attribute).
         Handles list-like columns (`paper_author`, embeddings) using PyArrow array types.
         """
 
@@ -160,14 +162,14 @@ class QuestionState:
     # ---------------------------------------------------------------------- #
     
     @classmethod
-    def from_json(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), join_str="-||-|||-||-") -> "QuestionState":
+    def from_json(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), join_str="-||-|||-||-") -> "CorpusState":
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No folder found at {filepath}")
 
         files = os.listdir(filepath)
         files = [file for file in files if Path(file).suffix.lower() == ".json"]
         if "insights.json" not in files:
-            raise FileNotFoundError(f"'insights.json' file not found in {filepath}, cannot load QuestionState.")
+            raise FileNotFoundError(f"'insights.json' file not found in {filepath}, cannot load CorpusState.")
         state_df_dict = {}
         for file in files:
             full_path = os.path.join(filepath, file)
@@ -192,7 +194,7 @@ class QuestionState:
         return question_state
 
     @classmethod
-    def from_parquet(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), new = True, join_str="-||-|||-||-") -> "QuestionState":
+    def from_parquet(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), new = True, join_str="-||-|||-||-") -> "CorpusState":
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No folder found at {filepath}")
          
@@ -200,7 +202,7 @@ class QuestionState:
         state_df_dict = {}
         if new:
             if "insights.parquet" not in files:
-                raise FileNotFoundError(f"'insights.parquet' file not found in {filepath}, cannot load QuestionState.")
+                raise FileNotFoundError(f"'insights.parquet' file not found in {filepath}, cannot load CorpusState.")
 
             for file in files:
                 full_path = os.path.join(filepath, file)
@@ -213,14 +215,14 @@ class QuestionState:
                             lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
                         )
 
-            question_state = cls(
+            corpus_state = cls(
                 questions=state_df_dict.get("questions"),
                 insights=state_df_dict["insights"],
                 full_text=state_df_dict.get("full_text", None),
                 chunks=state_df_dict.get("chunks", None)
             )
 
-            return question_state
+            return corpus_state
        
         else:
             files = os.listdir(filepath)
@@ -231,7 +233,7 @@ class QuestionState:
                 df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
                 state_df_dict[Path(file).stem] = df
 
-            question_state = cls(
+            corpus_state = cls(
                 questions=state_df_dict.get("questions"),
                 insights=state_df_dict.get("insights", None),
                 full_text=state_df_dict.get("full_text", None),
@@ -239,14 +241,14 @@ class QuestionState:
             )
             
             # Normalize the columns - first get arrays to lists then get 
-            question_state.arrays_to_lists(["paper_author", "insight", "chunks", "pages"])
-            question_state.normalize_list_columns(["paper_author", "insight", "chunks", "pages"])
-            return question_state
+            corpus_state.arrays_to_lists(["paper_author", "insight", "chunks", "pages"])
+            corpus_state.normalize_list_columns(["paper_author", "insight", "chunks", "pages"])
+            return corpus_state
     
     @classmethod
-    def load(cls, filepath: str) -> "QuestionState":
+    def load(cls, filepath: str) -> "CorpusState":
         """
-        Load a QuestionState object from a folder of Parquet files.
+        Load a CorpusState object from a folder of Parquet files.
         Expects one Parquet per DataFrame attribute.
         """
 
@@ -280,7 +282,7 @@ class QuestionState:
         )
 
     @classmethod
-    def from_csv(cls, filepath: str, encoding="utf-8") -> "QuestionState":
+    def from_csv(cls, filepath: str, encoding="utf-8") -> "CorpusState":
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No folder found at {filepath}")
 
@@ -296,7 +298,7 @@ class QuestionState:
 
             df_dict[Path(file).stem] = df
 
-        question_state = cls(
+        corpus_state = cls(
             questions=df_dict.get("questions"),
             insights=df_dict.get("insights", None),
             full_text=df_dict.get("full_text", None),
@@ -304,7 +306,7 @@ class QuestionState:
         )
         
         # Normalize the columns - first get arrays to lists then get viable lists
-        return question_state
+        return corpus_state
 
     # ---------------------------------------------------------------------- #
     #                             HELPER UTILS                              #
@@ -346,4 +348,292 @@ class QuestionState:
     #                 if col in attr_value.columns:
     #                     attr_value[col] = attr_value[col].apply(utils.ensure_list_of_strings)
     #             setattr(self, attr_name, attr_value)
-     
+    
+
+    class SummaryState:
+        """
+        Holds all interpretive artifacts generated during the summarization stage.
+
+        Attributes
+        ----------
+        cluster_summary_list : List[pd.DataFrame]
+        theme_schema_list : List[pd.DataFrame]
+        mapped_theme_list : List[pd.DataFrame]
+        populated_theme_list : List[pd.DataFrame]
+        orphan_list : List[pd.DataFrame]
+        redundancy_list : List[pd.DataFrame]
+
+        This object represents the full state of the thematic summarization pipeline.
+
+        The SummaryState is distinguished from CorpusState as the latter is focused on tracking the way insights are developed, SummaryState tracks the evolution of the summary artefacts
+        """
+        def __init__(
+            self,
+            summary_save_location: str = config.SUMMARY_SAVE_LOCATION,
+        ) -> None:
+            self.summary_save_location = summary_save_location
+
+            # Ensure summary save location exists
+            if not os.path.exists(self.summary_save_location):
+                os.makedirs(self.summary_save_location, exist_ok=True)
+
+            # Reload any runs that might have already happened, or create place holders for that data. 
+            # These are in a different form to corpus_state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
+            self.cluster_summary_list = self.load(config.summary_state_prefix["cluster_summary_list"]) # List of len(1) containing the cluster summaries
+            self.theme_schema_list = self.load(config.summary_state_prefix["theme_schema_list"]) # List of len(n) containing the theme schemas for each re-theming pass
+            self.mapped_theme_list = self.load(config.summary_state_prefix["mapped_theme_list"]) # List of len(n) containing the mapped themes for each theme mapping pass
+            self.populated_theme_list = self.load(config.summary_state_prefix["populated_theme_list"]) # List of len(n) containing the populated themes for each theme population pass
+            self.orphan_list = self.load(config.summary_state_prefix["orphan_list"]) # List of len(n) containing the orphaned insights for each theme population pass
+            self.redundancy_list = self.load(config.summary_state_prefix["redundancy_list"]) # List of len(1) containing the output of the final redundancy pass
+
+
+        def load(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
+            """
+            Finds and loads all parquet versions of a specific file, sorted by creation time.
+
+            This method searches the summary save location for files matching the 
+            pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
+            ordered from oldest to newest.
+
+            Args:
+                file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
+
+            Returns:
+                A list of pandas DataFrames if matching files exist, otherwise None.
+                The list is sorted by file creation time (st_birthtime/st_mtime).
+            """
+            base_dir = Path(self.summary_save_location)
+            
+            # 1. Grab all potential matches using the prefix wildcard
+            # We wrap in list() so we can check if any files were actually found
+            paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
+
+            if not paths:
+                return []
+
+            # 2. Sort by creation/birth time
+            # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
+            paths_sorted = sorted(
+                paths, 
+                key=lambda p: getattr(p.stat(), 'st_birthtime', p.stat().st_mtime)
+            )
+
+            # 3. Load and return the list of DataFrames
+            output = [pd.read_parquet(p.absolute()) for p in paths_sorted]
+            self._assert_state_integrity(output, context = f"Load: {file_prefix}")
+            return output
+        
+        def _assert_state_integrity(self, df_list: list, context: str = ""):
+            """
+            Developer-facing integrity check for summarize pipeline corpus_state.
+
+            - Ensures structural keys like `theme_id` maintain expected dtype.
+            - Prints loud warnings but does NOT raise errors.
+            - Intended as a guardrail during development and refactoring.
+
+            Args:
+                df_list: A list of pandas DataFrames to validate.
+                context: Optional string indicating where this check is being run
+                        (e.g., 'reload', 'save', 'post-populate').
+            """
+
+            if not isinstance(df_list, list):
+                print(
+                    f"⚠️ STATE WARNING [{context}]: Expected list of DataFrames, "
+                    f"received {type(df_list)}"
+                )
+                return
+
+            for idx, df in enumerate(df_list):
+
+                if df is None:
+                    print(
+                        f"STATE WARNING [{context}]: "
+                        f"DataFrame at index {idx} is None."
+                    )
+                    continue
+
+                if not hasattr(df, "columns"):
+                    print(
+                        f"STATE WARNING [{context}]: "
+                        f"Object at index {idx} is not a DataFrame "
+                        f"(type={type(df)})."
+                    )
+                    continue
+
+                # Check structural identity key
+                if "theme_id" in df.columns:
+                    if not pd.api.types.is_integer_dtype(df["theme_id"]):
+                        print(
+                            f"\nSTATE WARNING [{context}]\n"
+                            f"DataFrame index: {idx}\n"
+                            f"'theme_id' dtype is {df['theme_id'].dtype}, "
+                            f"expected integer.\n"
+                            f"This may cause ordering or join errors downstream.\n"
+                            f"Correct dtype drift before proceeding.\n"
+                    )
+
+        def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
+            """
+            Deletes summary output files matching the given prefixes.
+
+            Args:
+                file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
+            """
+            if not self.summary_save_location:
+                return
+
+            base_dir = Path(self.summary_save_location)
+            
+            # Ensure we don't try to glob an empty path or a non-existent directory
+            if not base_dir.is_dir():
+                return
+
+            for prefix in file_prefixes:
+                # glob finds every file starting with prefix and ending in .parquet
+                for file_path in base_dir.glob(f"{prefix}*.parquet"):
+                    # missing_ok=True prevents crashes if another process 
+                    # deletes the file between globbing and unlinking
+                    file_path.unlink(missing_ok=True)
+
+        
+        def save(self) -> None:
+            """
+            Atomically saves the current SummaryState to disk.
+            Writes to a temporary directory first, then replaces the live directory.
+            """
+
+            save_path = Path(self.summary_save_location)
+
+            # Ensure parent directory exists
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create a true temporary directory next to target
+            temp_path = save_path.parent / f"{save_path.name}_tmp"
+
+            # If temp exists from previous crash, clean it
+            if temp_path.exists():
+                shutil.rmtree(temp_path)
+
+            temp_path.mkdir()
+
+            # Write all summary state lists into temp directory
+            for name in config.summary_state_prefix.values():
+                data_list = getattr(self, name)
+                
+                # Check the data integrity to id any issues. 
+                self._assert_state_integrity(data_list, context=f"Saving: {name}")
+
+                for idx, df in enumerate(data_list, start=1):
+                    filename = f"{name}_{idx}.parquet"
+                    df.to_parquet(temp_path / filename, index=False)
+
+
+            # Now atomically replace old directory
+            if save_path.exists():
+                shutil.rmtree(save_path)
+
+            temp_path.rename(save_path)
+
+            print(f"Summary outputs saved successfully to {save_path}.")
+            
+
+        def rewind_to(self, stage: str, index: int):
+
+            stage_order = {
+                "schema": 0,
+                "mapping": 1,
+                "populate": 2,
+                "orphan": 3,
+            }
+
+            if stage not in stage_order:
+                raise ValueError("Invalid stage name.")
+
+            target_depth = stage_order[stage]
+
+            structural = [
+                self.theme_schema_list,
+                self.mapped_theme_list,
+                self.populated_theme_list,
+                self.orphan_list,
+            ]
+
+            if index < 0:
+                raise ValueError("Index must be >= 0.")
+
+            target_list = structural[target_depth]
+            if index >= len(target_list):
+                raise ValueError("Index exceeds available passes.")
+
+            # Now realign explicitly
+            if target_depth == 0:  # schema
+                self.theme_schema_list = self.theme_schema_list[:index+1]
+                self.mapped_theme_list = self.mapped_theme_list[:index]
+                self.populated_theme_list = self.populated_theme_list[:index]
+                self.orphan_list = self.orphan_list[:index]
+
+            elif target_depth == 1:  # mapping
+                self.theme_schema_list = self.theme_schema_list[:index+1]
+                self.mapped_theme_list = self.mapped_theme_list[:index+1]
+                self.populated_theme_list = self.populated_theme_list[:index]
+                self.orphan_list = self.orphan_list[:index]
+
+            elif target_depth == 2:  # populate
+                self.theme_schema_list = self.theme_schema_list[:index+1]
+                self.mapped_theme_list = self.mapped_theme_list[:index+1]
+                self.populated_theme_list = self.populated_theme_list[:index+1]
+                self.orphan_list = self.orphan_list[:index]
+
+            elif target_depth == 3:  # orphan
+                self.theme_schema_list = self.theme_schema_list[:index+1]
+                self.mapped_theme_list = self.mapped_theme_list[:index+1]
+                self.populated_theme_list = self.populated_theme_list[:index+1]
+                self.orphan_list = self.orphan_list[:index+1]
+
+            # Always clear redundancy
+            self.redundancy_list = []
+            
+            # Save the state after rewinding (handles the deleting of old files and writes the current state objects to file)
+            self.save()
+
+        def restart(self):
+            confirm = None
+            while confirm not in ["yes", "no"]:
+                confirm = input(
+                    "Are you sure you want to restart? This will clear all summary state. Enter 'yes' or 'no':\n"
+                ).lower()
+
+            if confirm == "yes":
+                # Clear in-memory state
+                self.cluster_summary_list = []
+                self.theme_schema_list = []
+                self.mapped_theme_list = []
+                self.populated_theme_list = []
+                self.orphan_list = []
+                self.redundancy_list = []
+
+                # Clear disk state
+                save_path = Path(self.summary_save_location)
+                if save_path.exists():
+                    shutil.rmtree(save_path)
+
+                save_path.mkdir(parents=True, exist_ok=True)
+
+                print("SummaryState reset successfully.")
+            else:
+                print("Restart cancelled.")
+
+        def status(self):
+            print("Current Status:")
+            print(f"Cluster summary: {len(self.cluster_summary_list)}")
+            print(f"Theme schemas: {len(self.theme_schema_list)}")
+            print(f"Mapped themes: {len(self.mapped_theme_list)}")
+            print(f"Populated themes: {len(self.populated_theme_list)}")
+            print(f"Orphan audits: {len(self.orphan_list)}")
+            if len(self.redundancy_list) > 0:
+                print(f"Redundancy passes: applied")
+            else:
+                print(f"Redundancy passes: not applied")
+
+

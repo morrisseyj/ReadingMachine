@@ -2,7 +2,7 @@
 # import custom libraries
 
 from lit_review_machine import config, utils
-from lit_review_machine.state import QuestionState
+from lit_review_machine.state import CorpusState, QuestionState
 from lit_review_machine.render import Render
 from lit_review_machine.prompts import Prompts
 
@@ -34,7 +34,7 @@ class Ingestor:
     Validates papers against known question_ids and populates state.full_text.
 
     Attributes:
-        state: QuestionState object containing literature metadata.
+        corpus_state: CorpusState object containing literature metadata.
         file_path: Directory containing PDF/HTML files to ingest.
         llm_client: Client for calling the LLM.
         ai_model: Model name to use for LLM.
@@ -46,7 +46,7 @@ class Ingestor:
         self,
         llm_client: Any,
         ai_model: str,
-        state: Optional[QuestionState] = None,
+        corpus_state: Optional[CorpusState] = None,
         questions: Optional[List[str]] = None,
         papers: Optional[pd.DataFrame] = None,
         file_path: str = os.path.join(os.getcwd(), "data", "docs"),
@@ -54,9 +54,9 @@ class Ingestor:
     ) -> None:
         """Initialize Ingestor and validate state/papers format."""
                
-        self.state = deepcopy(
+        self.corpus_state = deepcopy(
             utils.validate_format(
-                state=state,
+                corpus_state=corpus_state,
                 questions=questions,
                 injected_value=papers,
                 state_required_cols=[
@@ -68,7 +68,7 @@ class Ingestor:
             )
         )
 
-        self.state.enforce_canonical_question_text()
+        self.corpus_state.enforce_canonical_question_text()
         self.file_path: str = file_path
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
