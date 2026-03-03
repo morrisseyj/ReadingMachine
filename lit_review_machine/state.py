@@ -597,8 +597,7 @@ class CorpusState:
             # Save the state after rewinding (handles the deleting of old files and writes the current state objects to file)
             self.save()
 
-        def restart(self):
-            confirm = None
+        def restart(self, confirm = None):
             while confirm not in ["yes", "no"]:
                 confirm = input(
                     "Are you sure you want to restart? This will clear all summary state. Enter 'yes' or 'no':\n"

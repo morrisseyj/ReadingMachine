@@ -1,4 +1,4 @@
-from lit_review_machine.state import QuestionState
+from lit_review_machine.state import CorpusState
 
 import ast
 import pandas as pd
@@ -35,46 +35,46 @@ from openai import OpenAI, APITimeoutError, APIConnectionError
 #     return [str(val)]
 
 def validate_format(
-    state: Optional["QuestionState"], 
+    corpus_state: Optional["CorpusState"], 
     questions: Optional[pd.DataFrame],
     injected_value: Optional[pd.DataFrame],
     state_required_cols: List[str], 
     injected_required_cols: List[str]
-) -> "QuestionState":
+) -> "CorpusState":
     """
     Validates input state or injected DataFrame for required columns.
-    Returns a properly initialized QuestionState.
+    Returns a properly initialized CorpusState.
 
     Args:
-        state: An existing QuestionState object (if available).
-        questions: A list of questions to initialize a new QuestionState if state is None.
-        injected_value: A DataFrame to inject into a new QuestionState if state is None.
-        state_required_cols: List of columns required in state.insights.
+        corpus_state: An existing CorpusState object (if available).
+        questions: A list of questions to initialize a new CorpusState if corpus_state is None.
+        injected_value: A DataFrame to inject into a new CorpusState if corpus_state is None.
+        state_required_cols: List of columns required in corpus_state.insights.
         injected_required_cols: List of columns required in the injected DataFrame.
 
     Returns:
-        QuestionState: A valid state object with all required columns.
+        CorpusState: A valid state object with all required columns.
 
     Raises:
-        ValueError: If neither state nor injected_value is provided,
+        ValueError: If neither corpus_state nor injected_value is provided,
                     or if required columns are missing,
                     or if 'paper_id' contains any NA values.
     """
     
     # --- PATH A: Existing State Provided ---
-    if state is not None:
+    if corpus_state is not None:
         # Strict check: Ensure they didn't try to provide Path B arguments too
         if questions is not None or injected_value is not None:
-            raise ValueError("Provide EITHER 'state' OR ('questions' AND 'injected_value'), not both.")
+            raise ValueError("Provide EITHER 'corpus_state' OR ('questions' AND 'injected_value'), not both.")
 
         # Column Validation
-        if not set(state_required_cols).issubset(state.insights.columns):
-            raise ValueError(f"State.insights missing required columns: {state_required_cols}")
+        if not set(state_required_cols).issubset(corpus_state.insights.columns):
+            raise ValueError(f"corpus_state.insights missing required columns: {state_required_cols}")
             
-        if "paper_id" in state.insights.columns and state.insights["paper_id"].isna().any():
-            raise ValueError("State.insights contains NA values in 'paper_id'.")
+        if "paper_id" in corpus_state.insights.columns and corpus_state.insights["paper_id"].isna().any():
+            raise ValueError("corpus_state.insights contains NA values in 'paper_id'.")
             
-        return state
+        return corpus_state
 
     # --- PATH B: New State via Injection ---
     elif questions is not None and injected_value is not None:
@@ -86,12 +86,12 @@ def validate_format(
             if field not in injected_value.columns: # Use .columns check directly
                 injected_value[field] = np.nan
 
-        return QuestionState(questions=questions, insights=injected_value)
+        return CorpusState(questions=questions, insights=injected_value)
 
     # --- PATH C: Failure (Nothing provided or partial Path B) ---
     else:
         raise ValueError(
-            "Invalid arguments. You must provide a 'state' object "
+            "Invalid arguments. You must provide a 'corpus_state' object "
             "OR both 'questions' and 'injected_value'."
         )
     
@@ -334,35 +334,35 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
         latest_step = os.path.basename(latest_path)
         
         pipeline_steps = {
-        "01_search_strings": ("You have generated search strings and saved them in your state. "
+        "01_search_strings": ("You have generated search strings and saved them in your corpus_state. "
                               "You should continue with retreieving academic literature. Initialize AcademicLit as follows:\n"
-                              f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                              "getlit.AcademicLit(state = latest_state)"),
-        "02_academic_lit": ("You have retrieved academic literature and added it to your state. "
+                              f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                              "getlit.AcademicLit(corpus_state = latest_corpus_state)"),
+        "02_academic_lit": ("You have retrieved academic literature and added it to your corpus_state. "
                            "You should continue with processing the literature. Initialize AcademicLit as follows:\n"
-                           f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                           "getlit.GreyLiterature(state = latest_state, llm_client=llm_client)"),
-        "03_grey_lit": ("You have acquired the relevant grey literature and added it to your state. "
+                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                           "getlit.GreyLiterature(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+        "03_grey_lit": ("You have acquired the relevant grey literature and added it to your corpus_state. "
                         "You should continue with the next step. Initialize the next class as follows:\n"
-                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                        "getlit.Literature(state = latest_state)"),
-        "04_literature_deduped": ("You have deduplicated the literature and updated your state. "
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "getlit.Literature(corpus_state = latest_corpus_state)"),
+        "04_literature_deduped": ("You have deduplicated the literature and updated your corpus_state. "
                                   "You should continue by condutcing an ai assisted check of your literature. Initialize the next class as follows:\n"
-                                  f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                                  "getlit.AiLiteratureCheck(state = latest_state, llm_client=llm_client)"),
-        "05_ai_lit_check": ("You have completed the AI literature check and updated your state. "
+                                  f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                                  "getlit.AiLiteratureCheck(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+        "05_ai_lit_check": ("You have completed the AI literature check and updated your corpus_state. "
                            "You should proceed to set up your download architecture for your papers. Initialize the next class as follows:\n"
-                           f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                           "getlit.DownloadManager(state = latest_state)"),
+                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                           "getlit.DownloadManager(corpus_state = latest_corpus_state)"),
         "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
-                                    f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                                    "core.InsightsGenerator(state = latest_state, llm_client=llm_client)"),
+                                    f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                                    "core.InsightsGenerator(corpus_state = latest_corpus_state, llm_client=llm_client)"),
         "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
-                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                        "core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
         "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
-                        f"latest_state = state.QuestionState.load(filepath = '{latest_path}')\n"
-                        "core.Summarize(state=latest_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000)")
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000)")
         }
         
         # Call the dict to return the text

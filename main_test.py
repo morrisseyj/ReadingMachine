@@ -88,10 +88,10 @@ ingestor.update_metadata()
 ingestor.chunk_papers()
 
 # To recover the state of the pipeline at any point, we can use the QuestionState class to load the state from a specific filepath. This allows us to pick up where we left off in the pipeline without having to re-run previous steps. In this case, we are loading the state from a specific filepath that corresponds to a previous run of the pipeline. This is useful for testing and debugging purposes, as it allows us to see how the pipeline is progressing and to identify any issues that may arise.
-latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\06_full_text_and_chunks')
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\06_full_text_and_chunks')
 
 # Now we create the insights generator, which is responsible for taking the chunked papers and generating insights from the chunks as well as meta insights from the whole paper 
-insights_generator = core.Insights(state = latest_state,
+insights_generator = core.Insights(corpus_state = latest_corpus_state,
                                    llm_client=llm_client,
                                    ai_model="gpt-4o", 
                                    paper_context=paper_context)
@@ -102,9 +102,9 @@ insights_generator.get_chunk_insights()
 insights_generator.get_meta_insights()
 
 # Get the latest state again
-latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\07_insights')
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\07_insights')
 # Initialize the cluster class
-cluster = core.Clustering(state = latest_state, llm_client=llm_client, embedding_model='text-embedding-3-small')
+cluster = core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')
 # Embed the insights
 cluster.embed_insights()
 
@@ -165,8 +165,8 @@ reload()
 
 # Now we move to summarizing the clusters and generating the themes. 
 # Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
-latest_state = state.QuestionState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
-summarize = core.Summarize(state=latest_state, 
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
+summarize = core.Summarize(corpus_state=latest_corpus_state, 
                            llm_client=llm_client,
                            ai_model="gpt-4o",
                            paper_output_length=14000)

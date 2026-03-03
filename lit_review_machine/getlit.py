@@ -1,5 +1,5 @@
 # Import custom libraries and modules
-from lit_review_machine.state import QuestionState
+from lit_review_machine.state import CorpusState
 from lit_review_machine.prompts import Prompts
 import lit_review_machine.config
 import lit_review_machine.utils
@@ -30,9 +30,9 @@ class ScholarSearchString:
 
     Workflow:
       1. Initialize with a list of questions and an LLM client.
-      2. Build a state object (QuestionState) that tracks questions and insights.
+      2. Build a corpus_state object (CorpusState) that tracks questions and insights.
       3. Generate structured messages for each question (`message_maker`).
-      4. Query the LLM for search strings and update the state (`searchstring_maker`).
+      4. Query the LLM for search strings and update the corpus_state (`searchstring_maker`).
     """
 
     def __init__(
@@ -42,7 +42,7 @@ class ScholarSearchString:
         num_prompts: int = 10,
         search_engine: str = "Semantic Scholar",
         llm_model: str = "gpt-4.1",
-        state: Optional[QuestionState] = None,
+        corpus_state: Optional[CorpusState] = None,
         messages: Optional[List[List[Dict[str, str]]]] = None,
     ) -> None:
         """
@@ -54,7 +54,7 @@ class ScholarSearchString:
             num_prompts (int, optional): Number of search prompts per question. Defaults to 10.
             search_engine (str, optional): Search engine context. Defaults to "Semantic Scholar".
             llm_model (str, optional): LLM model name. Defaults to "gpt-4.1".
-            state (Optional[QuestionState], optional): Existing QuestionState object.
+            corpus_state (Optional[CorpusState], optional): Existing CorpusState object.
             messages (Optional[List[List[Dict[str, str]]]], optional):
                 Pre-generated messages. Usually left None.
         """
@@ -64,11 +64,11 @@ class ScholarSearchString:
         self.search_engine: str = search_engine
         self.llm_model: str = llm_model
 
-        # Create or reuse a QuestionState object
-        if state:
-            self.state = state
+        # Create or reuse a CorpusState object
+        if corpus_state:
+            self.corpus_state = corpus_state
         else:
-            self.state = QuestionState(insights = self._make_state())
+            self.corpus_state = CorpusState(insights = self._make_state())
 
         # Messages are generated later by `message_maker`
         self.messages: Optional[List[List[Dict[str, str]]]] = messages
@@ -80,11 +80,11 @@ class ScholarSearchString:
         Returns:
             pd.DataFrame: DataFrame with `question_id` and `question_text`.
         """
-        state = pd.DataFrame()
+        corpus_state = pd.DataFrame()
         question_ids: List[str] = [f"question_{i}" for i in range(len(self.questions))]
-        state["question_id"] = question_ids
-        state["question_text"] = self.questions
-        return state
+        corpus_state["question_id"] = question_ids
+        corpus_state["question_text"] = self.questions
+        return corpus_state
 
     def message_maker(self) -> List[List[Dict[str, str]]]:
         """
@@ -101,7 +101,7 @@ class ScholarSearchString:
         # Build user prompts from question IDs and texts
         user_prompts: List[str] = []
         for question_id, question_text in zip(
-            self.state.insights["question_id"], self.state.insights["question_text"]
+            self.corpus_state.insights["question_id"], self.corpus_state.insights["question_text"]
         ):
             user_prompt: str = f"**QUESTION**\n{question_id}: {question_text}"
             user_prompts.append(user_prompt)
@@ -115,7 +115,7 @@ class ScholarSearchString:
             ]
             messages.append(message)
 
-        # Store internally (not in state to save space/memory)
+        # Store internally (not in corpus_state to save space/memory)
         self.messages = messages
 
         return self.messages
@@ -123,7 +123,7 @@ class ScholarSearchString:
     def searchstring_maker(self) -> List[str]:
         """
         Query the LLM to generate search strings for each question,
-        update the state, and persist it to pickle.
+        update the corpus_state, and persist it to pickle.
 
         Returns:
             List[str]: Generated search strings across all questions.
@@ -135,10 +135,10 @@ class ScholarSearchString:
         # Initialize empty results dataframe
         search_strings_df = pd.DataFrame(columns=["question_id", "search_string"])
 
-        # Iterate over all questions in state
-        for index, question_id in enumerate(self.state.insights["question_id"]):
+        # Iterate over all questions in corpus_state
+        for index, question_id in enumerate(self.corpus_state.insights["question_id"]):
             message = self.messages[index]
-            print(f"Generating prompts for question {index + 1} of {self.state.insights.shape[0]}")
+            print(f"Generating prompts for question {index + 1} of {self.corpus_state.insights.shape[0]}")
 
             # Call LLM
             response = self.llm_client.chat.completions.create(
@@ -172,15 +172,15 @@ class ScholarSearchString:
         ]
 
         # Merge back into the insights dataframe
-        self.state.insights = search_strings_df.merge(
-            self.state.insights, how="left", on="question_id"
+        self.corpus_state.insights = search_strings_df.merge(
+            self.corpus_state.insights, how="left", on="question_id"
         )
 
-        # Save updated state object
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATIONSTATE_SAVE_LOCATION, "01_search_strings"))
+        # Save updated corpus_state object
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATIONSTATE_SAVE_LOCATION, "01_search_strings"))
 
         # Return search strings for testing/debugging
-        return self.state.insights["search_string"].to_list()
+        return self.corpus_state.insights["search_string"].to_list()
 
 class AcademicLit:
 
@@ -188,19 +188,19 @@ class AcademicLit:
     OPENALEX_TIMEOUT = 30
 
     def __init__(self, 
-                 state: Optional["QuestionState"] = None, 
+                 corpus_state: Optional["CorpusState"] = None, 
                  search_strings: Optional[pd.DataFrame] = None) -> None:
         """
-        Initialize the AcademicLit class with a validated state or search_strings.
+        Initialize the AcademicLit class with a validated corpus_state or search_strings.
 
         Args:
-            state (Optional[QuestionState]): Existing QuestionState object.
+            corpus_state (Optional[CorpusState]): Existing CorpusState object.
             search_strings (Optional[pd.DataFrame]): DataFrame with search strings.
         """
-        # Deepcopy ensures this class has its own copy of state
-        self.state = deepcopy(
+        # Deepcopy ensures this class has its own copy of corpus_state
+        self.corpus_state = deepcopy(
             utils.validate_format(
-                state=state,
+                corpus_state=corpus_state,
                 injected_value=search_strings,
                 state_required_cols=["question_id", "question_text", "search_string", "search_string_id"],
                 injected_required_cols=["question_id", "question_text", "search_string", "search_string_id"]
@@ -210,24 +210,24 @@ class AcademicLit:
     # CLASS UTILS ------------
     def _merge_search_results_with_state(self, search_results: pd.DataFrame) -> pd.DataFrame:
         """
-        Merge search results with the existing state.insights DataFrame.
+        Merge search results with the existing corpus_state.insights DataFrame.
 
         - Adds question metadata (question_id, question_text, search_string_id, search_string).
         - Deduplicates across engines.
         - Returns the merged DataFrame (not written to disk).
         """
-        if "search_engine" in getattr(self.state, "insights", pd.DataFrame()).columns:
+        if "search_engine" in getattr(self.corpus_state, "insights", pd.DataFrame()).columns:
             # Merge to bring in question info and concatenate with existing results
             enriched = search_results.merge(
-                self.state.insights[["question_id", "question_text", "search_string_id", "search_string"]],
+                self.corpus_state.insights[["question_id", "question_text", "search_string_id", "search_string"]],
                 on="search_string",
                 how="left"
             )
-            merged = pd.concat([self.state.insights, enriched], ignore_index=True)
+            merged = pd.concat([self.corpus_state.insights, enriched], ignore_index=True)
         else:
             # First engine call — merge just to add question info
             merged = search_results.merge(
-                self.state.insights,
+                self.corpus_state.insights,
                 on="search_string",
                 how="left"
             )
@@ -242,8 +242,8 @@ class AcademicLit:
 
     def search_crossref(self, num_results: int = 10) -> pd.DataFrame:
         """
-        Search Crossref for each search string in state and update the state.
-        Returns self.state.insights (DataFrame).
+        Search Crossref for each search string in corpus_state and update the corpus_state.
+        Returns self.corpus_state.insights (DataFrame).
         """
         # Must be a full email address
         mailto = os.getenv("EMAIL_DOMAIN")
@@ -257,7 +257,7 @@ class AcademicLit:
             "doi": []
         }
 
-        for search_string in self.state.insights["search_string"]:
+        for search_string in self.corpus_state.insights["search_string"]:
             # one request; optionally retry once on 503/429
             for attempt in (1, 2):
                 try:
@@ -314,9 +314,9 @@ class AcademicLit:
         output_df["paper_id"] = [f"crossref_paper_{i+1}" for i in range(len(output_df))]
         output_df["paper_author"] = [";".join(authors) if isinstance(authors, list) else authors for authors in output["paper_author"]]
 
-        # Merge results into state
-        self.state.insights = self._merge_search_results_with_state(output_df)
-        return self.state.insights
+        # Merge results into corpus_state
+        self.corpus_state.insights = self._merge_search_results_with_state(output_df)
+        return self.corpus_state.insights
     
     @staticmethod
     def _openalex_authors(authorships) -> List[str]:
@@ -332,7 +332,7 @@ class AcademicLit:
 
     def search_openalex(self, num_results: int = 10) -> pd.DataFrame:
         """
-        Search OpenAlex for each search string in state and merge with existing state.
+        Search OpenAlex for each search string in corpus_state and merge with existing corpus_state.
         Each query returns up to 200 results (one page).
         """
         if num_results > 200:
@@ -351,7 +351,7 @@ class AcademicLit:
             "User-Agent": f"lit-review-machine/1 (mailto:{os.getenv('EMAIL_DOMAIN','noreply@example.com')})"
         })
 
-        for search_string in self.state.insights["search_string"]:
+        for search_string in self.corpus_state.insights["search_string"]:
             params = {"search": search_string, "per_page": num_results}
             try:
                 r = session.get(self.OPENALEX_BASE, params=params, timeout=self.OPENALEX_TIMEOUT)
@@ -397,32 +397,32 @@ class AcademicLit:
             subset=["paper_title", "paper_date", "search_engine", "search_string"]
         ).reset_index(drop=True)
 
-        self.state.insights = merged
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "02_academic_lit"))
-        return self.state.insights
+        self.corpus_state.insights = merged
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "02_academic_lit"))
+        return self.corpus_state.insights
     
 # class DOI:
 #     """
-#     Retrieve DOIs and open-access download links for papers stored in a QuestionState
+#     Retrieve DOIs and open-access download links for papers stored in a CorpusState
 #     object or provided as a DataFrame.
 #     """
 
 #     def __init__(
 #         self, 
-#         state: Optional["QuestionState"] = None, 
+#         corpus_state: Optional["CorpusState"] = None, 
 #         papers: Optional[pd.DataFrame] = None
 #     ) -> None:
 #         """
 #         Initialize DOI retriever.
 
 #         Args:
-#             state: A pre-existing QuestionState object containing paper metadata.
-#             papers: A DataFrame containing paper metadata (used if state is None).
+#             corpus_state: A pre-existing CorpusState object containing paper metadata.
+#             papers: A DataFrame containing paper metadata (used if corpus_state is None).
 #         """
-#         # Validate and set up state
-#         self.state = deepcopy(
+#         # Validate and set up corpus_state
+#         self.corpus_state = deepcopy(
 #             validate_format(
-#             state=state,
+#             corpus_state=corpus_state,
 #             injected_value=papers,
 #             state_required_cols=[
 #                 "question_id", "question_text", "search_string_id", "search_string", 
@@ -448,10 +448,10 @@ class AcademicLit:
 #         Returns:
 #             List[str]: A list of search strings for each paper.
 #         """
-#         if self.state.insights.empty:
+#         if self.corpus_state.insights.empty:
 #             return []
 
-#         df = self.state.insights[["paper_title", "paper_author", "paper_date"]].copy()
+#         df = self.corpus_state.insights[["paper_title", "paper_author", "paper_date"]].copy()
 #         df["search_string"] = (
 #         df["paper_title"].astype(str) + " " +
 #         df["paper_author"].astype(str) + " " +
@@ -490,16 +490,16 @@ class AcademicLit:
 
 #     def get_doi(self) -> List[Optional[str]]:
 #         """
-#         Retrieves DOIs for all papers in the current state using OpenAlex.
+#         Retrieves DOIs for all papers in the current corpus_state using OpenAlex.
 
 #         Returns:
 #             List[Optional[str]]: A list of DOIs corresponding to papers.
 #         """
-#         dois = self.state.insights["doi"]
+#         dois = self.corpus_state.insights["doi"]
 
 #         if not self.search_string:
 #             print("No papers available to retrieve DOIs.")
-#             self.state.insights["doi"] = []
+#             self.corpus_state.insights["doi"] = []
 #             return []
 
 #         for idx, (string, doi) in enumerate(zip(self.search_string, dois), start=1):
@@ -510,7 +510,7 @@ class AcademicLit:
 #                 doi_result = self.call_alex(string)
 #                 dois[idx - 1] = doi_result
 
-#         self.state.insights["doi"] = dois
+#         self.corpus_state.insights["doi"] = dois
 
 #         return dois
 
@@ -522,9 +522,9 @@ class AcademicLit:
 #             List[Optional[str]]: A list of open-access PDF download links (or None if unavailable).
 #         """
 #         # Ensure DOI column exists
-#         self.state = validate_format(
-#             state=self.state,
-#             injected_value=self.state.insights,
+#         self.corpus_state = validate_format(
+#             corpus_state=self.corpus_state,
+#             injected_value=self.corpus_state.insights,
 #             state_required_cols=[
 #                 "question_id", "question_text", "search_string_id", "search_string",
 #                 "search_engine","paper_id", "paper_title", "paper_author", "paper_date", "doi"
@@ -537,8 +537,8 @@ class AcademicLit:
 
 #         download_links: List[Optional[str]] = []
 
-#         for idx, doi in enumerate(self.state.insights.get("doi", []), start=1):
-#             print(f"Retrieving downlod link for paper {idx} of {self.state.insights.shape[0]}")
+#         for idx, doi in enumerate(self.corpus_state.insights.get("doi", []), start=1):
+#             print(f"Retrieving downlod link for paper {idx} of {self.corpus_state.insights.shape[0]}")
 
 #             if not doi:
 #                 download_links.append(None)
@@ -570,8 +570,8 @@ class AcademicLit:
 #             else:
 #                 download_links.append(None)
 
-#         self.state.insights["download_link"] = download_links
-#         self.state.save(STATE_SAVE_LOCATION)
+#         self.corpus_state.insights["download_link"] = download_links
+#         self.corpus_state.save(STATE_SAVE_LOCATION)
 
 #         return download_links
 
@@ -583,7 +583,7 @@ class GreyLiterature:
     studies published by think tanks, INGOs, multilateral organizations, and other 
     research institutions.
 
-    The class integrates with a QuestionState object that tracks research questions
+    The class integrates with a CorpusState object that tracks research questions
     and insights, ensuring that retrieved grey literature is associated with the 
     correct research question IDs.
     """
@@ -592,7 +592,7 @@ class GreyLiterature:
     def __init__(
         self,
         llm_client: Any,  # Client interface for interacting with the LLM API
-        state: Optional["QuestionState"] = None,  # Current research state (can be injected)
+        corpus_state: Optional["CorpusState"] = None,  # Current research corpus_state (can be injected)
         questions: Optional[List[str]] = None,    # User-defined research questions
         ai_reasoning_model: str = "o3-deep-research",       # LLM model to use
         ai_chat_completion_model: str = "gpt-4o",  # Chat completion model for JSON cleaning
@@ -606,7 +606,7 @@ class GreyLiterature:
 
         Args:
             llm_client (Any): Client for interacting with the language model.
-            state (Optional[QuestionState]): QuestionState object holding research state.
+            corpus_state (Optional[CorpusState]): CorpusState object holding research corpus_state.
             questions (Optional[List[str]]): User-defined research questions.
             ai_model (str): Name of the LLM model to use.
         """
@@ -619,10 +619,10 @@ class GreyLiterature:
                 "question_text": questions
             })
 
-        # Validate the state and inject the questions if provided
-        self.state: "QuestionState" = deepcopy(
+        # Validate the corpus_state and inject the questions if provided
+        self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-                state=state,
+                corpus_state=corpus_state,
                 injected_value=questions,
                 state_required_cols=[
                     "question_id", "question_text", "search_string_id", "search_string",
@@ -648,11 +648,11 @@ class GreyLiterature:
         1. Build a prompt from research questions.
         2. Call the LLM with web search capability.
         3. Parse the JSON output from the LLM.
-        4. Merge results with existing QuestionState using `question_id`.
-        5. Save updated state to disk.
+        4. Merge results with existing CorpusState using `question_id`.
+        5. Save updated corpus_state to disk.
 
         Returns:
-            Optional[pd.DataFrame]: Subset of state with grey literature results
+            Optional[pd.DataFrame]: Subset of corpus_state with grey literature results
             (where `paper_id` starts with "grey_lit_"), or None if parsing fails.
         """
 
@@ -664,12 +664,12 @@ class GreyLiterature:
                 with open(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"), "rb") as f:
                     self.grey_lit = pickle.load(f)
 
-                self.state.insights = pd.concat([self.state.insights, self.grey_lit], ignore_index=True)
+                self.corpus_state.insights = pd.concat([self.corpus_state.insights, self.grey_lit], ignore_index=True)
                 return self.grey_lit
 
         # Build question strings: "question_id: question_text"
         question_strings = (
-            self.state.insights[["question_id", "question_text"]]
+            self.corpus_state.insights[["question_id", "question_text"]]
             .drop_duplicates()
             .assign(combined=lambda df: df["question_id"].astype(str) + ": " + df["question_text"])
             ["combined"]
@@ -730,7 +730,7 @@ class GreyLiterature:
 
         # Merge ONLY on canonical `question_id` to get original question_text
         grey_lit_pd = grey_lit_pd.merge(
-            self.state.insights[["question_id", "question_text"]].drop_duplicates(),
+            self.corpus_state.insights[["question_id", "question_text"]].drop_duplicates(),
             on="question_id",
             how="left"
         )
@@ -745,11 +745,11 @@ class GreyLiterature:
         with open(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"), "wb") as f:
             pickle.dump(self.grey_lit, f)
 
-        # Update state
-        self.state.insights = pd.concat([self.state.insights, self.grey_lit], ignore_index=True)
-        self.state.insights["paper_date"] = pd.to_numeric(self.state.insights["paper_date"], errors="coerce").astype("Int64")
-        self.state.insights.replace(["", "NA", pd.NA, np.nan, "null"], None, inplace=True)
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "03_grey_lit"))
+        # Update corpus_state
+        self.corpus_state.insights = pd.concat([self.corpus_state.insights, self.grey_lit], ignore_index=True)
+        self.corpus_state.insights["paper_date"] = pd.to_numeric(self.corpus_state.insights["paper_date"], errors="coerce").astype("Int64")
+        self.corpus_state.insights.replace(["", "NA", pd.NA, np.nan, "null"], None, inplace=True)
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "03_grey_lit"))
 
         # Return grey literature
         return self.grey_lit
@@ -765,17 +765,17 @@ class Literature:
     3. Drop exact duplicates.
     4. Detect fuzzy duplicates using pairwise string similarity.
     5. Export potential matches for manual verification.
-    6. Update QuestionState with cleaned results.
+    6. Update CorpusState with cleaned results.
     """
 
     FUZZY_CHECK_PATH: str = os.path.join(os.getcwd(), "data", "fuzzy_check")
     os.makedirs(FUZZY_CHECK_PATH, exist_ok=True)
 
-    def __init__(self, state: "QuestionState", literature: Optional[pd.DataFrame] = None) -> None:
+    def __init__(self, corpus_state: "CorpusState", literature: Optional[pd.DataFrame] = None) -> None:
         
-        self.state: "QuestionState" = deepcopy(
+        self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             injected_value=literature,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
@@ -798,8 +798,8 @@ class Literature:
         Only question_id is needed; question_text is not included here.
         """
         dfs: List[pd.DataFrame] = [
-            self.state.insights[self.state.insights["question_id"] == qid].copy()
-            for qid in self.state.insights["question_id"].drop_duplicates()
+            self.corpus_state.insights[self.corpus_state.insights["question_id"] == qid].copy()
+            for qid in self.corpus_state.insights["question_id"].drop_duplicates()
         ]
 
         for df in dfs:
@@ -906,21 +906,21 @@ class Literature:
                     inplace=True
                     )
         
-        self.state.insights = pd.concat(dfs, ignore_index=True)
+        self.corpus_state.insights = pd.concat(dfs, ignore_index=True)
 
-        if "duplicate_check_string" in self.state.insights.columns:
-            self.state.insights.drop(columns="duplicate_check_string", inplace=True)
+        if "duplicate_check_string" in self.corpus_state.insights.columns:
+            self.corpus_state.insights.drop(columns="duplicate_check_string", inplace=True)
 
-        if "sim_group" in self.state.insights.columns:
-            self.state.insights.drop(columns="sim_group", inplace=True)
+        if "sim_group" in self.corpus_state.insights.columns:
+            self.corpus_state.insights.drop(columns="sim_group", inplace=True)
 
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "04_literature_deduped"))
-        return self.state.insights
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "04_literature_deduped"))
+        return self.corpus_state.insights
 
 class AiLiteratureCheck:
     """
     Class to check the completeness of literature for a set of research questions
-    using an LLM. Takes a QuestionState object and optionally a DataFrame of papers
+    using an LLM. Takes a CorpusState object and optionally a DataFrame of papers
     and outputs missing literature suggested by the AI.
     """
 
@@ -929,7 +929,7 @@ class AiLiteratureCheck:
         llm_client: Any,
         ai_reasoning_model: str = "o3-deep-research",
         ai_chat_completion_model: str = "gpt-4o",
-        state: Optional["QuestionState"] = None,
+        corpus_state: Optional["CorpusState"] = None,
         papers: Optional[pd.DataFrame] = None, 
     ) -> None:
         """
@@ -938,17 +938,17 @@ class AiLiteratureCheck:
         Args:
             llm_client: An instance of the language model client (e.g., OpenAI client).
             ai_model: The name of the LLM model to use.
-            state: QuestionState object containing current literature data.
-            papers: Optional DataFrame with literature to inject if state is None.
+            corpus_state: CorpusState object containing current literature data.
+            papers: Optional DataFrame with literature to inject if corpus_state is None.
         """
         self.llm_client: Any = llm_client
         self.ai_reasoning_model: str = ai_reasoning_model
         self.ai_chat_completion_model: str = ai_chat_completion_model
 
-        # Validate that the state or injected papers contain all required columns
-        self.state: "QuestionState" = deepcopy(
+        # Validate that the corpus_state or injected papers contain all required columns
+        self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             injected_value=papers,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
@@ -973,7 +973,7 @@ class AiLiteratureCheck:
         Returns:
             str: JSON string of grouped literature for input to the LLM.
         """
-        df = self.state.insights[[
+        df = self.corpus_state.insights[[
             "question_id", "question_text", "paper_id", "paper_author", "paper_date", "paper_title"
         ]]
 
@@ -992,7 +992,7 @@ class AiLiteratureCheck:
     def ai_literature_check(self, resp_timeout = 1500) -> Optional[pd.DataFrame]:
         """
         Uses the LLM to identify missing literature for each research question.
-        Parses the LLM JSON output, flattens it, merges with the state, and
+        Parses the LLM JSON output, flattens it, merges with the corpus_state, and
         assigns unique AI literature paper IDs.
 
         Returns:
@@ -1044,17 +1044,17 @@ class AiLiteratureCheck:
         
         self.clean_ai_lit_check = clean_response
         
-        # if the response is empty no new papers were found so we print a message and save the current state and return the state.insights
+        # if the response is empty no new papers were found so we print a message and save the current corpus_state and return the corpus_state.insights
         if len(clean_response["results"]) == 0:
             print("No missing papers returned by the LLM.")
-            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "05_ai_lit_check"))
-            return self.state.insights
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "05_ai_lit_check"))
+            return self.corpus_state.insights
 
-        # Otherwise we convert to a df, clean and concat with state.insights
+        # Otherwise we convert to a df, clean and concat with corpus_state.insights
         ai_lit = pd.DataFrame(clean_response["results"])
         # Clean:
         # Get canonical question text and join
-        canonical_questions = self.state.insights[["question_id", "question_text"]].drop_duplicates()
+        canonical_questions = self.corpus_state.insights[["question_id", "question_text"]].drop_duplicates()
         ai_lit = ai_lit.merge(
             canonical_questions,
             how="left",
@@ -1066,8 +1066,8 @@ class AiLiteratureCheck:
         # Create ai_lit attribute for inspection
         self.ai_lit = ai_lit
 
-        # Append AI literature to state
-        updated_state = pd.concat([self.state.insights, ai_lit], ignore_index=True)
+        # Append AI literature to corpus_state
+        updated_state = pd.concat([self.corpus_state.insights, ai_lit], ignore_index=True)
         # CLean up any dates to numeric to not break parquet
         updated_state["paper_date"] = pd.to_numeric(updated_state["paper_date"], errors="coerce").astype("Int64") 
         # Clean up any empty strings to None to not break parquet
@@ -1075,25 +1075,25 @@ class AiLiteratureCheck:
         # Update the oder for pretty export
         updated_state = updated_state[["question_id", "question_text", "search_string_id", "search_string", "search_engine", "paper_id", "paper_title", "paper_author", "paper_date", "doi"]]
 
-        # Asign to state attribute
-        self.state.insights = updated_state
+        # Asign to corpus_state attribute
+        self.corpus_state.insights = updated_state
 
         # Save
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "05_ai_lit_check"))
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "05_ai_lit_check"))
 
         # Return only the new AI-suggested papers
         return self.ai_lit
 
 class DownloadManager:
     """
-    Class to manage downloading of papers listed in a QuestionState object.
+    Class to manage downloading of papers listed in a CorpusState object.
     Downloads are organized by sanitized question_id and paper_id to ensure
     filesystem-safe filenames, while maintaining traceability to original IDs.
     """
 
     def __init__(
         self,
-        state: "QuestionState" = None,
+        corpus_state: "CorpusState" = None,
         papers: Optional[pd.DataFrame] = None,
         DOWNLOAD_LOCATION: str = os.path.join(os.getcwd(), "data", "docs")
     ) -> None:
@@ -1101,14 +1101,14 @@ class DownloadManager:
         Initialize the Downloader.
 
         Args:
-            state: QuestionState object containing literature data.
+            corpus_state: CorpusState object containing literature data.
             papers: Optional DataFrame of literature to inject.
             DOWNLOAD_LOCATION: Base directory to save downloaded files.
         """
-        # Validate that the state or injected papers contain all required columns
-        self.state: "QuestionState" = deepcopy(
+        # Validate that the corpus_state or injected papers contain all required columns
+        self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             injected_value=papers,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
@@ -1122,9 +1122,9 @@ class DownloadManager:
             )
         )
 
-        # Check if download_status variable is in the passed state if its not create with 0 values, assuming no downloads have happened yet, if it does exsist, simply use it. 
-        if "download_status" not in self.state.insights.columns:
-            self.state.insights["download_status"] = 0
+        # Check if download_status variable is in the passed corpus_state if its not create with 0 values, assuming no downloads have happened yet, if it does exsist, simply use it. 
+        if "download_status" not in self.corpus_state.insights.columns:
+            self.corpus_state.insights["download_status"] = 0
         else: 
             pass
 
@@ -1136,13 +1136,13 @@ class DownloadManager:
         self._create_download_folder()
 
         # Preserve original IDs and sanitize for filesystem-safe filenames
-        self.state.insights["messy_question_id"] = self.state.insights["question_id"]
-        self.state.insights["messy_paper_id"] = self.state.insights["paper_id"]
-        self.state.insights["question_id"] = self.state.insights["question_id"].apply(self._sanitize_filename)
-        self.state.insights["paper_id"] = self.state.insights["paper_id"].apply(self._sanitize_filename)
+        self.corpus_state.insights["messy_question_id"] = self.corpus_state.insights["question_id"]
+        self.corpus_state.insights["messy_paper_id"] = self.corpus_state.insights["paper_id"]
+        self.corpus_state.insights["question_id"] = self.corpus_state.insights["question_id"].apply(self._sanitize_filename)
+        self.corpus_state.insights["paper_id"] = self.corpus_state.insights["paper_id"].apply(self._sanitize_filename)
 
         # write the insights to csv
-        self.state.write_to_csv(save_location= self.DOWNLOAD_LOCATION, 
+        self.corpus_state.write_to_csv(save_location= self.DOWNLOAD_LOCATION, 
                                 write_full_text=False, write_chunks=False)
         
         print(
@@ -1157,7 +1157,7 @@ class DownloadManager:
         """
         Create subfolders for each sanitized question_id to organize downloaded files.
         """
-        for qid in self.state.insights["question_id"].unique():
+        for qid in self.corpus_state.insights["question_id"].unique():
             os.makedirs(os.path.join(self.DOWNLOAD_LOCATION, qid), exist_ok=True)
 
     @staticmethod
@@ -1176,16 +1176,16 @@ class DownloadManager:
     
     def update(self):
         # This convenience function just calls the from csv method of the questionstate
-        self.state = self.state.from_csv(filepath=os.path.join(self.DOWNLOAD_LOCATION))
-        # And updates the state object on file by saving
-        self.state.save(config.STATE_SAVE_LOCATION)
-        return(self.state.insights)
+        self.corpus_state = self.corpus_state.from_csv(filepath=os.path.join(self.DOWNLOAD_LOCATION))
+        # And updates the corpus_state object on file by saving
+        self.corpus_state.save(config.STATE_SAVE_LOCATION)
+        return(self.corpus_state.insights)
 
 # THIS WAS ALL TOO FRAGILE TO MAKE WORK SO I BAILED ON IT AND RESORTED TO MANUAL DOWNLOADING
 #     def download_files(self) -> pd.DataFrame:
 #         """
-#         Attempt to download all files in the state DataFrame. Tracks download status
-#         and local filenames. Updates state and writes a CSV with download results.
+#         Attempt to download all files in the corpus_state DataFrame. Tracks download status
+#         and local filenames. Updates corpus_state and writes a CSV with download results.
 
 #         Returns:
 #             DataFrame containing columns ['paper_id', 'download_status'] with updated statuses.
@@ -1194,19 +1194,19 @@ class DownloadManager:
 #         self._create_download_folder()
 
 #         # Initialize download tracking columns
-#         if "download_status" not in self.state.insights.columns:
-#             self.state.insights["download_status"] = 0
-#         if "filename" not in self.state.insights.columns:
-#             self.state.insights["filename"] = np.nan
+#         if "download_status" not in self.corpus_state.insights.columns:
+#             self.corpus_state.insights["download_status"] = 0
+#         if "filename" not in self.corpus_state.insights.columns:
+#             self.corpus_state.insights["filename"] = np.nan
 
 #         # Iterate through each row and attempt download
-#         for idx, row in self.state.insights.iterrows():
+#         for idx, row in self.corpus_state.insights.iterrows():
 #             url: str = row["download_link"]
 #             status: int = row["download_status"]
 #             qid: str = row["question_id"]
 #             pid: str = row["paper_id"]
 
-#             print(f"Downloading file {idx + 1} of {self.state.insights.shape[0]}")
+#             print(f"Downloading file {idx + 1} of {self.corpus_state.insights.shape[0]}")
 
 #             if status == 0:
 #                 if pd.notna(url) and url != "NA":
@@ -1219,34 +1219,34 @@ class DownloadManager:
 #                             for chunk in response.iter_content(chunk_size=8192):
 #                                 f.write(chunk)
 
-#                         self.state.insights.at[idx, "filename"] = file_path
-#                         self.state.insights.at[idx, "download_status"] = 1
+#                         self.corpus_state.insights.at[idx, "filename"] = file_path
+#                         self.corpus_state.insights.at[idx, "download_status"] = 1
 #                     except Exception as e:
 #                         print(f"Failed to download {url}: {e}")
-#                         self.state.insights.at[idx, "filename"] = np.nan
-#                         self.state.insights.at[idx, "download_status"] = 0
+#                         self.corpus_state.insights.at[idx, "filename"] = np.nan
+#                         self.corpus_state.insights.at[idx, "download_status"] = 0
 #                 else:
-#                     self.state.insights.at[idx, "filename"] = np.nan
-#                     self.state.insights.at[idx, "download_status"] = 0
+#                     self.corpus_state.insights.at[idx, "filename"] = np.nan
+#                     self.corpus_state.insights.at[idx, "download_status"] = 0
 #             else:
-#                 self.state.insights.at[idx, "download_status"] = 1
+#                 self.corpus_state.insights.at[idx, "download_status"] = 1
 
 #         # Save download status CSV for inspection
 #         download_status_csv = os.path.join(self.DOWNLOAD_LOCATION, "download_status.csv")
-#         self.state.insights.to_csv(download_status_csv, index=False)
+#         self.corpus_state.insights.to_csv(download_status_csv, index=False)
 
 #         print(
 #             f"Attempted downloads complete. Inspect the results here: {download_status_csv}.\n"
 #             "For files that failed to download, open this CSV, update the 'download_link' as needed, and save it.\n"
-#             "Then reload the updated CSV into a QuestionState using:\n"
-#             "    state = QuestionState.load_from_csv('path/to/download_status.csv')\n"
-#             "After that, pass the new state to the Downloader and retry downloads:\n"
-#             "    downloader = Downloader(state=state)\n"
+#             "Then reload the updated CSV into a CorpusState using:\n"
+#             "    corpus_state = CorpusState.load_from_csv('path/to/download_status.csv')\n"
+#             "After that, pass the new corpus_state to the Downloader and retry downloads:\n"
+#             "    downloader = Downloader(corpus_state=corpus_state)\n"
 #             "Filenames correspond to sanitized question_id and paper_id, preserving traceability."
 #         )
-#         # Save the state
-#         self.state.save(STATE_SAVE_LOCATION)
-#         return self.state.insights[["paper_id", "download_status"]]
+#         # Save the corpus_state
+#         self.corpus_state.save(STATE_SAVE_LOCATION)
+#         return self.corpus_state.insights[["paper_id", "download_status"]]
 
 class PaperAttainmentTriage:
     """
@@ -1256,7 +1256,7 @@ class PaperAttainmentTriage:
 
     def __init__(
         self,
-        state: "QuestionState",
+        corpus_state: "CorpusState",
         client: Any,
         embedding_model: str = "text-embedding-3-small",
         save_location: str = os.path.join(os.getcwd(), "data", "hard_to_get_papers.csv"),
@@ -1266,16 +1266,16 @@ class PaperAttainmentTriage:
         Initialize PaperAttainmentTriage.
 
         Args:
-            state: QuestionState object containing literature data.
+            corpus_state: CorpusState object containing literature data.
             client: OpenAI or similar embedding client.
             embedding_model: Name of the embedding model.
             save_location: CSV path to save the hard-to-get papers.
             hard_to_get_papers: Optional pre-filtered DataFrame of failed downloads.
         """
-        # Validate the state structure
-        self.state: "QuestionState" = deepcopy(
+        # Validate the corpus_state structure
+        self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
                 "paper_id", "paper_title", "paper_author", "paper_date", "doi",
@@ -1293,7 +1293,7 @@ class PaperAttainmentTriage:
         # Filter hard-to-get papers (failed downloads)
         self.hard_to_get_papers: pd.DataFrame = (
             hard_to_get_papers if hard_to_get_papers is not None 
-            else self.state.insights[self.state.insights["download_status"] == 0].copy()
+            else self.corpus_state.insights[self.corpus_state.insights["download_status"] == 0].copy()
         )
 
     def _generate_question_embeddings(self) -> pd.DataFrame:
@@ -1489,15 +1489,15 @@ class PaperAttainmentTriage:
             "medium"
         )
 
-        # Merge rankings back into main state
-        self.state.insights = self.state.insights.merge(
+        # Merge rankings back into main corpus_state
+        self.corpus_state.insights = self.corpus_state.insights.merge(
             self.hard_to_get_papers[["paper_id", "cosine_sim", "paper_ranking"]],
             how="left",
             on="paper_id"
         )
 
         # Save to CSV for manual review
-        self.state.insights.to_csv(self.save_location, index=False)
+        self.corpus_state.insights.to_csv(self.save_location, index=False)
         print(
             f"The list of hard-to-get papers can be viewed here: {self.save_location}.\n"
             f"Manually attain the papers that you can and save them in the relevant question folder: {os.path.join(os.getcwd(), 'data', 'docs')}.\n"
@@ -1507,5 +1507,5 @@ class PaperAttainmentTriage:
         )
 
     def update_state(self):
-        # This is simply a wrapper for state.from_csv() which makes it intutive to update the state of the class after manually editing the csv
-        self.state = self.state.from_csv(filepath=self.save_location)
+        # This is simply a wrapper for corpus_state.from_csv() which makes it intutive to update the corpus_state of the class after manually editing the csv
+        self.corpus_state = self.corpus_state.from_csv(filepath=self.save_location)

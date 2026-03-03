@@ -2,7 +2,7 @@
 # import custom libraries
 
 from lit_review_machine import config, utils
-from lit_review_machine.state import CorpusState, QuestionState
+from lit_review_machine.state import CorpusState, SummaryState
 from lit_review_machine.render import Render
 from lit_review_machine.prompts import Prompts
 
@@ -30,8 +30,8 @@ import math
 
 class Ingestor:
     """
-    Class to ingest PDF or HTML papers into a QuestionState object.
-    Validates papers against known question_ids and populates state.full_text.
+    Class to ingest PDF or HTML papers into a CorpusState object.
+    Validates papers against known question_ids and populates corpus_state.full_text.
 
     Attributes:
         corpus_state: CorpusState object containing literature metadata.
@@ -52,7 +52,7 @@ class Ingestor:
         file_path: str = os.path.join(os.getcwd(), "data", "docs"),
         pickle_path: str = config.PICKLE_SAVE_LOCATION # For storing the pickles of LLM metadata retreival for resume
     ) -> None:
-        """Initialize Ingestor and validate state/papers format."""
+        """Initialize Ingestor and validate corpus_state/papers format."""
                
         self.corpus_state = deepcopy(
             utils.validate_format(
@@ -93,7 +93,7 @@ class Ingestor:
                      
     def _list_files(self) -> List[str]:
         """
-        Recursively list all PDF and HTML files in the target directory.
+        Recursively list all PDF and HTML files in the target directory
         Identify duplicate file names to maintain unique paper_id across the data.
         Show the user any conflicting paths with absolute path to allow them to resolve before ingestion.
         
@@ -198,13 +198,13 @@ class Ingestor:
 
     def ingest_papers(self) -> pd.DataFrame:
         """
-        Ingest all papers and populate state.full_text.
+        Ingest all papers and populate corpus_state.full_text.
         Returns a DataFrame with columns ['paper_path', 'pages', 'paper_id', 'question_id', 'full_text'].
         """
 
         
         working_insights = (
-            self.state.insights.copy()
+            self.corpus_state.insights.copy()
             .assign(paper_id=lambda x: x["paper_id"].astype(str)) # set as string to handle NaN values so avoid merge issues on str and float (NaN)
         )
 
@@ -232,12 +232,12 @@ class Ingestor:
             abort_failed_ingest = None
             while abort_failed_ingest not in ["y", "n"]:
                 abort_failed_ingest = input(
-                    "Ingestion errors occurred. Examine .ingestion_errors and state.full_text.\n"
+                    "Ingestion errors occurred. Examine .ingestion_errors and corpus_state.full_text.\n"
                     "Hit 'c' to confirm having read this message:\n\n\n"
                 ).lower()
             
             if abort_failed_ingest == "y":
-                print("Aborting ingestion. Please review the ingestion errors (returned below and accessible via .ingestion_errors) and the state.full_text object to see which papers were not ingested successfully.\n\n\n")
+                print("Aborting ingestion. Please review the ingestion errors (returned below and accessible via .ingestion_errors) and the corpus_state.full_text object to see which papers were not ingested successfully.\n\n\n")
                 return(self.ingestion_errors)
             else:
                 pass # continue with ingestion despite errors
@@ -272,8 +272,8 @@ class Ingestor:
                 "did not have a matching file in the ingestion directory. This is not neccessarily an error, but if you want to be able to match " 
                 "these papers to thier search terms and search engines later you will need to ensure the files are named correctly.\n\n"
                 "If you are conducting a literature review this warning is likely relevant to you. If you are reading your own corpus, you can likely ignore this message.\n\n"
-                "If you ignore this warning any paper ids that did not have a matching file will be deleted from state.insights. "  
-                "You can look these up later by exploring the state.insights object created earlier in the pipeline.\n\n"
+                "If you ignore this warning any paper ids that did not have a matching file will be deleted from corpus_state.insights. "  
+                "You can look these up later by exploring the corpus_state.insights object created earlier in the pipeline.\n\n"
                 "Do you wish to abort ingestion to review the failed id matches? (y/n):\n\n"
             ).lower()
             
@@ -286,25 +286,25 @@ class Ingestor:
 
         # Identify all undownloaded files for the user to see what they are not getting. 
         # Note not tracking these is a design. This package manages reading. It has a module that helps with identifying papers to read, but it is the users responsibility to get the papers. 
-        # So we record this error here but it is not persisted to state
+        # So we record this error here but it is not persisted to corpus_state
         self.dropped_papers = working_insights[working_insights["ingestion_status"] == 0]
 
         # Get the all the ingested papers
         working_insights = working_insights[working_insights["ingestion_status"] == 1] # Filter to just the papers that were ingested successfully, as these are the ones we have insights for and can track through the pipeline.
-        # Populate the full text state object
+        # Populate the full text corpus_state object
         full_text = (
             working_insights[["paper_id", "pages"]]
             .assign(full_text=lambda x: ["".join(pages) for pages in x["pages"]])
             .drop(columns=["pages"]) # Drop pages as they take up memory and are not needed, we have the full text now
         )
-        # Set the full text as a state attribute
-        self.state.full_text = full_text
+        # Set the full text as a corpus_state attribute
+        self.corpus_state.full_text = full_text
 
         # Drop pages from insights as well as other fields from the lit retrieve module that are no longer needed:
         working_insights.drop(columns=["pages", "download_status", "messy_question_id", "messy_paper_id"], inplace=True)
 
-        # Set as state attributes
-        self.state.insights = working_insights
+        # Set as corpus_state attributes
+        self.corpus_state.insights = working_insights
 
         if self.dropped_papers.shape[0] > 0: # Set as none on init, gets created if there are dropped papers
                 print(
@@ -419,11 +419,11 @@ class Ingestor:
         return(output)
 
     def update_metadata(self) -> pd.DataFrame:
-        """Get the metadata for every paper from the first 5000 chrs of the full text using the LLM and update state.insights with the metadata."""
+        """Get the metadata for every paper from the first 5000 chrs of the full text using the LLM and update corpus_state.insights with the metadata."""
         #Create the metadata check which is the dataframe containing the columns i need for the check
         metadata_check_df = (
-            self.state.insights.copy()[["paper_id", "paper_title", "paper_author", "paper_date"]]
-            .merge(self.state.full_text[["paper_id", "full_text"]],
+            self.corpus_state.insights.copy()[["paper_id", "paper_title", "paper_author", "paper_date"]]
+            .merge(self.corpus_state.full_text[["paper_id", "full_text"]],
                 how="left",
                 on=["paper_id"])
         )
@@ -456,18 +456,18 @@ class Ingestor:
         # Now process the list: concat to full metadata
         full_meta_data_df = pd.concat(metadata_list, ignore_index=True)
 
-        # Merge back to state.insights. Drop the old metadata columns and replace with the new metadata from the llm. This ensures that any metadata that was missing or incorrect is updated with the llm response, while any existing correct metadata is retained. We merge on paper_id to ensure we are updating the correct records, and we validate one_to_one to ensure there are no duplicate paper_ids which would indicate an issue with the data integrity.
+        # Merge back to corpus_state.insights. Drop the old metadata columns and replace with the new metadata from the llm. This ensures that any metadata that was missing or incorrect is updated with the llm response, while any existing correct metadata is retained. We merge on paper_id to ensure we are updating the correct records, and we validate one_to_one to ensure there are no duplicate paper_ids which would indicate an issue with the data integrity.
         updated_insights = (
-            self.state.insights
+            self.corpus_state.insights
             .drop(columns=["paper_title", "paper_author", "paper_date"])
             .merge(full_meta_data_df, how="left", on="paper_id", validate="one_to_one")
         )
 
-        # Update the state.insights to now have the correct metadata. 
+        # Update the corpus_state.insights to now have the correct metadata. 
         # Note we don't save here as its not the end of the object and we have the pickle to handle recovery if we need to re run.
-        self.state.insights = updated_insights
+        self.corpus_state.insights = updated_insights
 
-        return self.state.insights
+        return self.corpus_state.insights
 
     def chunk_papers(
         self,
@@ -489,32 +489,32 @@ class Ingestor:
             is_separator_regex=is_separator_regex
         )
 
-        full_text_list = self.state.full_text["full_text"].to_list()
+        full_text_list = self.corpus_state.corpus_state.full_text["full_text"].to_list()
         chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
 
-        # Create the chunks state from the full_text state
-        self.state.full_text["chunk_text"] = chunks_list
-        self.state.chunks = self.state.full_text[["paper_id", "chunk_text"]].explode("chunk_text").reset_index(drop=True).copy()
-        self.state.chunks["chunk_id"] = [f"chunk_{i+1}" for i in range(self.state.chunks.shape[0])]
+        # Create the chunks corpus_state from the full_text corpus_state
+        self.corpus_state.full_text["chunk_text"] = chunks_list
+        self.corpus_state.chunks = self.corpus_state.full_text[["paper_id", "chunk_text"]].explode("chunk_text").reset_index(drop=True).copy()
+        self.corpus_state.chunks["chunk_id"] = [f"chunk_{i+1}" for i in range(self.corpus_state.chunks.shape[0])]
 
         # Chunks from full_text as its now joined by paper and question id
-        self.state.full_text.drop(columns=["chunk_text"], inplace=True)
+        self.corpus_state.full_text.drop(columns=["chunk_text"], inplace=True)
 
         # Get chunk_id into insights
-        temp_insights = self.state.insights.copy()
-        self.state.insights = (
-            self.state.chunks
+        temp_insights = self.corpus_state.insights.copy()
+        self.corpus_state.insights = (
+            self.corpus_state.chunks
             .drop(columns=["chunk_text"])
             .merge(temp_insights, how="left", on="paper_id")
         )
 
-        # Save the updated state
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_full_text_and_chunks"))
+        # Save the updated corpus_state
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_full_text_and_chunks"))
 
 class Insights:
     def __init__(
         self,
-        state: "QuestionState",
+        corpus_state: "CorpusState",
         llm_client: Any,
         ai_model: str,
         paper_context: str, 
@@ -528,8 +528,8 @@ class Insights:
         from a corpus of academic papers and grey literature using an LLM.
 
         Args:
-            state (QuestionState): 
-                Container for all relevant state data including chunks, 
+            corpus_state (CorpusState): 
+                Container for all relevant corpus_state data including chunks, 
                 full text, and insights tables.
             llm_client (Any): 
                 Client instance for calling the LLM API (e.g. OpenAI client).
@@ -547,10 +547,10 @@ class Insights:
         self.max_token_length: int = max_token_length
 
 
-        # Ensure state has all required columns before processing
-        self.state = deepcopy(
+        # Ensure corpus_state has all required columns before processing
+        self.corpus_state = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             questions=None,
             injected_value=None,
             state_required_cols=[
@@ -561,7 +561,7 @@ class Insights:
             )
         )
 
-        self.state.enforce_canonical_question_text()
+        self.corpus_state.enforce_canonical_question_text()
 
     
 
@@ -585,8 +585,8 @@ class Insights:
             pd.DataFrame:
                 A consolidated insights table where each row represents a
                 (question_id, paper_id, chunk_id, insight) record, merged
-                with existing state metadata and assigned back to
-                `self.state.insights`.
+                with existing corpus_state metadata and assigned back to
+                `self.corpus_state.insights`.
 
         # -------------------------------------------------------------
         # Recovery / Resume Handling
@@ -605,7 +605,7 @@ class Insights:
         # We must defensively handle three distinct states:
         #
         #    insights is None   → brand new run
-        #    insights == []     → valid recovery state but zero chunks processed
+        #    insights == []     → valid recovery corpus_state but zero chunks processed
         #    insights has data  → resume and skip already-processed chunk_ids
         #
         # Even though under normal execution the pickle file should
@@ -632,15 +632,15 @@ class Insights:
                 # Explicitly handle injected empty list
                 processed_chunks = []
 
-        remaining_chunks = self.state.chunks[
-            ~self.state.chunks["chunk_id"].isin(processed_chunks)
+        remaining_chunks = self.corpus_state.chunks[
+            ~self.corpus_state.chunks["chunk_id"].isin(processed_chunks)
         ]
 
         # Generate a list of all the research questions with ids in the form <rq_id>: <rq_text> for the llm to consdier against each chunk
-        rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.state.questions.iterrows()]
+        rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.corpus_state.questions.iterrows()]
         rqs_ids_str = "\n".join(rqs_ids)
 
-        temp_state_insights = self.state.insights.copy()
+        temp_state_insights = self.corpus_state.insights.copy()
 
         # Merge chunk text with metadata (author, date, etc.)
         temp_state_insights: pd.DataFrame = remaining_chunks.merge(
@@ -688,7 +688,7 @@ class Insights:
                                  return_json = True, 
                                  fall_back=fall_back)
             
-            # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the state later.
+            # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the corpus_state later.
             results = response_dict.get("results", {})
             
             response_df = (
@@ -716,17 +716,17 @@ class Insights:
                 pickle.dump(insights, f)
 
         # Convert insights list to DataFrame
-        print("Converting insights to DataFrame and merging into state...")
+        print("Converting insights to DataFrame and merging into corpus_state...")
         insights_complete_df: pd.DataFrame = pd.concat(insights).reset_index(drop=True) if insights else pd.DataFrame(columns=["question_id", "insight", "chunk_id", "paper_id"])
         
         # Merge into global insights table - first drop existing insight columns if present (these can be created by previous runs of recover_chunk_insights_generation)
         base_insights = (
-            self.state.insights
-            .drop(columns=["insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
+            self.corpus_state.insights
+            .drop(columns=["insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the corpus_state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
         )
         
         # Now we merge this chunk insights with all the insights data and metadata. 
-        # Notably we drop question_id from the state.insights as previously if papers wwere not associated with a question when importing them, the question_id was NA
+        # Notably we drop question_id from the corpus_state.insights as previously if papers wwere not associated with a question when importing them, the question_id was NA
         # Now we have all the chunks and thier insights associated with a question_id thus this becomes the primary df
         working_insights_df = (
             insights_complete_df
@@ -749,12 +749,12 @@ class Insights:
             working_insights_df.loc[mask, "insight_id"].astype(int).astype(str)
         )
 
-        # Assign to state
-        self.state.insights = working_insights_df
+        # Assign to corpus_state
+        self.corpus_state.insights = working_insights_df
 
         # Note i don't save here as i only save at the end of the class's operations. This is cleaner for the user. 
         # Also since i have the recover function in place, once the insights are generated for this class it should be quick to recreate to this point
-        return self.state.insights
+        return self.corpus_state.insights
     
     
     def _recover_chunk_insights_generation(self):
@@ -798,17 +798,17 @@ class Insights:
             ValueError: If chunk insights do not exist prior to running.
         """
         # Must run chunk insights first
-        if "insight" not in self.state.insights.columns:
+        if "insight" not in self.corpus_state.insights.columns:
             raise ValueError(
                 "Meta-insights cannot be created prior to generating chunk insights. "
                 "Please run .get_chunk_insights before .get_meta_insights."
             )
         
-        rqs = self.state.questions
+        rqs = self.corpus_state.questions
         # Create the final list of paper that we will populate as we develop all the data for checking for meta insights for each paper
         list_of_papers = []
         # Get the full text and paper id
-        for _, row in self.state.full_text.iterrows():
+        for _, row in self.corpus_state.full_text.iterrows():
             paper_id = row["paper_id"]
             paper_content = row["full_text"]
             # Check that the whole paper fits in the model context window, if not break into chunks and process separately 
@@ -822,13 +822,13 @@ class Insights:
 
             # Get the chunk insights for the paper id and the question_id
             for rqid in rqs["question_id"].to_list():
-                paper_question_chunk_insights = self.state.insights[
-                    (self.state.insights["paper_id"] == paper_id) & (self.state.insights["question_id"] == rqid)
+                paper_question_chunk_insights = self.corpus_state.insights[
+                    (self.corpus_state.insights["paper_id"] == paper_id) & (self.corpus_state.insights["question_id"] == rqid)
                 ]["insight"].dropna().tolist()
                 paper_question_chunk_insights = "\n".join(paper_question_chunk_insights) if paper_question_chunk_insights else ""
             
                 # Get the metadata for the paper id
-                paper_metadata_df = self.state.insights[self.state.insights["paper_id"] == paper_id][["paper_author", "paper_title", "paper_date"]].drop_duplicates()
+                paper_metadata_df = self.corpus_state.insights[self.corpus_state.insights["paper_id"] == paper_id][["paper_author", "paper_title", "paper_date"]].drop_duplicates()
                 author = paper_metadata_df["paper_author"].iloc[0] if not paper_metadata_df.empty and "paper_author" in paper_metadata_df.columns else pd.NA
                 if isinstance(author, list):
                         author_str = ", ".join(author)
@@ -859,13 +859,13 @@ class Insights:
         # Create an id for full_content chunks both for resuming and traceability
         meta_insight_check_df["content_chunk_id"] = [f"meta_chunk_{i+1}" for i in range(meta_insight_check_df.shape[0])]
 
-        # Update the state.chunks with the meta chunks and their ids
-        temp_chunks = self.state.chunks.copy()
-        # Check if the meta_chunks were already created in a previous run. If so remove them from the state object before we concat so that they don't get duplicated. 
+        # Update the corpus_state.chunks with the meta chunks and their ids
+        temp_chunks = self.corpus_state.chunks.copy()
+        # Check if the meta_chunks were already created in a previous run. If so remove them from the corpus_state object before we concat so that they don't get duplicated. 
         if temp_chunks["chunk_id"].str.startswith("meta_chunk_").any():
             temp_chunks = temp_chunks[~temp_chunks["chunk_id"].str.startswith("meta_chunk_")]
         
-        self.state.chunks = pd.concat([
+        self.corpus_state.chunks = pd.concat([
             meta_insight_check_df[["paper_id", "paper_content", "content_chunk_id"]].rename(columns={"paper_content": "chunk_text", "content_chunk_id": "chunk_id"}),
             temp_chunks
             ])
@@ -880,13 +880,13 @@ class Insights:
         and the full text.
 
         Returns:
-            pd.DataFrame: An updated version of state.insights which has the meta-insights appended.
+            pd.DataFrame: An updated version of corpus_state.insights which has the meta-insights appended.
 
         Raises:
             ValueError: If chunk insights do not exist prior to running.
         """
         # Must run chunk insights first
-        if "insight" not in self.state.insights.columns:
+        if "insight" not in self.corpus_state.insights.columns:
             raise ValueError(
                 "Meta-insights cannot be created prior to generating chunk insights. "
                 "Please run .get_chunk_insights before .get_meta_insights."
@@ -907,9 +907,9 @@ class Insights:
                 with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "rb") as f:
                     meta_insights = pickle.load(f)
             else:
-                # Clean up any meta insights that have been generated in self.state.insights to avoid duplication when we generate new ones.
-                self.state.insights = self.state.insights[
-                    ~self.state.insights["insight_id"].astype(str).str.startswith("meta_insight_")
+                # Clean up any meta insights that have been generated in self.corpus_state.insights to avoid duplication when we generate new ones.
+                self.corpus_state.insights = self.corpus_state.insights[
+                    ~self.corpus_state.insights["insight_id"].astype(str).str.startswith("meta_insight_")
                     ]
                 meta_insights = None
 
@@ -932,9 +932,9 @@ class Insights:
             # Extract fields from row
             paper_id: str = row["paper_id"]
             rq_id = row["question_id"]
-            rq_text = self.state.questions[self.state.questions["question_id"] == rq_id]["question_text"].iloc[0] if rq_id in self.state.questions["question_id"].tolist() else ""
+            rq_text = self.corpus_state.questions[self.corpus_state.questions["question_id"] == rq_id]["question_text"].iloc[0] if rq_id in self.corpus_state.questions["question_id"].tolist() else ""
             rq = f"{rq_id}: {rq_text}"
-            other_rqs = self.state.questions[self.state.questions["question_id"] != rq_id]
+            other_rqs = self.corpus_state.questions[self.corpus_state.questions["question_id"] != rq_id]
             other_rqs_str = "\n".join([f"{row['question_id']}: {row['question_text']}" for _, row in other_rqs.iterrows()])
             paper_content: str = row["paper_content"] if pd.notna(row["paper_content"]) else ""
             paper_chunk_insights: str = row["paper_chunk_insights"] if pd.notna(row["paper_chunk_insights"]) else ""
@@ -986,8 +986,8 @@ class Insights:
         # Explode on meta_insight (currently a list for each content chunk)
         meta_insights_complete_df = meta_insights_complete_df.explode("meta_insight").reset_index(drop=True) 
 
-        # Now we want to append to self.state.insights (which already has the chunk level insights)
-        # First rename meta_insight to insight to match .state.insights, i also rename content_chunk_id to chunk_id to match the state and ensure the meta_chunks have an ID of thier own. 
+        # Now we want to append to self.corpus_state.insights (which already has the chunk level insights)
+        # First rename meta_insight to insight to match .corpus_state.insights, i also rename content_chunk_id to chunk_id to match the corpus_state and ensure the meta_chunks have an ID of thier own. 
         meta_insights_complete_df.rename(columns={"meta_insight": "insight", 
                                                   "content_chunk_id": "chunk_id"}, 
                                                   inplace=True)
@@ -1005,8 +1005,8 @@ class Insights:
             meta_insights_complete_df.loc[mask, "insight_id"].astype(int).astype(str)
         )
 
-        # Then manipulate state.insights so that we can merge with meta_insights to get a complete df that we can later append to insights
-        temp_insights = self.state.insights.copy()
+        # Then manipulate corpus_state.insights so that we can merge with meta_insights to get a complete df that we can later append to insights
+        temp_insights = self.corpus_state.insights.copy()
         temp_insights = (
             temp_insights
             .drop(columns=["question_id", "question_text", "insight_id", "insight", "chunk_id"]) #Drop these to avoid conflicts
@@ -1017,11 +1017,11 @@ class Insights:
             on="paper_id", 
             how="left"
             )
-        # Now we have the meta insights with all the metadata and we can append to the state insights
-        self.state.insights = pd.concat([self.state.insights, meta_insights_complete], ignore_index=True)
+        # Now we have the meta insights with all the metadata and we can append to the corpus_state insights
+        self.corpus_state.insights = pd.concat([self.corpus_state.insights, meta_insights_complete], ignore_index=True)
         # Save to parquet and return
-        self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "07_insights"))
-        return self.state.insights
+        self.corpus_state.save(os.path.join(self.pickle_path, "07_insights"))
+        return self.corpus_state.insights
 
       
     @staticmethod
@@ -1074,15 +1074,15 @@ class Clustering:
 
     def __init__(
         self,
-        state: QuestionState,
+        corpus_state: CorpusState,
         llm_client: Any,
         embedding_model: str,
         embedding_dims: int = 1024,
         embeddings_pickle_path: str = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
     ):
-        self.state = deepcopy(
+        self.corpus_state = deepcopy(
             utils.validate_format(
-            state=state,
+            corpus_state=corpus_state,
             questions = None,
             injected_value=None,
             state_required_cols=[
@@ -1128,20 +1128,20 @@ class Clustering:
         """
         Get the DataFrame of insights that are non-empty after stripping
         citation parentheticals.
-        Updates self.state.insights with a new column 'no_author_insight_string'.
+        Updates self.corpus_state.insights with a new column 'no_author_insight_string'.
         Returns: pd.DataFrame
         """
 
         # Strip citation-style parentheticals from the insight text
-        self.state.insights["no_author_insight_string"] = (
-            self.state.insights["insight"]
+        self.corpus_state.insights["no_author_insight_string"] = (
+            self.corpus_state.insights["insight"]
             .astype(str)
             .apply(self._strip_citation_parentheticals)
         )
 
         # Keep only non-empty strings
-        out = self.state.insights[
-            self.state.insights["no_author_insight_string"].str.strip() != ""
+        out = self.corpus_state.insights[
+            self.corpus_state.insights["no_author_insight_string"].str.strip() != ""
         ].copy()
 
         return out
@@ -1382,7 +1382,7 @@ class Clustering:
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
         Generate clusters for each research question using HDBSCAN.
-        Updates self.state.insights with cluster labels and probabilities.
+        Updates self.corpus_state.insights with cluster labels and probabilities.
 
         Args:
             min_cluster_size (int): Minimum cluster size for HDBSCAN.
@@ -1437,13 +1437,13 @@ class Clustering:
         self.cum_prop_cluster = pd.concat(summary_df)
         clustered_df = pd.concat(data)
 
-        self.state.insights = self.state.insights.merge(
+        self.corpus_state.insights = self.corpus_state.insights.merge(
             clustered_df[["question_id", "paper_id", "chunk_id", "insight_id", "cluster", "cluster_prob", "full_insight_embedding", "reduced_insight_embedding"]],
             on=["question_id", "paper_id", "chunk_id", "insight_id"],
             how="left"
         )
 
-        return self.state.insights
+        return self.corpus_state.insights
 
     @staticmethod
     def make_cum_prop_cluster_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -1511,10 +1511,10 @@ class Clustering:
 
     #     # In case the user is re-running generate clusters to adjust parameters, remove the old cluster assignments
     #     for col in ["cluster", "cluster_prob"]:
-    #         if col in self.state.insights.columns:
-    #             self.state.insights.drop(columns=[col], inplace=True)   
+    #         if col in self.corpus_state.insights.columns:
+    #             self.corpus_state.insights.drop(columns=[col], inplace=True)   
 
-    #     self.state.insights = self.state.insights.merge(
+    #     self.corpus_state.insights = self.corpus_state.insights.merge(
     #         clustered_df[["question_id", "paper_id", "chunk_id", "cluster", "cluster_prob"]],
     #         on=["question_id", "paper_id", "chunk_id"],
     #         how="left"
@@ -1522,7 +1522,7 @@ class Clustering:
 
     #     # 1. Calculate counts and prop per question_id and cluster
     #     cum_prop_cluster = (
-    #         self.state.insights.dropna(subset=["cluster"])
+    #         self.corpus_state.insights.dropna(subset=["cluster"])
     #         .groupby(["question_id", "cluster"])
     #         .size()
     #         .reset_index(name="count")
@@ -1550,7 +1550,7 @@ class Clustering:
     def clean_clusters(self, final_cluster_count: dict = None) -> pd.DataFrame:
         """
         Selects the top N clusters (by size) for each research question, marking all other clusters as outliers (-1).
-        Updates self.state.insights with a new column 'selected_cluster' and saves the result.
+        Updates self.corpus_state.insights with a new column 'selected_cluster' and saves the result.
 
         Args:
             final_cluster_count (dict): Dictionary mapping question_id to the number of clusters to keep for that question.
@@ -1560,11 +1560,11 @@ class Clustering:
             pd.DataFrame: Updated insights DataFrame with 'selected_cluster' column.
         """
         if final_cluster_count is None:
-            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
-            return(self.state.insights)
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            return(self.corpus_state.insights)
 
         else:
-            rqs = self.state.insights["question_id"].unique()
+            rqs = self.corpus_state.insights["question_id"].unique()
             if len(rqs) != len(final_cluster_count):
                 raise ValueError(
                     "final_cluster_count must specify the number of clusters to keep for each research question."
@@ -1573,9 +1573,9 @@ class Clustering:
             selected_clusters_list = []
 
             # Loop over each research question
-            for rq in self.state.insights["question_id"].unique():
+            for rq in self.corpus_state.insights["question_id"].unique():
                 # Filter insights for the current research question
-                current_rq_df = self.state.insights[self.state.insights["question_id"] == rq].copy()
+                current_rq_df = self.corpus_state.insights[self.corpus_state.insights["question_id"] == rq].copy()
                 # Count the size of each cluster (excluding outliers)
                 cluster_sizes = current_rq_df.dropna(subset=["cluster"]).groupby("cluster").size().sort_values(ascending=False)
 
@@ -1594,38 +1594,41 @@ class Clustering:
                 selected_clusters_list.append(current_rq_df)
 
             # Concatenate all research questions back together
-            self.state.insights = pd.concat(selected_clusters_list)
+            self.corpus_state.insights = pd.concat(selected_clusters_list)
             # Save the updated DataFrame to disk
-            self.state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
-            return self.state.insights
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            return self.corpus_state.insights
         
             
 
 class Summarize:
     def __init__(self,
-                 state: Any,
+                 corpus_state: Any,
                  llm_client: Any,
                  ai_model: str,
                  paper_output_length: int,  # Approximate total paper length in words
-                 summary_save_location: str = None, 
+                 summary_save_location: str = config.SUMMARY_SAVE_LOCATION, 
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
-                 state_save_location: str = os.path.join(config.STATE_SAVE_LOCATION, "12_summarize"), 
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")):
         """
         Class to handle summarization of clustered insights.
 
         Args:
-            state: Object holding insights (expects DataFrame `state.insights`).
+            corpus_state: Object holding insights (expects DataFrame `corpus_state.insights`).
             llm_client: Client to interact with LLM API.
             ai_model: Model name or identifier for LLM.
             paper_output_length: Total word length for paper; used to proportion cluster summaries.
             summaries_pickle_path: Optional path to pickle the resulting summaries DataFrame.
         """
-        self.state: Any = deepcopy(state)
+        # Load the two states that this class operates on. Note this class has a SummaryState which will manage all the objects the class generates
+        self.corpus_state: Any = deepcopy(corpus_state)
+        self.summary_state = SummaryState()
+
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
         self.paper_output_length: int = paper_output_length
-        self.summary_save_location: str = config.SUMMARY_SAVE_LOCATION
+        self.summary_save_location = summary_save_location
+        pickle_save_location = pickle_save_location
 
         # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
         if not os.path.exists(insight_embedding_path):
@@ -1633,166 +1636,10 @@ class Summarize:
         else:
             with open(insight_embedding_path, "rb") as f:
                 self.insight_embeddings_array: np.ndarray = pickle.load(f)
-
-        # Reload any runs that might have already happened, or create place holders for that data. 
-        # These are in a different form to state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
-        self.cluster_summary_list = self._reload_summary_outputs(config.cluster_summaries) # List of len(1) containing the cluster summaries
-        self.theme_schema_list = self._reload_summary_outputs(config.theme_schemas) # List of len(n) containing the theme schemas for each re-theming pass
-        self.mapped_theme_list = self._reload_summary_outputs(config.mapped_themes) # List of len(n) containing the mapped themes for each theme mapping pass
-        self.populated_theme_list = self._reload_summary_outputs(config.populated_themes) # List of len(n) containing the populated themes for each theme population pass
-        self.orphans_list = self._reload_summary_outputs(config.orphans) # List of len(n) containing the orphaned insights for each theme population pass
-        self.redundancy_list = self._reload_summary_outputs(config.redundancy) # List of len(1) containing the output of the final redundancy pass
-
-        # Ensure summary save location exists
-        if not os.path.exists(self.summary_save_location):
-            os.makedirs(self.summary_save_location, exist_ok=True)
-
-    
-    def _reload_summary_outputs(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
-        """
-        Finds and loads all parquet versions of a specific file, sorted by creation time.
-
-        This method searches the summary save location for files matching the 
-        pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
-        ordered from oldest to newest.
-
-        Args:
-            file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
-
-        Returns:
-            A list of pandas DataFrames if matching files exist, otherwise None.
-            The list is sorted by file creation time (st_birthtime/st_mtime).
-        """
-        base_dir = Path(self.summary_save_location)
-        
-        # 1. Grab all potential matches using the prefix wildcard
-        # We wrap in list() so we can check if any files were actually found
-        paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
-
-        if not paths:
-            return []
-
-        # 2. Sort by creation/birth time
-        # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
-        paths_sorted = sorted(
-            paths, 
-            key=lambda p: getattr(p.stat(), 'st_birthtime', p.stat().st_mtime)
-        )
-
-        # 3. Load and return the list of DataFrames
-        output = [pd.read_parquet(p.absolute()) for p in paths_sorted]
-        self._assert_summarize_state_integrity(output)
-        return output
-    
-    def _assert_summarize_state_integrity(self, df_list: list, context: str = ""):
-        """
-        Developer-facing integrity check for summarize pipeline state.
-
-        - Ensures structural keys like `theme_id` maintain expected dtype.
-        - Prints loud warnings but does NOT raise errors.
-        - Intended as a guardrail during development and refactoring.
-
-        Args:
-            df_list: A list of pandas DataFrames to validate.
-            context: Optional string indicating where this check is being run
-                    (e.g., 'reload', 'save', 'post-populate').
-        """
-
-        if not isinstance(df_list, list):
-            print(
-                f"⚠️ STATE WARNING [{context}]: Expected list of DataFrames, "
-                f"received {type(df_list)}"
-            )
-            return
-
-        for idx, df in enumerate(df_list):
-
-            if df is None:
-                print(
-                    f"⚠️ STATE WARNING [{context}]: "
-                    f"DataFrame at index {idx} is None."
-                )
-                continue
-
-            if not hasattr(df, "columns"):
-                print(
-                    f"⚠️ STATE WARNING [{context}]: "
-                    f"Object at index {idx} is not a DataFrame "
-                    f"(type={type(df)})."
-                )
-                continue
-
-            # Check structural identity key
-            if "theme_id" in df.columns:
-                if not pd.api.types.is_integer_dtype(df["theme_id"]):
-                    print(
-                        f"\n🚨 STATE WARNING [{context}] 🚨\n"
-                        f"DataFrame index: {idx}\n"
-                        f"'theme_id' dtype is {df['theme_id'].dtype}, "
-                        f"expected integer.\n"
-                        f"This may cause ordering or join errors downstream.\n"
-                        f"Correct dtype drift before proceeding.\n"
-                    )
-
-    def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
-        """
-        Deletes summary output files matching the given prefixes.
-
-        Args:
-            file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
-        """
-        if not self.summary_save_location:
-            return
-
-        base_dir = Path(self.summary_save_location)
-        
-        # Ensure we don't try to glob an empty path or a non-existent directory
-        if not base_dir.is_dir():
-            return
-
-        for prefix in file_prefixes:
-            # glob finds every file starting with prefix and ending in .parquet
-            for file_path in base_dir.glob(f"{prefix}*.parquet"):
-                # missing_ok=True prevents crashes if another process 
-                # deletes the file between globbing and unlinking
-                file_path.unlink(missing_ok=True)
-
-    def _save_summary_outputs(self, file_prefixes: List[str]):
-
-        possible_prefixes = [
-            config.cluster_summaries,
-            config.theme_schemas,
-            config.mapped_themes,
-            config.populated_themes,
-            config.orphans,
-            config.redundancy,
-        ]
-
-        if not set(file_prefixes).issubset(possible_prefixes):
-            raise ValueError("Invalid file prefix provided.")
-        
-        
-        file_loc_dict = {
-            config.cluster_summaries: self.cluster_summary_list,
-            config.theme_schemas: self.theme_schema_list,
-            config.mapped_themes: self.mapped_theme_list,
-            config.populated_themes: self.populated_theme_list,
-            config.orphans: self.orphans_list,
-            config.redundancy: self.redundancy_list
-        }
-
-        obj_to_save = [file_loc_dict[prefix] for prefix in file_prefixes]
-
-        for obj, prefix in zip(obj_to_save, file_prefixes):
-            for idx, df in enumerate(obj, start=1):
-                df.to_parquet(os.path.join(self.summary_save_location, f"{prefix}_{idx}.parquet"), index=False)
-
-        self._assert_summarize_state_integrity(obj_to_save)
-
-
+     
     def _calculate_centroid(self, col="full_insight_embedding"):
         rows = []
-        for rq, d in self.state.insights.groupby("question_id", sort=False):
+        for rq, d in self.corpus_state.insights.groupby("question_id", sort=False):
             # get clusters with at least one non-null embedding
             for cl, g in d.groupby("cluster", sort=False):
                 vecs = [v for v in g[col].tolist() if isinstance(v, (list, tuple, np.ndarray))]
@@ -1869,7 +1716,7 @@ class Summarize:
             Summaries object containing a DataFrame of cluster summaries.
         """
         
-        if self.cluster_summary_list is not None and len(self.cluster_summary_list) > 0:
+        if self.summary_state.cluster_summary_list is not None and len(self.summary_state.cluster_summary_list) > 0:
             new = None
             while new not in ["1", "2"]:
                 new = input(
@@ -1887,14 +1734,9 @@ class Summarize:
             else:
                 # If we are regenerating summeries we need to delete all existing outputs and reset the attributes to none as they are loaed on init if they exist
                 print("Re-running summarization of clusters...")
-                self._delete_summary_outputs(file_prefixes=[config.cluster_summaries, config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
-                self.cluster_summary_list = []
-                self.theme_schema_list = []
-                self.mapped_theme_list = []
-                self.populated_theme_list = []
-                self.orphans = []
-                self.redundancy = []
-
+                # Delete all the existing outputs and set thier values to empty lists
+                self.summary_state.restart(confirm="yes")
+    
         # We are going to send the insights to the LLM in the order of the shortest path, so that the most similar clusters are summarized close together
         # This will add coherence to the final paper when the summaries are stitched together
         # It will also aid in the applicaion of the sliding window for summary clean up
@@ -1908,10 +1750,10 @@ class Summarize:
         count = 1
 
         # Loop over unique research questions
-        for _, row in self.state.questions.iterrows():
+        for _, row in self.corpus_state.questions.iterrows():
             rq_id = row["question_id"]
             rq_text = row["question_text"]
-            rq_df: pd.DataFrame = self.state.insights[self.state.insights["question_id"] == rq_id].copy()
+            rq_df: pd.DataFrame = self.corpus_state.insights[self.corpus_state.insights["question_id"] == rq_id].copy()
 
             # Loop over clusters for this research question - in shortest path order
             for cluster in shortest_paths[rq_id]["order"]:
@@ -1983,13 +1825,13 @@ class Summarize:
             f"Summaries saved here: {self.summary_save_location} and accesible via `variable.cluster_summary_list[0]`.\n"
         )
 
-        self.cluster_summary_list = [summaries_df]
+        self.summary_state.cluster_summary_list = [summaries_df]
 
         # Save summaries as this is LLM output we may want to reuse later - save as parquet
         os.makedirs(self.summary_save_location, exist_ok=True)
-        [i.to_parquet(os.path.join(self.summary_save_location, config.cluster_summaries + ".parquet")) for i in self.cluster_summary_list]
+        self.summary_state.save()
 
-        return self.cluster_summary_list
+        return self.summary_state.cluster_summary_list
     
     def _run_llm_schema_gen(self, source: pd.DataFrame) -> pd.DataFrame:
         """
@@ -2002,17 +1844,17 @@ class Summarize:
         
         if source == "cluster summaries":
             # Grab data from summaries
-            source_df = self.cluster_summary_list[0].copy()
+            source_df = self.summary_state.cluster_summary_list[0].copy()
             source_df.rename(columns={"cluster": "id", "summary": "text_to_theme"}, inplace=True)
         else:
             # if its an iteration we get data from the last populated theme and convert the columsn to a generic form to send to the llm
-            source_df = self.populated_theme_list[-1].copy()
+            source_df = self.summary_state.populated_theme_list[-1].copy()
             source_df.rename(columns={"theme_id": "id", "thematic_summary": "text_to_theme"}, inplace=True)
         
         out_df_list = []
 
-        for idx, row in self.state.questions.iterrows():
-            print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.state.questions)})...")
+        for idx, row in self.corpus_state.questions.iterrows():
+            print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
             question_id = row["question_id"]
             question_text = row["question_text"]
             rq_df = source_df[source_df["question_id"] == question_id].copy()
@@ -2093,22 +1935,22 @@ class Summarize:
         """
         
          # --- Root validation ---
-        if not self.cluster_summary_list:
+        if not self.summary_state.cluster_summary_list:
             raise ValueError(
                 "No cluster summaries found. Please run cluster summarization first."
             )
 
-        schema_len = len(self.theme_schema_list)
-        populate_len = len(self.populated_theme_list)
-        orphan_len = len(self.orphans_list)
+        schema_len = len(self.summary_state.theme_schema_list)
+        populate_len = len(self.summary_state.populated_theme_list)
+        orphan_len = len(self.summary_state.orphan_list)
 
         # Determine the input source (from cluster summaries or from orphan handling):
         # --- CASE 1: First schema pass, build from clusters
         if schema_len == 0:
             source_name = "cluster summaries"
             new_schema = self._run_llm_schema_gen(source=source_name)
-            self.theme_schema_list.append(new_schema)
-            self._save_summary_outputs([config.theme_schemas])
+            self.summary_state.theme_schema_list.append(new_schema)
+            self.summary_state.save()
             return new_schema  
 
         # --- Existing schema passes, check what user wants---
@@ -2144,9 +1986,9 @@ class Summarize:
 
             source_name = "populated themes"
             new_schema = self._run_llm_schema_gen(source=source_name)
-            self.theme_schema_list.append(new_schema)
+            self.summary_state.theme_schema_list.append(new_schema)
 
-            self._save_summary_outputs([config.theme_schemas])
+            self.summary_state.save()
             return new_schema
 
         # --- Option 3: Regenerate last pass ---
@@ -2165,9 +2007,9 @@ class Summarize:
             new_schema = self._run_llm_schema_gen(source=source_name)
 
             # Replace last schema pass
-            self.theme_schema_list[-1] = new_schema
+            self.summary_state.theme_schema_list[-1] = new_schema
 
-            self._save_summary_outputs([config.theme_schemas])
+            self.summary_state.save()
             return new_schema
 
     def _validate_and_cast_theme_ids(self, df, allowed_ids):
@@ -2187,8 +2029,8 @@ class Summarize:
     
     def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
         #### --------------------------------------------------
-    #### RESUMPTION / RECOVERY LOGIC
-    #### --------------------------------------------------
+        #### RESUMPTION / RECOVERY LOGIC
+        #### --------------------------------------------------
 
         mapped_insights_df_list = None
         already_mapped_insight_ids = []
@@ -2233,13 +2075,13 @@ class Summarize:
         #### PRE-RUN VALIDATION
         #### --------------------------------------------------
 
-        if not self.theme_schema_list:
+        if not self.summary_state.theme_schema_list:
             raise ValueError(
                 "No theme schema found. Please run gen_theme_schema() first."
             )
 
-        schema_len = len(self.theme_schema_list)
-        mapped_len = len(self.mapped_theme_list)
+        schema_len = len(self.summary_state.theme_schema_list)
+        mapped_len = len(self.summary_state.mapped_theme_list)
 
         # If mappings exist, offer choice
         if mapped_len > 0:
@@ -2258,13 +2100,13 @@ class Summarize:
                 print("Mapped themes loaded.")
                 return None
 
-            # Realign to last coherent pre-mapping state
+            # Realign to last coherent pre-mapping corpus_state
             min_len = min(schema_len, mapped_len)
-            self.theme_schema_list = self.theme_schema_list[:min_len + 1]
-            self.mapped_theme_list = self.mapped_theme_list[:min_len]
+            self.summary_state.theme_schema_list = self.summary_state.theme_schema_list[:min_len + 1]
+            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len]
 
         else:
-            # No mappings exist — ensure we are in valid pre-mapping state
+            # No mappings exist — ensure we are in valid pre-mapping corpus_state
             if schema_len < 1:
                 raise ValueError("No schema available to map.")
         
@@ -2278,7 +2120,7 @@ class Summarize:
             mapped_insights_df_list = []
 
         # Work on a temporary copy
-        temp_state_insights = self.state.insights.copy()
+        temp_state_insights = self.corpus_state.insights.copy()
 
         # Remove already mapped insights if resuming
         if already_mapped_insight_ids:
@@ -2289,7 +2131,7 @@ class Summarize:
             ]
 
         # Iterate through each research question
-        for _, q_row in self.state.questions.iterrows():
+        for _, q_row in self.corpus_state.questions.iterrows():
 
             question_id = q_row["question_id"]
             question_text = q_row["question_text"]
@@ -2305,8 +2147,8 @@ class Summarize:
                 continue
 
             # Get schema for this question
-            q_schema_df = self.theme_schema_list[-1][
-                self.theme_schema_list[-1]["question_id"] == question_id
+            q_schema_df = self.summary_state.theme_schema_list[-1][
+                self.summary_state.theme_schema_list[-1]["question_id"] == question_id
             ].copy()
 
             q_schema_json = q_schema_df[
@@ -2439,7 +2281,7 @@ class Summarize:
                 ignore_index=True
             )
 
-        self.mapped_theme_list.append(mapped_insights_df)
+        self.summary_state.mapped_theme_list.append(mapped_insights_df)
 
         os.makedirs(self.summary_save_location, exist_ok=True)
 
@@ -2448,16 +2290,9 @@ class Summarize:
             os.remove(in_progress_path)
 
         # Persist parquet versions
-        for idx, df in enumerate(self.mapped_theme_list):
-            df.to_parquet(
-                os.path.join(
-                    self.summary_save_location,
-                    f"{config.mapped_themes}_{idx+1}.parquet"
-                ),
-                index=False
-            )
+        self.summary_state.save()
 
-        return self.mapped_theme_list[-1]
+        return self.summary_state.mapped_theme_list[-1]
 
 
     def _estimate_theme_lengths(self, paper_len: int, max_model_output_words: int = 2800) -> pd.DataFrame:
@@ -2467,7 +2302,7 @@ class Summarize:
 
         # --- Full list of expected themes (anchor) ---
         full_schema = (
-            self.theme_schema_list[-1][["theme_id"]]
+            self.summary_state.theme_schema_list[-1][["theme_id"]]
             .copy()
             .astype({"theme_id": int})
             .drop_duplicates()
@@ -2475,7 +2310,7 @@ class Summarize:
 
         # --- Count mapped insights per theme ---
         theme_counts = (
-            self.mapped_theme_list[-1]
+            self.summary_state.mapped_theme_list[-1]
             .copy()
             .astype({"theme_id": int})
             .groupby("theme_id")
@@ -2559,7 +2394,7 @@ class Summarize:
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
-        # Copy the df because this could be called on a state object
+        # Copy the df because this could be called on a corpus_state object
         schema_df["question_id"] = schema_df["question_id"].copy()
         schema_df["theme_id"] = schema_df["theme_id"].astype(int).copy()
         
@@ -2586,7 +2421,7 @@ class Summarize:
                 (mapped_themes_df["theme_id"] == theme_id)
             ]["insight_id"].tolist()
             # Get the insight text from those insight ids
-            insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+            insights = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
             # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
             if len(insights) == 0:
                 no_insight_df = pd.DataFrame([{
@@ -2669,11 +2504,11 @@ class Summarize:
                         max_prop: float = 0.9) -> pd.DataFrame:
         
         # Check that themes have been mapped before we try to populate
-        if not self.mapped_theme_list:
+        if not self.summary_state.mapped_theme_list:
             raise ValueError("No mapped themes found. Please run map_insights_to_themes() first.")
         
-        mapped_len = len(self.mapped_theme_list)
-        populate_len = len(self.populated_theme_list)
+        mapped_len = len(self.summary_state.mapped_theme_list)
+        populate_len = len(self.summary_state.populated_theme_list)
 
         # If populated themes exist, offer choice
         if populate_len > 0:
@@ -2691,21 +2526,21 @@ class Summarize:
                 )
                 return(None) # Return to exit the function and avoid re-running the population
             
-            # Realign to last coherent pre-population state
+            # Realign to last coherent pre-population corpus_state
             min_len = min(mapped_len - 1, populate_len)
-            self.mapped_theme_list = self.mapped_theme_list[:min_len + 1]
-            self.populated_theme_list = self.populated_theme_list[:min_len]
+            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len + 1]
+            self.summary_state.populated_theme_list = self.summary_state.populated_theme_list[:min_len]
             
         else:
-            # No populated themes exist — ensure we are in valid pre-population state
+            # No populated themes exist — ensure we are in valid pre-population corpus_state
             if mapped_len < 1:
                 raise ValueError("No mapped themes available to populate from. Please run map_insights_to_themes() first.")
         
         
         # Populate the themes with the insights mapped to them 
         populated_themes_df = self._run_theme_pop(
-            schema_df=self.theme_schema_list[-1].copy(),
-            mapped_themes_df=self.mapped_theme_list[-1].copy(),
+            schema_df=self.summary_state.theme_schema_list[-1].copy(),
+            mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
             paper_len=paper_len
         )
 
@@ -2736,13 +2571,13 @@ class Summarize:
                 df_len_flagged["allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
                 # Then get the ids and the corresponding insights
                 length_check_theme_ids = df_len_flagged["theme_id"].tolist()
-                rerun_mapped_df = self.mapped_theme_list[-1][self.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
+                rerun_mapped_df = self.summary_state.mapped_theme_list[-1][self.summary_state.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
                 # Rerun on the flagged themes with the expanded length and get new summaries for those themes
                 rerun_theme_ids = df_len_flagged["theme_id"].tolist()
                 rerun_schema_df = (
-                    self.theme_schema_list[-1][self.theme_schema_list[-1]["theme_id"].isin(rerun_theme_ids)] # First filter the schema to just the themes we want to rerun
+                    self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["theme_id"].isin(rerun_theme_ids)] # First filter the schema to just the themes we want to rerun
                     .drop(columns=["allocated_length"], errors="ignore") # Drop allocated length as we will get the updated length from df_len_flagged 
-                    .copy() # Copy so that we are not modifying state
+                    .copy() # Copy so that we are not modifying corpus_state
                 )
                 # Now get the updated allocated length via a merge
                 rerun_schema_df = ( 
@@ -2774,9 +2609,9 @@ class Summarize:
         populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         # Now add populated_themes_df to the populated theme list and save to disk. Return the updated themes
-        self.populated_theme_list.append(populated_themes_df)
-        self._save_summary_outputs([config.populated_themes])
-        return self.populated_theme_list[-1]
+        self.summary_state.populated_theme_list.append(populated_themes_df)
+        self.summary_state.save()
+        return self.summary_state.populated_theme_list[-1]
 
 
     def _identify_orphans(self, batch_size=75) -> pd.DataFrame:
@@ -2805,7 +2640,7 @@ class Summarize:
         # Handling for iteration, or reload is in the orchestrator .handle_orphans() which calls this func
         # So set up for the orphan id process
         
-        total_batches_to_check = math.ceil(len(self.mapped_theme_list[-1]) / batch_size)
+        total_batches_to_check = math.ceil(len(self.summary_state.mapped_theme_list[-1]) / batch_size)
         count = (checked_insights_df.shape[0] // batch_size) + 1 if checked_insights_df is not None else 0
 
         # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
@@ -2813,15 +2648,15 @@ class Summarize:
         checked_insight_id_list = checked_insights_df["insight_id"].tolist() if not checked_insights_df.empty else []
         
         # Now call the loop on these temp dataframes which will allow me to skip the insights that have already been checked and saved in the checked_insights_df which is being updated and saved to pickle as we go to allow for resumption if the process is interupted
-        theme_map = self.mapped_theme_list[-1].copy() # we need this in the loop, but to prevent copying each loop, i put it here
-        for _, row in self.populated_theme_list[-1].iterrows():
+        theme_map = self.summary_state.mapped_theme_list[-1].copy() # we need this in the loop, but to prevent copying each loop, i put it here
+        for _, row in self.summary_state.populated_theme_list[-1].iterrows():
             # This runs question by question so first we iterate over those
             t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
             # Then we get the insights that were iniitally allocaed to that question - as we are checking whether these got allocated
             relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
-            relevant_insights = self.state.insights[
-                (self.state.insights["insight_id"].isin(relevant_ids)) & # Get the insight text for the insight_ids that were mapped
-                (~self.state.insights["insight_id"].isin(checked_insight_id_list)) # SKIP checked insights
+            relevant_insights = self.corpus_state.insights[
+                (self.corpus_state.insights["insight_id"].isin(relevant_ids)) & # Get the insight text for the insight_ids that were mapped
+                (~self.corpus_state.insights["insight_id"].isin(checked_insight_id_list)) # SKIP checked insights
             ].dropna(subset=["insight_id"]).copy()
 
             for i in range(0, len(relevant_insights), batch_size):
@@ -2908,7 +2743,7 @@ class Summarize:
         updated_summary_df_lst = []
         
         # --- Added Counter Logic ---
-        populated_themes = self.populated_theme_list[-1]
+        populated_themes = self.summary_state.populated_theme_list[-1]
         total_themes = len(populated_themes)
         count = 1
         # ---------------------------
@@ -2918,7 +2753,7 @@ class Summarize:
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
-            question_text = self.state.questions[self.state.questions["question_id"] == question_id]["question_text"].iloc[0] # Get the question text from the state questions df using the question id in the row
+            question_text = self.corpus_state.questions[self.corpus_state.questions["question_id"] == question_id]["question_text"].iloc[0] # Get the question text from the corpus_state questions df using the question id in the row
             theme_description = row["theme_description"]
             thematic_summary = row["thematic_summary"] # Stuck to your name here
             
@@ -2928,8 +2763,8 @@ class Summarize:
             if not theme_orphans.empty:
                 print(f"Integrating orphans for theme {count} of {total_themes} (Theme ID: {theme_id})...")
                 
-                # Fetch the actual text for the orphans from self.state.insights
-                orphan_data = self.state.insights[self.state.insights["insight_id"].isin(theme_orphans["insight_id"])]
+                # Fetch the actual text for the orphans from self.corpus_state.insights
+                orphan_data = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(theme_orphans["insight_id"])]
                 orphan_insights_for_theme_str = "\n".join([f"- {r['insight']}" for _, r in orphan_data.iterrows()])
                 
                 if thematic_summary != "" and thematic_summary is not None:
@@ -2995,19 +2830,19 @@ class Summarize:
         return(theme_no_orphans)
 
     def address_orphans(self):
-        populate_len = len(self.populated_theme_list)
+        populate_len = len(self.summary_state.populated_theme_list)
 
         if populate_len == 0:
             raise ValueError(
                 "No populated themes found. Please run populate_themes() first."
             )
 
-        # --- Realign orphan list to coherent state ---
-        min_len = min(len(self.populated_theme_list), len(self.orphans_list))
-        self.orphans_list = self.orphans_list[:min_len]
+        # --- Realign orphan list to coherent corpus_state ---
+        min_len = min(len(self.summary_state.populated_theme_list), len(self.summary_state.orphan_list))
+        self.summary_state.orphan_list = self.summary_state.orphan_list[:min_len]
 
         # --- Determine behavior ---
-        if len(self.populated_theme_list) == len(self.orphans_list):
+        if len(self.summary_state.populated_theme_list) == len(self.summary_state.orphan_list):
             # Orphan already exists for latest populate
             choice = None
             while choice not in ["1", "2"]:
@@ -3030,7 +2865,7 @@ class Summarize:
         # --- Run orphan logic ---
         # Get the orphans and replace or append
         orphans_df = self._identify_orphans()
-        # Note we don't append to the state list yet because integration has yet to happen and we don't want the state to update and have integration crash. So we hold of for now.
+        # Note we don't append to the corpus_state list yet because integration has yet to happen and we don't want the corpus_state to update and have integration crash. So we hold of for now.
         # Now check for integration     
         if orphans_df.shape[0] == 0:
             print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
@@ -3040,129 +2875,25 @@ class Summarize:
             # Get the new populated theme summaries
             updated_summary_df = self._integrate_orphans(orphans_df)
             # Always replace because its a repair on the existing theme summaries
-            self.populated_theme_list[-1] = updated_summary_df
+            self.summary_state.populated_theme_list[-1] = updated_summary_df
             # Save the updated theme summaries
         
         # Now update the orphan list (populated_summary updated with integrated orphans in the else branch above)
         if replace_mode:
-            self.orphans_list[-1] = orphans_df
+            self.summary_state.orphan_list[-1] = orphans_df
         else:
-            self.orphans_list.append(orphans_df)
-        # Save both
-        self._save_summary_outputs([config.populated_themes, config.orphans])
+            self.summary_state.orphan_list.append(orphans_df)
+        # Save the state
+        self.summary_state.save()
         # delete pickle after save   
         os.remove(self.orphan_pickle_resume_path) 
         # Return updated populated themes with orphans integrated
-        return(self.populated_theme_list[-1])
-
-    def rewind_to(self, stage: str, index: int):
-
-        stage_order = {
-            "schema": 0,
-            "mapping": 1,
-            "populate": 2,
-            "orphan": 3,
-        }
-
-        if stage not in stage_order:
-            raise ValueError("Invalid stage name.")
-
-        target_depth = stage_order[stage]
-
-        structural = [
-            self.theme_schema_list,
-            self.mapped_theme_list,
-            self.populated_theme_list,
-            self.orphans_list,
-        ]
-
-        if index < 0:
-            raise ValueError("Index must be >= 0.")
-
-        target_list = structural[target_depth]
-        if index >= len(target_list):
-            raise ValueError("Index exceeds available passes.")
-
-        # Now realign explicitly
-        if target_depth == 0:  # schema
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index]
-            self.populated_theme_list = self.populated_theme_list[:index]
-            self.orphans_list = self.orphans_list[:index]
-
-        elif target_depth == 1:  # mapping
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
-            self.populated_theme_list = self.populated_theme_list[:index]
-            self.orphans_list = self.orphans_list[:index]
-
-        elif target_depth == 2:  # populate
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
-            self.populated_theme_list = self.populated_theme_list[:index+1]
-            self.orphans_list = self.orphans_list[:index]
-
-        elif target_depth == 3:  # orphan
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
-            self.populated_theme_list = self.populated_theme_list[:index+1]
-            self.orphans_list = self.orphans_list[:index+1]
-
-        # Always clear redundancy
-        self.redundancy_list = []
-
-        self._delete_summary_outputs([
-            config.theme_schemas,
-            config.mapped_themes,
-            config.populated_themes,
-            config.orphans,
-            config.redundancy,
-        ])
-
-        self._save_summary_outputs([
-            config.theme_schemas,
-            config.mapped_themes,
-            config.populated_themes,
-            config.orphans,
-        ])
-
-    def restart(self):
-        confirm = None
-        while confirm not in ["yes", "no"]:
-            confirm = input(
-                "Are you sure you want to restart the process? This will clear all existing themes schemas, mappings, populated themes, orphan audits and redundancy passes. Enter 'yes' to confirm or 'no' to cancel.\n"
-            ).lower()
-        
-        if confirm == "yes":
-            self.theme_schema_list = []
-            self.mapped_theme_list = []
-            self.populated_theme_list = []
-            self.orphans_list = []
-            self.redundancy_list = []
-
-            self._delete_summary_outputs(file_prefixes=[config.theme_schemas, config.mapped_themes, config.populated_themes, config.orphans, config.redundancy])
-
-        else:
-            print("Restart cancelled. Existing data preserved.")
-
-    def status(self):
-        print("Current Status:")
-        print(f"Cluster summary: {len(self.cluster_summary_list)}")
-        print(f"Theme schemas: {len(self.theme_schema_list)}")
-        print(f"Mapped themes: {len(self.mapped_theme_list)}")
-        print(f"Populated themes: {len(self.populated_theme_list)}")
-        print(f"Orphan audits: {len(self.orphans_list)}")
-        if len(self.redundancy_list) > 0:
-            print(f"Redundancy passes: applied")
-        else:
-            print(f"Redundancy passes: not applied")
-
-################
+        return(self.summary_state.populated_theme_list[-1])
 
 
     def address_redundancy(self) -> pd.DataFrame:
         # Ensure ordering is respected for the narrative flow
-        ordered_themes = self.populated_theme_list[-1].sort_values(by=["question_id", "theme_order"])
+        ordered_themes = self.summary_state.populated_theme_list[-1].sort_values(by=["question_id", "theme_order"])
         refined_rows = []
 
         for q_id, q_group in ordered_themes.groupby("question_id"):
@@ -3216,7 +2947,7 @@ class Summarize:
 
         # Push to State
         refined_df = pd.DataFrame(refined_rows)
-        self.populated_theme_list.append(refined_df)
+        self.summary_state.populated_theme_list.append(refined_df)
         return refined_df
 
 
@@ -3250,10 +2981,10 @@ class Summarize:
         
         # # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # # Prior to doing the caluclation remove any wordcounts that might have been calculated on prior runs
-        # self.theme_schema_list[-1] = self.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
+        # self.summary_state.theme_schema_list[-1] = self.summary_state.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
         # # Then populate the new lengths and merge to the theme schema
-        # self.theme_schema_list[-1] = (
-        #     self.theme_schema_list[-1].
+        # self.summary_state.theme_schema_list[-1] = (
+        #     self.summary_state.theme_schema_list[-1].
         #     merge(
         #         self._estimate_theme_lengths(),
         #         on=["question_id", "theme_id"],
@@ -3262,18 +2993,18 @@ class Summarize:
         #     )
         
         # populated_themes = []    
-        # for _, row in self.theme_schema_list[-1].iterrows():
+        # for _, row in self.summary_state.theme_schema_list[-1].iterrows():
         #     rq_id = row["question_id"]
         #     rq_text = row["question_text"]
         #     theme_id = row["theme_id"]
         #     theme_label = row["theme_label"]
         #     theme_description = row["theme_description"]
         #     allocated_length = row["allocated_length"]
-        #     insight_ids = self.mapped_theme_list[-1][
-        #         (self.mapped_theme_list[-1]["question_id"] == rq_id) & 
-        #         (self.mapped_theme_list[-1]["theme_id"] == theme_id)
+        #     insight_ids = self.summary_state.mapped_theme_list[-1][
+        #         (self.summary_state.mapped_theme_list[-1]["question_id"] == rq_id) & 
+        #         (self.summary_state.mapped_theme_list[-1]["theme_id"] == theme_id)
         #     ]["insight_id"].tolist()
-        #     insights = self.state.insights[self.state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+        #     insights = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
         #     if len(insights) == 0:
         #         no_insight_df = pd.DataFrame([{
         #             "thematic_summary": "",
@@ -3343,12 +3074,12 @@ class Summarize:
         
 
 
-        # self.populated_theme_list.append(populated_themes_df)
+        # self.summary_state.populated_theme_list.append(populated_themes_df)
         # os.makedirs(self.summary_save_location, exist_ok=True)
-        # for idx, df in enumerate(self.populated_theme_list):
+        # for idx, df in enumerate(self.summary_state.populated_theme_list):
         #     df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
         
-        # return self.populated_theme_list[-1]
+        # return self.summary_state.populated_theme_list[-1]
 
 
 
