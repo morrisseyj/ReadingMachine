@@ -489,7 +489,7 @@ class Ingestor:
             is_separator_regex=is_separator_regex
         )
 
-        full_text_list = self.corpus_state.corpus_state.full_text["full_text"].to_list()
+        full_text_list = self.corpus_state.full_text["full_text"].to_list()
         chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
 
         # Create the chunks corpus_state from the full_text corpus_state
@@ -2046,7 +2046,11 @@ class Summarize:
                               batch_size,
                               already_mapped_insight_ids,
                               mapped_insights_df_list, 
-                              in_progress_path):
+                              in_progress_path, 
+                              mode):
+        
+        if mode not in ["force", "normal"]:
+            raise ValueError("Invalid mode. Mode must be either 'force' or 'normal'.")
         
         # Create a meta object of the state against which any resume can be checked to ensure state has not been changed between resume calls
         # This gets pickled along with the progess in mapped insights
@@ -2198,7 +2202,8 @@ class Summarize:
 
                 mapped_insights_df_list.append(batch_results_df)
                 mapped_insights_df_with_meta = {"mapped_insights_df_list": mapped_insights_df_list, 
-                                                "state_meta": state_meta}
+                                                "state_meta": state_meta, 
+                                                "mode": mode}
 
                 # Save progress safely after each batch
                 with open(in_progress_path, "wb") as f:
@@ -2219,46 +2224,29 @@ class Summarize:
                                batch_size=75, 
                                force = False) -> pd.DataFrame:
         
+        # Check that it is possible to run this step: i.e. there is a theme schema to map to
+        if not self.summary_state.theme_schema_list:
+            raise ValueError(
+                "No theme schema found. Please run gen_theme_schema() first. No force option possible."
+            )
         
-        
+        # Set up the variabales i will need in the logic below
+        # Get the lengths of the theme schema and mapped themes to handle state integirity
+        schema_len = len(self.summary_state.theme_schema_list)
+        mapped_len = len(self.summary_state.mapped_theme_list)
+
+        # First check for resume 
+        #### --------------------------------------------------
+        #### RESUMPTION / RECOVERY LOGIC
+        #### --------------------------------------------------
+
         # Get the progress path for the mapping process as i will need this immediately in the logic
         in_progress_path = os.path.join(
             self.summary_save_location, "mapped_theme_in_progress.pickle"
         )
 
-        ####--------------------------------------------------
-        #  Force flag enabled - skip all validation and resume checks. Run a mapping of the insights to the latest themes and append to the state.
-        if force:
-            print("WARNING: Force flag is True: Skipping validation and resumption checks and mapping insights to themes. This may cause the state to become unstable. This mode should be used for testing purposes only.")
-            # Check that it is possible to run this step: i.e. there is a theme schema to map to
-            if not self.summary_state.theme_schema_list:
-                raise ValueError(
-                    "No theme schema found. Please run gen_theme_schema() first. No force option possible."
-                )
-            # Remove any pickles of progress from other runs 
-            # Assume the user knows what they are doing and want a fresh overwrite
-            if os.path.exists(in_progress_path):
-                os.remove(in_progress_path)
-
-            # Get the mapped df from the llm with resume elements set to empty as we want fresh run
-            mapped_insights_df = self._map_insights_via_llm(
-                batch_size=batch_size,
-                already_mapped_insight_ids=[],
-                mapped_insights_df_list=[],
-                in_progress_path=in_progress_path
-            )
-            
-            # Append to state, save and return
-            self.summary_state.mapped_theme_list.append(mapped_insights_df)
-            self.summary_state.save()
-            return mapped_insights_df
-        ######-----------------------------
-
-
-        # if not force, run the regular checks
-        #### --------------------------------------------------
-        #### RESUMPTION / RECOVERY LOGIC
-        #### --------------------------------------------------
+        # Set this as empty for no resume and update the value in the resume branch if triggered
+        already_mapped_insight_ids = []
 
         # Check for existing in-progress file
         if os.path.exists(in_progress_path):
@@ -2277,6 +2265,7 @@ class Summarize:
                     mapped_insights_df_list_meta = pickle.load(f)
                     mapped_insights_df_list = mapped_insights_df_list_meta["mapped_insights_df_list"]
                     pickled_meta = mapped_insights_df_list_meta["state_meta"]
+                    mode = mapped_insights_df_list_meta["mode"]
                 
                 # Check that the state has not changed between resume calls
                 current_meta = {
@@ -2304,31 +2293,68 @@ class Summarize:
                     batch_size=batch_size,
                     already_mapped_insight_ids=already_mapped_insight_ids,
                     mapped_insights_df_list=mapped_insights_df_list,
-                    in_progress_path=in_progress_path
+                    in_progress_path=in_progress_path, 
+                    mode = mode
                 )
 
-                # Append to state, save and return
-                self.summary_state.mapped_theme_list.append(mapped_insights_df)
-                self.summary_state.save()
-                # Remove in-progress file now that mapping and save is complete
-                if os.path.exists(in_progress_path):
-                    os.remove(in_progress_path)
-                return self.summary_state.mapped_theme_list[-1]
-
+                # Now check the mode to know how to handle.
+                # If the mode is force we append as that is the defualt for force
+                if mode == "force":
+                    self.summary_state.mapped_theme_list.append(mapped_insights_df)
+                    # Save state
+                    os.makedirs(self.summary_save_location, exist_ok=True)
+                    self.summary_state.save()
+                    # Remove in-progress file now that mapping and save is complete
+                    if os.path.exists(in_progress_path):
+                        os.remove(in_progress_path)
+                    # Return to exit the function
+                    return self.summary_state.mapped_theme_list[-1]
+                # mode is normal, so we follow pattern for ensuring state integrity
+                else: 
+                    # Make sure the state is integreal by realigning the schema and mapping history to the last coherent point 
+                    min_len = min(schema_len, mapped_len)
+                    self.summary_state.theme_schema_list = self.summary_state.theme_schema_list[:min_len + 1]
+                    self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len]
+                    # Append the new mapped insights to the state
+                    self.summary_state.mapped_theme_list.append(mapped_insights_df)
+                    # Save state
+                    os.makedirs(self.summary_save_location, exist_ok=True)
+                    self.summary_state.save()
+                    # Remove in-progress file now that mapping and save is complete
+                    if os.path.exists(in_progress_path):
+                        os.remove(in_progress_path)
+                    # Return to exit the function
+                    return self.summary_state.mapped_theme_list[-1]
             else:
                 os.remove(in_progress_path)
                 print("Deleted in-progress file. Starting new mapping process.")
 
-        #### --------------------------------------------------
-        #### PRE-RUN VALIDATION
-        #### --------------------------------------------------
 
-        schema_len = len(self.summary_state.theme_schema_list)
-        mapped_len = len(self.summary_state.mapped_theme_list)
+        ####--------------------------------------------------
+        #  Force flag enabled - skip all validation and resume checks. Run a mapping of the insights to the latest themes and append to the state.
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and resumption checks and mapping insights to themes. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            
+            # Get the mapped df from the llm with resume elements set to empty as we want fresh run
+            mapped_insights_df = self._map_insights_via_llm(
+                batch_size=batch_size,
+                already_mapped_insight_ids=[],
+                mapped_insights_df_list=[],
+                in_progress_path=in_progress_path, 
+                mode = "force"
+            )
+            
+            # Append to state (because force defaults to append), save, clean-up and return
+            self.summary_state.mapped_theme_list.append(mapped_insights_df)
+            self.summary_state.save()
+            # Remove in-progress file now that mapping and save is complete
+            if os.path.exists(in_progress_path):
+                os.remove(in_progress_path)
+            return mapped_insights_df
+        ######-----------------------------
 
         # If mappings exist, offer choice
         if mapped_len > 0:
-
             new_choice = None
             while new_choice not in ["1", "2"]:
                 new_choice = input(
@@ -2353,16 +2379,18 @@ class Summarize:
                 batch_size=batch_size,
                 already_mapped_insight_ids=[],
                 mapped_insights_df_list=[],
-                in_progress_path=in_progress_path
+                in_progress_path=in_progress_path, 
+                mode = "normal"
             )
 
         else:
             # No mappings exist — ensure we are in valid pre-mapping corpus_state
+            # This is duplicative because we tested earlier, but this makes the logic more explicit
             if schema_len < 1:
                 raise ValueError("No schema available to map.")
         
         #### --------------------------------------------------
-        #### FINALIZATION
+        #### FINALIZATION ON NORMAL MODE (non-force)
         #### --------------------------------------------------
 
         # Update state
