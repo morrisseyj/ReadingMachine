@@ -13,6 +13,9 @@ import numpy as np
 import ast
 from pathlib import Path
 import shutil
+import hashlib
+import json
+
 
 class CorpusState:
     """
@@ -307,6 +310,27 @@ class CorpusState:
         
         # Normalize the columns - first get arrays to lists then get viable lists
         return corpus_state
+
+    def fingerprint(self) -> str:
+        """
+        Deterministic fingerprint of the corpus state.
+        Used for resume validation.
+        Only includes fields relevant to downstream summarization.
+        """
+
+        relevant_columns = ["insight_id", "insight", "cluster_id"]
+
+        df = self.insights[relevant_columns].copy()
+
+        df_normalized = (
+            df.fillna("__NULL__")
+            .sort_index(axis=1)
+            .sort_values(by=list(df.columns))
+            .reset_index(drop=True)
+        )
+
+        json_bytes = df_normalized.to_json().encode("utf-8")
+        return hashlib.sha256(json_bytes).hexdigest()
 
     # ---------------------------------------------------------------------- #
     #                             HELPER UTILS                              #
@@ -624,15 +648,49 @@ class CorpusState:
                 print("Restart cancelled.")
 
         def status(self):
-            print("Current Status:")
-            print(f"Cluster summary: {len(self.cluster_summary_list)}")
-            print(f"Theme schemas: {len(self.theme_schema_list)}")
-            print(f"Mapped themes: {len(self.mapped_theme_list)}")
-            print(f"Populated themes: {len(self.populated_theme_list)}")
-            print(f"Orphan audits: {len(self.orphan_list)}")
-            if len(self.redundancy_list) > 0:
-                print(f"Redundancy passes: applied")
-            else:
-                print(f"Redundancy passes: not applied")
+            status = {
+                "cluster_summary_list": len(self.cluster_summary_list),
+                "theme_schema_list": len(self.theme_schema_list),
+                "mapped_theme_list": len(self.mapped_theme_list),
+                "populated_theme_list": len(self.populated_theme_list),
+                "orphan_list": len(self.orphan_list),
+                "redundancy_list": len(self.redundancy_list)
+            }
+            return(status)
+        
+        def fingerprint(self):
+            """
+            Deterministic fingerprint of the summary state.
+            Uses the latest DataFrame from each summary artifact list.
+            If anything changes, resume becomes invalid.
+            """
+
+            parts = []
+
+            state_lists = [
+                self.cluster_summary_list,
+                self.theme_schema_list,
+                self.mapped_theme_list,
+                self.populated_theme_list,
+                self.orphan_list,
+                self.redundancy_list,
+            ]
+
+            for df_list in state_lists:
+                if df_list:
+                    df_list = (
+                        df_list[-1].fillna("__NULL__")
+                        .sort_index(axis=1)
+                        .sort_values(by=sorted(df_list.columns))
+                        .reset_index(drop=True)
+                    )
+                    parts.append(_hash_dataframe(df_list))
+                else:
+                    parts.append("EMPTY")
+
+            combined = "".join(parts).encode("utf-8")
+            return hashlib.sha256(combined).hexdigest()
+
+
 
 

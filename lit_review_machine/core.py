@@ -1923,7 +1923,7 @@ class Summarize:
 
         return(output)
 
-    def gen_theme_schema(self) -> pd.DataFrame:
+    def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
         
         """
         Generate or regenerate a theme schema pass.
@@ -1932,14 +1932,29 @@ class Summarize:
         1. First pass (no existing schema) → use cluster summaries.
         2. Iterative pass → requires orphan incorporation.
         3. Regenerate last pass → overwrite most recent schema.
+
+        force flag: if true sequencing enforcement steps will be ignored and schema will be generated regardless. This may leave the state out of sync but can be useful for testing and development. 
         """
         
+        if force not in [True, False]:
+            raise ValueError("Invalid value for 'force' parameter. Must be a boolean (True or False).")
+
          # --- Root validation ---
         if not self.summary_state.cluster_summary_list:
             raise ValueError(
                 "No cluster summaries found. Please run cluster summarization first."
             )
+        ##### 
+        # Experimental mode where force is True and guardrails are skipped
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and sequencing checks and generating new schema pass from cluster summaries. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            new_schema = self._run_llm_schema_gen(source="cluster summaries")
+            self.summary_state.theme_schema_list.append(new_schema)
+            self.summary_state.save()
+            return new_schema
+        #####
 
+        # Else run all the regular validation and sequencing checks and proceed as the user specifies/system alllows            
         schema_len = len(self.summary_state.theme_schema_list)
         populate_len = len(self.summary_state.populated_theme_list)
         orphan_len = len(self.summary_state.orphan_list)
@@ -2025,99 +2040,20 @@ class Summarize:
 
         df["theme_id"] = df["theme_id"].astype(int)
         return df
-
     
-    def map_insights_to_themes(self, batch_size=75) -> pd.DataFrame:
-        #### --------------------------------------------------
-        #### RESUMPTION / RECOVERY LOGIC
-        #### --------------------------------------------------
 
-        mapped_insights_df_list = None
-        already_mapped_insight_ids = []
-
-        in_progress_path = os.path.join(
-            self.summary_save_location,
-            "mapped_theme_in_progress.pickle"
-        )
-
-        # Check for existing in-progress file
-        if os.path.exists(in_progress_path):
-
-            resume_choice = None
-            while resume_choice not in ["1", "2"]:
-                resume_choice = input(
-                    "A partial mapping process was detected. Do you want to:\n"
-                    "1) resume from the last saved point? \n"
-                    "2) start a new mapping process? \n"
-                    "Enter 1 or 2:\n"
-                ).strip()
-
-            if resume_choice == "1":
-                with open(in_progress_path, "rb") as f:
-                    mapped_insights_df_list = pickle.load(f)
-
-                if mapped_insights_df_list:
-                    recovered_df = pd.concat(
-                        mapped_insights_df_list,
-                        ignore_index=True
-                    )
-                    already_mapped_insight_ids = (
-                        recovered_df["insight_id"].unique().tolist()
-                    )
-
-                print("Resuming mapping process from last saved point...")
-
-            else:
-                os.remove(in_progress_path)
-                print("Deleted in-progress file. Starting new mapping process.")
-
-        #### --------------------------------------------------
-        #### PRE-RUN VALIDATION
-        #### --------------------------------------------------
-
-        if not self.summary_state.theme_schema_list:
-            raise ValueError(
-                "No theme schema found. Please run gen_theme_schema() first."
-            )
-
-        schema_len = len(self.summary_state.theme_schema_list)
-        mapped_len = len(self.summary_state.mapped_theme_list)
-
-        # If mappings exist, offer choice
-        if mapped_len > 0:
-
-            new_choice = None
-            while new_choice not in ["1", "2"]:
-                new_choice = input(
-                    "Mapped themes already exist on disk. Do you want to:\n"
-                    "(1) reload existing mapped themes\n"
-                    "(2) remap insights to the latest theme schema. "
-                    "This will realign schema and mapping history.\n"
-                    "Enter 1 or 2:\n"
-                ).strip()
-
-            if new_choice == "1":
-                print("Mapped themes loaded.")
-                return None
-
-            # Realign to last coherent pre-mapping corpus_state
-            min_len = min(schema_len, mapped_len)
-            self.summary_state.theme_schema_list = self.summary_state.theme_schema_list[:min_len + 1]
-            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len]
-
-        else:
-            # No mappings exist — ensure we are in valid pre-mapping corpus_state
-            if schema_len < 1:
-                raise ValueError("No schema available to map.")
+    def _map_insights_via_llm(self, 
+                              batch_size,
+                              already_mapped_insight_ids,
+                              mapped_insights_df_list, 
+                              in_progress_path):
         
-
-        #### --------------------------------------------------
-        #### MAPPING LOGIC
-        #### --------------------------------------------------
-
-        # Initialize list safely
-        if mapped_insights_df_list is None:
-            mapped_insights_df_list = []
+        # Create a meta object of the state against which any resume can be checked to ensure state has not been changed between resume calls
+        # This gets pickled along with the progess in mapped insights
+        state_meta = {
+            "corpus_hash": self.corpus_state.fingerprint(),
+            "summary_hash": self.summary_state.fingerprint()
+        }
 
         # Work on a temporary copy
         temp_state_insights = self.corpus_state.insights.copy()
@@ -2259,20 +2195,16 @@ class Summarize:
                     batch_results_df,
                     allowed_theme_ids
                 )
-                
-                # Ensure that theme_id is numeric for consistency with the schema and to allow for subsequent sorting
-                batch_results_df["theme_id"] = batch_results_df["theme_id"].astype(int)
 
                 mapped_insights_df_list.append(batch_results_df)
+                mapped_insights_df_with_meta = {"mapped_insights_df_list": mapped_insights_df_list, 
+                                                "state_meta": state_meta}
 
                 # Save progress safely after each batch
                 with open(in_progress_path, "wb") as f:
-                    pickle.dump(mapped_insights_df_list, f)
-
-        #### --------------------------------------------------
-        #### FINALIZATION
-        #### --------------------------------------------------
-
+                    pickle.dump(mapped_insights_df_with_meta, f)
+            
+        # Check insights existed and were mapped, then concat and return the mapped insights
         if not mapped_insights_df_list:
             mapped_insights_df = pd.DataFrame()
         else:
@@ -2281,16 +2213,166 @@ class Summarize:
                 ignore_index=True
             )
 
+        return(mapped_insights_df)
+    
+    def map_insights_to_themes(self, 
+                               batch_size=75, 
+                               force = False) -> pd.DataFrame:
+        
+        
+        
+        # Get the progress path for the mapping process as i will need this immediately in the logic
+        in_progress_path = os.path.join(
+            self.summary_save_location, "mapped_theme_in_progress.pickle"
+        )
+
+        ####--------------------------------------------------
+        #  Force flag enabled - skip all validation and resume checks. Run a mapping of the insights to the latest themes and append to the state.
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and resumption checks and mapping insights to themes. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            # Check that it is possible to run this step: i.e. there is a theme schema to map to
+            if not self.summary_state.theme_schema_list:
+                raise ValueError(
+                    "No theme schema found. Please run gen_theme_schema() first. No force option possible."
+                )
+            # Remove any pickles of progress from other runs 
+            # Assume the user knows what they are doing and want a fresh overwrite
+            if os.path.exists(in_progress_path):
+                os.remove(in_progress_path)
+
+            # Get the mapped df from the llm with resume elements set to empty as we want fresh run
+            mapped_insights_df = self._map_insights_via_llm(
+                batch_size=batch_size,
+                already_mapped_insight_ids=[],
+                mapped_insights_df_list=[],
+                in_progress_path=in_progress_path
+            )
+            
+            # Append to state, save and return
+            self.summary_state.mapped_theme_list.append(mapped_insights_df)
+            self.summary_state.save()
+            return mapped_insights_df
+        ######-----------------------------
+
+
+        # if not force, run the regular checks
+        #### --------------------------------------------------
+        #### RESUMPTION / RECOVERY LOGIC
+        #### --------------------------------------------------
+
+        # Check for existing in-progress file
+        if os.path.exists(in_progress_path):
+
+            resume_choice = None
+            while resume_choice not in ["1", "2"]:
+                resume_choice = input(
+                    "A partial mapping process was detected. Do you want to:\n"
+                    "1) resume from the last saved point? \n"
+                    "2) start a new mapping process? \n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+
+            if resume_choice == "1":
+                with open(in_progress_path, "rb") as f:
+                    mapped_insights_df_list_meta = pickle.load(f)
+                    mapped_insights_df_list = mapped_insights_df_list_meta["mapped_insights_df_list"]
+                    pickled_meta = mapped_insights_df_list_meta["state_meta"]
+                
+                # Check that the state has not changed between resume calls
+                current_meta = {
+                    "corpus_hash": self.corpus_state.fingerprint(),
+                    "summary_hash": self.summary_state.fingerprint()
+                }
+
+                if current_meta != pickled_meta:
+                    raise ValueError(
+                        "State change detected between resume call. Resume invalid to prevent state corruption. "
+                        "Force override if you know what you are doing or run without resume."
+                    )
+
+                if mapped_insights_df_list:
+                    recovered_df = pd.concat(
+                        mapped_insights_df_list,
+                        ignore_index=True
+                    )
+                    already_mapped_insight_ids = (
+                        recovered_df["insight_id"].unique().tolist()
+                    )
+
+                print("Resuming mapping process from last saved point...")
+                mapped_insights_df = self._map_insights_via_llm(
+                    batch_size=batch_size,
+                    already_mapped_insight_ids=already_mapped_insight_ids,
+                    mapped_insights_df_list=mapped_insights_df_list,
+                    in_progress_path=in_progress_path
+                )
+
+                # Append to state, save and return
+                self.summary_state.mapped_theme_list.append(mapped_insights_df)
+                self.summary_state.save()
+                # Remove in-progress file now that mapping and save is complete
+                if os.path.exists(in_progress_path):
+                    os.remove(in_progress_path)
+                return self.summary_state.mapped_theme_list[-1]
+
+            else:
+                os.remove(in_progress_path)
+                print("Deleted in-progress file. Starting new mapping process.")
+
+        #### --------------------------------------------------
+        #### PRE-RUN VALIDATION
+        #### --------------------------------------------------
+
+        schema_len = len(self.summary_state.theme_schema_list)
+        mapped_len = len(self.summary_state.mapped_theme_list)
+
+        # If mappings exist, offer choice
+        if mapped_len > 0:
+
+            new_choice = None
+            while new_choice not in ["1", "2"]:
+                new_choice = input(
+                    "Mapped themes already exist on disk. Do you want to:\n"
+                    "(1) reload existing mapped themes\n"
+                    "(2) remap insights to the latest theme schema. "
+                    "This will realign schema and mapping history.\n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+
+            if new_choice == "1":
+                print("Mapped themes loaded.")
+                return None
+
+            # Realign to last coherent pre-mapping corpus_state
+            min_len = min(schema_len, mapped_len)
+            self.summary_state.theme_schema_list = self.summary_state.theme_schema_list[:min_len + 1]
+            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len]
+
+            # Get the mappings from the llm - passsing empty values for the resume elements as this is a fresh run
+            mapped_insights_df = self._map_insights_via_llm(
+                batch_size=batch_size,
+                already_mapped_insight_ids=[],
+                mapped_insights_df_list=[],
+                in_progress_path=in_progress_path
+            )
+
+        else:
+            # No mappings exist — ensure we are in valid pre-mapping corpus_state
+            if schema_len < 1:
+                raise ValueError("No schema available to map.")
+        
+        #### --------------------------------------------------
+        #### FINALIZATION
+        #### --------------------------------------------------
+
+        # Update state
         self.summary_state.mapped_theme_list.append(mapped_insights_df)
-
+        # Save state
         os.makedirs(self.summary_save_location, exist_ok=True)
-
-        # Remove in-progress file now that mapping is complete
+        self.summary_state.save()
+        # Remove in-progress file now that mapping and save is complete
         if os.path.exists(in_progress_path):
             os.remove(in_progress_path)
-
-        # Persist parquet versions
-        self.summary_state.save()
 
         return self.summary_state.mapped_theme_list[-1]
 
@@ -2395,8 +2477,10 @@ class Summarize:
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
         # Copy the df because this could be called on a corpus_state object
-        schema_df["question_id"] = schema_df["question_id"].copy()
-        schema_df["theme_id"] = schema_df["theme_id"].astype(int).copy()
+        
+        schema_df = schema_df.copy()
+        schema_df["question_id"] = schema_df["question_id"]
+        schema_df["theme_id"] = schema_df["theme_id"].astype(int)
         
         if "allocated_length" not in schema_df.columns:
             schema_df = schema_df.merge(
@@ -2437,9 +2521,9 @@ class Summarize:
             insights_str = "\n".join(insights)
 
             # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
-            if "conflict" == theme_label.lower():
+            if theme_label.strip().lower() == "conflicts":
                 theme_type = "conflicts"
-            elif "other" == theme_label.lower():
+            elif theme_label.strip().lower() == "other":
                 theme_type = "other"
             else:
                 theme_type = "general"
@@ -2499,53 +2583,18 @@ class Summarize:
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         return(populated_themes_df)
 
-    def populate_themes(self, 
-                        paper_len: int = 8000, 
-                        max_prop: float = 0.9) -> pd.DataFrame:
-        
-        # Check that themes have been mapped before we try to populate
-        if not self.summary_state.mapped_theme_list:
-            raise ValueError("No mapped themes found. Please run map_insights_to_themes() first.")
-        
-        mapped_len = len(self.summary_state.mapped_theme_list)
-        populate_len = len(self.summary_state.populated_theme_list)
+    def _iterative_length_check_and_expand_loop(self, 
+                                                populated_themes_df: pd.DataFrame, 
+                                                max_prop: float, 
+                                                paper_len: int) -> pd.DataFrame:  
 
-        # If populated themes exist, offer choice
-        if populate_len > 0:
-            new = None
-            while new not in ["1", "2"]:
-                new = input(
-                    "Populated themes already exist on disk. Do you want to:\n"
-                    "(1) reload existing populated themes\n"
-                    "(2) repopulate themes based on the current theme schema and mapped insights. This will realign mapping and population history.\n"
-                    "Enter 1 or 2:\n"
-                ).strip()
-            if new == "1":
-                print(
-                    "Populated themes loaded. Inspect them via variable.populated_theme_list[-1]\n"
-                )
-                return(None) # Return to exit the function and avoid re-running the population
-            
-            # Realign to last coherent pre-population corpus_state
-            min_len = min(mapped_len - 1, populate_len)
-            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len + 1]
-            self.summary_state.populated_theme_list = self.summary_state.populated_theme_list[:min_len]
-            
-        else:
-            # No populated themes exist — ensure we are in valid pre-population corpus_state
-            if mapped_len < 1:
-                raise ValueError("No mapped themes available to populate from. Please run map_insights_to_themes() first.")
-        
-        
-        # Populate the themes with the insights mapped to them 
-        populated_themes_df = self._run_theme_pop(
-            schema_df=self.summary_state.theme_schema_list[-1].copy(),
-            mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
-            paper_len=paper_len
-        )
-
+        """
+        Iteratively checks the lenght of the populated themes to see if the allocated length was sufficient and offers chance to expand if not.
+        Returns the updated populated themes with the length the user is happy with                                    
+        """
         # Check whether any of the populated themes exceed a certain proportion of th total allocated length
         df_len_ok, df_len_flagged = self._check_length_and_flag(populated_themes_df, max_prop)
+        df_len_flagged = df_len_flagged.copy() # Copy to avoid modifying the original df with the flags, as this will be used in the loop and we want to preserve the original for reference.
 
         #While any themes exceed the length threshold its a sign that the LLM is undertaking more compression of the granulatiry of the theme than might be optimal (to fit length requirements). 
         # Offer the user the options to re-run these themes with a 20% expansion of the word count allocated to them.
@@ -2608,39 +2657,109 @@ class Summarize:
         # Make sure the final df of populated themes is in the same order as the theme schema for easier comparison and so that it can be exported to the narrative in the correct order
         populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+        return(populated_themes_df)
+   
+    def populate_themes(self, 
+                        paper_len: int = 8000, 
+                        max_prop: float = 0.9, 
+                        force: bool = False) -> pd.DataFrame:
+        
+        # Check that themes have been mapped before we try to populate
+        if not self.summary_state.mapped_theme_list:
+            raise ValueError("No mapped themes found. Please run map_insights_to_themes() first.")
+        
+        #######
+        # FORCE FLAG LOGIC
+        #######
+        # Check whether force flag is enabled. If so popylate the themes and append without running any state checks.
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and resumption checks and populating themes. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            # populate the themes with the insights mapped to them
+            populated_themes_df = self._run_theme_pop(
+                schema_df=self.summary_state.theme_schema_list[-1].copy(),
+                mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
+                paper_len=paper_len
+            )
+            # Iteratively expand the theme lenght until the user is satisfied
+            populated_themes_df = self._iterative_length_check_and_expand_loop(
+                populated_themes_df=populated_themes_df,
+                max_prop=max_prop,
+                paper_len=paper_len
+            )
+
+            # Append, save and return
+            self.summary_state.populated_theme_list.append(populated_themes_df)
+            self.summary_state.save()
+            return self.summary_state.populated_theme_list[-1]
+        
+        #######
+        # FORCE FLAG LOGIC/ENDS
+        #######
+
+        
+        mapped_len = len(self.summary_state.mapped_theme_list)
+        populate_len = len(self.summary_state.populated_theme_list)
+
+        # If populated themes exist, offer choice
+        if populate_len > 0:
+            new = None
+            while new not in ["1", "2"]:
+                new = input(
+                    "Populated themes already exist on disk. Do you want to:\n"
+                    "(1) reload existing populated themes\n"
+                    "(2) repopulate themes based on the current theme schema and mapped insights. This will realign mapping and population history.\n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+            if new == "1":
+                print(
+                    "Populated themes loaded. Inspect them via variable.populated_theme_list[-1]\n"
+                )
+                return(None) # Return to exit the function and avoid re-running the population
+            
+            # Realign to last coherent pre-population corpus_state
+            min_len = min(mapped_len - 1, populate_len)
+            self.summary_state.mapped_theme_list = self.summary_state.mapped_theme_list[:min_len + 1]
+            self.summary_state.populated_theme_list = self.summary_state.populated_theme_list[:min_len]
+            
+        else:
+            # No populated themes exist — ensure we are in valid pre-population corpus_state
+            if mapped_len < 1:
+                raise ValueError("No mapped themes available to populate from. Please run map_insights_to_themes() first.")
+        
+        
+        # Populate the themes with the insights mapped to them 
+        populated_themes_df = self._run_theme_pop(
+            schema_df=self.summary_state.theme_schema_list[-1].copy(),
+            mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
+            paper_len=paper_len
+        )
+        
+        # Iterate on the length of each theme and expand until the user is happy
+        populated_themes_df = self._iterative_length_check_and_expand_loop(
+            populated_themes_df=populated_themes_df,
+            max_prop=max_prop,
+            paper_len=paper_len
+        )
+
         # Now add populated_themes_df to the populated theme list and save to disk. Return the updated themes
         self.summary_state.populated_theme_list.append(populated_themes_df)
         self.summary_state.save()
         return self.summary_state.populated_theme_list[-1]
 
 
-    def _identify_orphans(self, batch_size=75) -> pd.DataFrame:
+    def _identify_orphans(self, checked_insights_df, mode, batch_size) -> pd.DataFrame:
+        if mode not in ["replace", "append"]:
+            raise ValueError("Mode must be either 'replace' or 'append'.")
 
-        self.orphan_pickle_resume_path = os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_check_in_progress.pickle")
-        checked_insights_df = None
+        # Pickle path attribute gets set in self.address_orphans()
+        self.orphan_pickle_resume_path
+        # Get the state meta for the resume checks (so we don't recompute this for every batch in the loop))
+        state_meta = {
+            "corpus_hash": self.corpus_state.fingerprint(),
+            "summary_hash": self.summary_state.fingerprint()
+        }
 
-        # First check whether there was a orphan audit in progress. If there was, offer the option to resume
-
-        if os.path.exists(self.orphan_pickle_resume_path):
-            resume = None
-            while resume not in ["1", "2"]:
-                resume = input("A partial orphan identification process was detected. Do you want to:\n"
-                               "1) resume from the last saved point? \n"
-                               "2) start a new orphan identification process? \n"
-                               "Enter 1 or 2:\n").lower()
-            if resume == "1":
-                with open(self.orphan_pickle_resume_path, "rb") as f:
-                    checked_insights_df = pickle.load(f)
-                print("Resuming orphan identification process from last saved point...")
-
-            else:
-                print("Starting new orphan identification process and deleting the in progress pickle...")
-                os.remove(self.orphan_pickle_resume_path)
-
-        # Handling for iteration, or reload is in the orchestrator .handle_orphans() which calls this func
-        # So set up for the orphan id process
-        
-        total_batches_to_check = math.ceil(len(self.summary_state.mapped_theme_list[-1]) / batch_size)
+        total_batches_to_check = math.ceil(len(self.corpus_state.insights) / batch_size)
         count = (checked_insights_df.shape[0] // batch_size) + 1 if checked_insights_df is not None else 0
 
         # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
@@ -2652,7 +2771,7 @@ class Summarize:
         for _, row in self.summary_state.populated_theme_list[-1].iterrows():
             # This runs question by question so first we iterate over those
             t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
-            # Then we get the insights that were iniitally allocaed to that question - as we are checking whether these got allocated
+            # Then we get the insights that were initially allocated to that question - as we are checking whether these got allocated
             relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
             relevant_insights = self.corpus_state.insights[
                 (self.corpus_state.insights["insight_id"].isin(relevant_ids)) & # Get the insight text for the insight_ids that were mapped
@@ -2728,12 +2847,18 @@ class Summarize:
                 batch_results_df = pd.concat([batch_found_df, batch_missed_df], ignore_index=True)
                 # Append the batch to the list
                 checked_insights_df = pd.concat([checked_insights_df, batch_results_df], ignore_index=True)
-                # save the checked insights to pickle to allow for resume if the process crashes
+
+                # Then bundle into a dict that can be pickled. Mode keeps track of whether the resume path is intended to resume or append
+                checked_insights_df_meta_state_mode = {
+                    "checked_insights_df": checked_insights_df,
+                    "state_meta": state_meta,
+                    "mode": mode
+                }
                 os.makedirs(config.PICKLE_SAVE_LOCATION, exist_ok=True)
                 with open(self.orphan_pickle_resume_path, "wb") as f:
-                    pickle.dump(checked_insights_df, f)
+                    pickle.dump(checked_insights_df_meta_state_mode, f)
 
-        orphans_df = checked_insights_df[checked_insights_df["found"] == False]
+        orphans_df = checked_insights_df[checked_insights_df["found"] == False].copy()
         orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema
         return(orphans_df)
     
@@ -2829,19 +2954,106 @@ class Summarize:
 
         return(theme_no_orphans)
 
-    def address_orphans(self):
-        populate_len = len(self.summary_state.populated_theme_list)
+    def _get_orphans_and_updated_summary(self, checked_insights_df, mode, batch_size) -> pd.DataFrame:
+        orphans_df = self._identify_orphans(checked_insights_df=checked_insights_df, mode = mode, batch_size=batch_size)
+        if orphans_df.shape[0] == 0:
+            print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
+            # return the last populated theme as nothing is being updated
+            updated_summary_df = self.summary_state.populated_theme_list[-1]
+        else:
+            print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
+            updated_summary_df = self._integrate_orphans(orphans_df)
+        return(orphans_df, updated_summary_df)
 
-        if populate_len == 0:
-            raise ValueError(
-                "No populated themes found. Please run populate_themes() first."
-            )
+
+    def address_orphans(self, force = False, batch_size = 75) -> pd.DataFrame:
+
+        # The logic for this function is as follows:
+        # First check if there is a resume file, if so resume according to the mode passed originally
+        # Then run a force flag, which passes the mode append and skips the sequencing validation checks
+        # Finally, if no force and no reusme, check the state to determine the sequencing needs and offer the user to replace or extend, and then pass that mode to the call - so that it can resume correctly if it crashes
+
+        # Make sure the required state elements exist to check for orphans
+        if len(self.summary_state.populated_theme_list) == 0:
+            raise ValueError("No populated themes found. Please run populate_themes() first.")
+
+        # ####
+        # RESUME LOGIC
+        # ### 
+        # First check resume logic - this effectively sets the mode and the checked_insights_df
+        checked_insights_df = None
+        self.orphan_pickle_resume_path = os.path.join(config.PICKLE_SAVE_LOCATION, "orphan_check_in_progress.pickle")
+        if os.path.exists(self.orphan_pickle_resume_path):
+            resume = None
+            while resume not in ["1", "2"]:
+                resume = input("A partial orphan identification process was detected. Do you want to:\n"
+                               "1) resume from the last saved point? \n"
+                               "2) start a new orphan identification process? \n"
+                               "Enter 1 or 2:\n").lower()
+            if resume == "1":
+                with open(self.orphan_pickle_resume_path, "rb") as f:
+                    checked_insights_df_meta_state = pickle.load(f)
+                    # Check that the pickled state matches the current state
+                    pickled_state = checked_insights_df_meta_state["state_meta"]
+                    current_state = {
+                        "corpus_hash": self.corpus_state.fingerprint(),
+                        "summary_hash": self.summary_state.fingerprint()
+                    }
+                    if pickled_state != current_state:
+                        raise ValueError(
+                            "The corpus state or summary state has changed between resume. Resume invalid"
+                            "Either choose a fresh start or if you know what you are doing use force = True" 
+                            )
+                    # Load the checked insights data frame from the pickle to resume the process
+                    checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
+                    mode = checked_insights_df_meta_state["mode"]
+                    print("Resuming orphan identification process from last saved point...")
+                    orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
+                    self.summary_state.populated_theme_list[-1] = updated_summary_df
+                    if mode == "replace":
+                        self.summary_state.orphan_list[-1] = orphans_df
+                    elif mode == "append":
+                        self.summary_state.orphan_list.append(orphans_df)
+                    
+                    # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
+                    os.remove(self.orphan_pickle_resume_path)
+                    self.summary_state.save()
+                    return(self.summary_state.orphan_list[-1])
+ 
+            else:
+                print("Starting new orphan identification process and deleting the in progress pickle...")
+                os.remove(self.orphan_pickle_resume_path)
+
+
+        # #####
+        # FORCE FLAG LOGIC
+        # #####
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and resumption checks and addressing orphans. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            mode = "append" # This is a bit meaningless because with force we are always appending, but this makes it clear that we are not replacing any existing orphan audits and just appending a new one on top of the existing state regardless of the current state of the orphan list.       
+            orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=None, mode="append", batch_size=batch_size) # Mode is append because with force we are always appending. We set it here in case the system crashes, in which case the recover will propagate the append mode. We actually don't need to access the mode before this return as we just append in force
+            # We always repair the populated themes with the integrated version. No change under force
+            self.summary_state.populated_theme_list[-1] = updated_summary_df
+            # We append orphans because this is force and we always append
+            self.summary_state.orphan_list.append(orphans_df)
+
+            # Clean up           
+            if os.path.exists(self.orphan_pickle_resume_path):
+                os.remove(self.orphan_pickle_resume_path)
+            self.summary_state.save()
+            return(self.summary_state.orphan_list[-1])
+        
+        # #####
+        # SEQUENCING LOGIC
+        # #####
 
         # --- Realign orphan list to coherent corpus_state ---
         min_len = min(len(self.summary_state.populated_theme_list), len(self.summary_state.orphan_list))
         self.summary_state.orphan_list = self.summary_state.orphan_list[:min_len]
 
         # --- Determine behavior ---
+        # Essentially if the lenght of orphan and theme lists are the same the orphan has already been created for the latest theme list. If the user want to run again, we need to replace
+        # the last orphan rather than extending it. If orphans is behind, then we just extend the list
         if len(self.summary_state.populated_theme_list) == len(self.summary_state.orphan_list):
             # Orphan already exists for latest populate
             choice = None
@@ -2856,39 +3068,26 @@ class Summarize:
             if choice == "1":
                 print("Latest orphan audit loaded.")
                 return None
-
-            replace_mode = True
-
+            # If we are not reloading, and populated themes and orphans are aligned, then we replace the most recent orphan audit with a new one - we are essentially updating the audit, so mode is replace
+            mode = "replace" 
+            # Otherwise if orphans is behind populated themes we are adding the new audit to align the state
         else:
-            replace_mode = False
+            mode = "append"
 
-        # --- Run orphan logic ---
-        # Get the orphans and replace or append
-        orphans_df = self._identify_orphans()
-        # Note we don't append to the corpus_state list yet because integration has yet to happen and we don't want the corpus_state to update and have integration crash. So we hold of for now.
-        # Now check for integration     
-        if orphans_df.shape[0] == 0:
-            print("No orphans identified. All insights mapped to themes are reflected in the thematic summaries.")
-
-        else:
-            print(f"{orphans_df.shape[0]} orphan insights identified. Running integration process to integrate them back into the thematic summaries...")
-            # Get the new populated theme summaries
-            updated_summary_df = self._integrate_orphans(orphans_df)
-            # Always replace because its a repair on the existing theme summaries
-            self.summary_state.populated_theme_list[-1] = updated_summary_df
-            # Save the updated theme summaries
-        
-        # Now update the orphan list (populated_summary updated with integrated orphans in the else branch above)
-        if replace_mode:
+        # Get the orphans and the updated summaries based on whether we are replacing or appending
+        orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size) #Checked insights is None, based on false eval for resume. Mode propagates in case there is a crash
+        self.summary_state.populated_theme_list[-1] = updated_summary_df
+        if mode == "replace":
             self.summary_state.orphan_list[-1] = orphans_df
-        else:
+        elif mode == "append":
             self.summary_state.orphan_list.append(orphans_df)
-        # Save the state
+
+        # Now clean up and save
+        # Delete the resume pickle as the process is complete and we want to void a resume trigger if we run again
+        if os.path.exists(self.orphan_pickle_resume_path):
+            os.remove(self.orphan_pickle_resume_path)
         self.summary_state.save()
-        # delete pickle after save   
-        os.remove(self.orphan_pickle_resume_path) 
-        # Return updated populated themes with orphans integrated
-        return(self.summary_state.populated_theme_list[-1])
+        return(self.summary_state.orphan_list[-1])
 
 
     def address_redundancy(self) -> pd.DataFrame:
