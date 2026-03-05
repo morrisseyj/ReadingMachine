@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import hashlib
 import json
+import pprint
 
 
 class CorpusState:
@@ -648,6 +649,7 @@ class CorpusState:
                 print("Restart cancelled.")
 
         def status(self):
+            # Get the status of the current summary state by checking the lengths of each list of artifacts.            
             status = {
                 "cluster_summary_list": len(self.cluster_summary_list),
                 "theme_schema_list": len(self.theme_schema_list),
@@ -656,8 +658,30 @@ class CorpusState:
                 "orphan_list": len(self.orphan_list),
                 "redundancy_list": len(self.redundancy_list)
             }
-            return(status)
-        
+            # Pretty print the status with indentation for readability
+            pprint.pprint(status, indent=4)
+            
+            # Calculate  maximum number of passes completed across all stages
+            max_stage = max([val for val in status.values()])
+            # Now determine where in the process the user must be based on which objects have equal the latest run
+            if max_stage == 0:
+                print("No summarization runs detected. You can start the summarization process by running the cluster summary stage.")
+                return None
+            if status["redundancy_list"] > 0:
+                print("You Summaries are complete. You can now proceed to instantiate the render class")
+                return None
+            if status["orphan_list"] == max_stage:
+                print(f"You have handled orphans on your most recent run (run: {max_stage}). You can either iterate, run redundancy pass or finish your summary pass and instantiate the render class.")
+            elif status["populated_theme_list"] == max_stage:
+                print(f"You have populated themes on your most recent run (run: {max_stage}). Your next step should be to handle handle orphans.")
+            elif status["mapped_theme_list"] == max_stage:
+                print(f"You have mapped themes on your most recent run (run: {max_stage}). Your next step should be to populate themes.")
+            elif status["theme_schema_list"] == max_stage:
+                print(f"You have generated a theme schema on your most recent run (run: {max_stage}). Your next step should be to map themes.")
+            else:
+                print(f"You have generated a cluster summary on your most recent run (run: {max_stage}). Your next step should be to generate a theme schema.")
+            return None
+
         def fingerprint(self):
             """
             Deterministic fingerprint of the summary state.
