@@ -3117,10 +3117,8 @@ class Summarize:
         self.summary_state.save()
         return(self.summary_state.orphan_list[-1])
 
-
-    def address_redundancy(self) -> pd.DataFrame:
-        # Ensure ordering is respected for the narrative flow
-        ordered_themes = self.summary_state.populated_theme_list[-1].sort_values(by=["question_id", "theme_order"])
+    def _llm_redundancy_check(self):
+        ordered_themes = self.summary_state.populated_theme_list[-1].sort_values(by=["question_id", "theme_id"]).reset_index(drop=True).copy()
         refined_rows = []
 
         for q_id, q_group in ordered_themes.groupby("question_id"):
@@ -3138,10 +3136,12 @@ class Summarize:
                 # User Prompt (Matching your INPUT FORMAT)
                 user_prompt = (
                     f"RESEARCH QUESTION: {question_text}\n"
-                    f"THEME LABEL: {theme_label}\n"
                     f"PREVIOUSLY CLEANED THEMES:\n{previous_theme_text if previous_theme_text else 'None.'}\n\n"
-                    f"CURRENT THEME TO REFINE:\n{current_theme_text}"
+                    f"CURRENT THEME LABEL: {theme_label}\n"
+                    f"CURRENT THEME TEXT TO REFINE:\n{current_theme_text}"
                 )
+                
+                fall_back = {"refined_theme": ""}
 
                 # Execute the reduction
                 response = utils.call_chat_completion(
@@ -3150,6 +3150,7 @@ class Summarize:
                     llm_client=self.llm_client,
                     ai_model=self.ai_model,
                     return_json=True,
+                    fall_back=fall_back,
                     json_schema={
                         "name": "redundancy_reduction",
                         "strict": True,
@@ -3162,20 +3163,59 @@ class Summarize:
                     }
                 )
 
-                refined_text = response.get("refined_theme", current_theme_text)
+                refined_theme = response["refined_theme"]
                 
                 # Update context for the next theme in this RQ
-                previous_theme_text += f"\n\n{refined_text}"
+                previous_theme_text += f"\n\n{refined_theme}"
 
                 # Preserve the row data
                 refined_row = row.copy()
-                refined_row["thematic_summary"] = refined_text
+                refined_row["thematic_summary"] = refined_theme
                 refined_rows.append(refined_row)
 
         # Push to State
         refined_df = pd.DataFrame(refined_rows)
-        self.summary_state.populated_theme_list.append(refined_df)
-        return refined_df
+        refined_df["theme_id"] = refined_df["theme_id"].astype(int)
+        return(refined_df)
+
+    def address_redundancy(self, force = False) -> pd.DataFrame:
+        # Make sure this can run
+        if not self.summary_state.populated_theme_list:
+            raise ValueError("No populated themes available for redundancy pass.")
+        # Force logic: run regardless and populate redundancy attribute and return
+        if force:
+            print("WARNING: Force flag is True: Skipping validation and resumption checks and addressing redundancy. This may cause the state to become unstable. This mode should be used for testing purposes only.")
+            # We just run the redundancy reduction on the latest populated themes and append to the redundancy list without any checks
+            refined_df = self._llm_redundancy_check()
+            self.summary_state.redundancy_list = [refined_df]
+            self.summary_state.save()
+            return self.summary_state.redundancy_list[-1]
+        
+        # If not force then make sure the orphans are not smaller than populated themes - i.e. you have to have run orphans before you can run redundancy. But orphans can be larger - if you for some reason iterate orphans and redundancy, orphans will grow while everythig else stays as is
+        if len(self.summary_state.orphan_list) < len(self.summary_state.populated_theme_list):
+            raise ValueError("The number of orphan audits and populated themes are not aligned. Please run address_orphans() to align the state before running redundancy reduction.")
+
+        # Now check whether we want to reload or rebuild redundancy
+        if len(self.summary_state.redundancy_list) == 1:
+            reload = None
+            while reload not in ["1", "2"]:
+                reload = input(
+                    "Redundancy reduction has already been run on the latest populated themes.\n"
+                    "(1) Reload existing redundancy reduction\n"
+                    "(2) Re-run redundancy reduction (this will overwrite the previous redundancy pass)\n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+            if reload == "1":
+                print("Latest redundancy reduction loaded.")
+                return self.summary_state.redundancy_list[0] # Return to exit the function and avoid re-running the reduction    
+            else:
+                print("Re-running redundancy reduction on the latest populated themes...")
+
+        # Do the redundancy check, update redundancy_list, save and return
+        refined_df = self._llm_redundancy_check()
+        self.summary_state.redundancy_list = [refined_df]
+        self.summary_state.save()
+        return self.summary_state.redundancy_list[-1]
 
 
 

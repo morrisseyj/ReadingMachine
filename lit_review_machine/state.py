@@ -648,7 +648,7 @@ class CorpusState:
             else:
                 print("Restart cancelled.")
 
-        def status(self):
+        def status(self, diagnostic = False):
             # Get the status of the current summary state by checking the lengths of each list of artifacts.            
             status = {
                 "cluster_summary_list": len(self.cluster_summary_list),
@@ -658,29 +658,55 @@ class CorpusState:
                 "orphan_list": len(self.orphan_list),
                 "redundancy_list": len(self.redundancy_list)
             }
-            # Pretty print the status with indentation for readability
-            pprint.pprint(status, indent=4)
+            if diagnostic:
+                # Pretty print the status with indentation for readability
+                pprint.pprint(status, indent=4)
             
             # Calculate  maximum number of passes completed across all stages
             max_stage = max([val for val in status.values()])
             # Now determine where in the process the user must be based on which objects have equal the latest run
             if max_stage == 0:
-                print("No summarization runs detected. You can start the summarization process by running the cluster summary stage.")
-                return None
+                if diagnostic:
+                    return {"stage": "no_runs", "max_stage": max_stage}
+                else:
+                    print("No summarization runs detected. You can start the summarization process by running the cluster summary stage.")
+                    return None
             if status["redundancy_list"] > 0:
-                print("You Summaries are complete. You can now proceed to instantiate the render class")
-                return None
+                if diagnostic:
+                    return {"stage": "redundancy", "max_stage": max_stage}
+                else:
+                    print("You Summaries are complete. You can now proceed to instantiate the render class")
+                    return None
             if status["orphan_list"] == max_stage:
-                print(f"You have handled orphans on your most recent run (run: {max_stage}). You can either iterate, run redundancy pass or finish your summary pass and instantiate the render class.")
+                if diagnostic:
+                    return {"stage": "orphan", "max_stage": max_stage}
+                else:
+                    print(f"You have identified orphaned insights on your most recent run (run: {max_stage}). Your next step should be to handle redundancy.")
+                    return None
             elif status["populated_theme_list"] == max_stage:
-                print(f"You have populated themes on your most recent run (run: {max_stage}). Your next step should be to handle handle orphans.")
+                if diagnostic:
+                    return {"stage": "populated_theme", "max_stage": max_stage}
+                else:
+                    print(f"You have populated themes on your most recent run (run: {max_stage}). Your next step should be to handle handle orphans.")
+                    return None
             elif status["mapped_theme_list"] == max_stage:
-                print(f"You have mapped themes on your most recent run (run: {max_stage}). Your next step should be to populate themes.")
+                if diagnostic:
+                    return {"stage": "mapped_theme", "max_stage": max_stage}
+                else:
+                    print(f"You have mapped themes on your most recent run (run: {max_stage}). Your next step should be to populate themes.")
+                    return None
             elif status["theme_schema_list"] == max_stage:
-                print(f"You have generated a theme schema on your most recent run (run: {max_stage}). Your next step should be to map themes.")
+                if diagnostic:
+                    return {"stage": "theme_schema", "max_stage": max_stage}
+                else:
+                    print(f"You have generated a theme schema on your most recent run (run: {max_stage}). Your next step should be to map themes.")
+                    return None
             else:
-                print(f"You have generated a cluster summary on your most recent run (run: {max_stage}). Your next step should be to generate a theme schema.")
-            return None
+                if diagnostic:
+                    return {"stage": "cluster_summary", "max_stage": max_stage}
+                else:
+                    print(f"You have generated a cluster summary on your most recent run (run: {max_stage}). Your next step should be to generate a theme schema.")
+                    return None
 
         def fingerprint(self):
             """

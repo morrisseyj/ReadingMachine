@@ -2,6 +2,8 @@
 # Import custom libraries and modules
 from lit_review_machine import config, utils
 from lit_review_machine.prompts import Prompts
+from lit_review_machine.state import SummaryState, CorpusState
+
 
 # Import standard libraries
 from typing import Any, Dict, Optional
@@ -18,7 +20,10 @@ class Render:
         self, 
         llm_client: Any,
         ai_model: str,
-        summaries: Optional[pd.DataFrame] = None, 
+        summary_state: SummaryState = None, 
+        corpus_state: CorpusState = None,
+        force: bool = False,
+        render_object: tuple[str, int] = None,
         summaries_folder: str = os.path.join(config.SUMMARY_SAVE_LOCATION, "parquet"),
         summary_string: Optional[str] = None, 
         ai_peer_review: Optional[Dict] = None,
@@ -28,21 +33,28 @@ class Render:
         Wrapper for a DataFrame of summaries and tools for AI-assisted peer review.
         
         Args:
-            summaries: DataFrame of either the summaries or the summaries synthesized into themes
-            llm_client: LLM client for interacting with the AI model.
-            ai_model: Name of the deep research model to use.
+            summary_state: SummaryState object containing the summaries and related metadata.
+            corpus_state: CorpusState object containing the paper metadata and related information.
+            force: If True allows rendering of summaries even if the summarization process has not been completed - either orphan handling or redundancy pass. Use with caution as the summaries may not be fully processed and may contain redundancies or unhandled orphans. 
+            render_object: Optional tuple specifying which object to render and at which stage (articulated as list index) (e.g. "cluster_summary", 0" or "populated_theme", -1"). Must be passed with force=True. If None, the class will automatically determine which summaries to render based on the current stage of the summarization process as indicated by summary_state.status().
             summary_string: Optional; pre-computed concatenated summary string.
             ai_peer_review: Optional; stores the AI peer review output as a dictionary.
             output_save_location: Directory to save Word documents.
         """
+        # Check that we can instantiate this class - i.e. summaries have been generated
+        if summary_state.cluster_summary_list == [] and summary_state.populated_theme_list == []:
+            raise ValueError("SummaryState appears to be empty. Please run the summarization process before instantiating the Render class.")
         
-        
-        # If summaries is not provided, try and load from parquet
-        if summaries is None:
-            self.summaries = self.from_parquet(summaries_folder=summaries_folder, llm_client=llm_client, ai_model=ai_model)
+        if render_object is not None:
+            if not isinstance(render_object, tuple) or len(render_object) != 2:
+                raise ValueError("render_object must be a tuple of length 2.")
+            if render_object[0] not in ["cluster_summary", "populated_theme", "redundancy"]:
+                raise ValueError(f"Invalid render_object '{render_object[0]}'. Valid options are 'cluster_summary', 'populated_theme', or 'redundancy'.")
 
-
-        self.summaries: pd.DataFrame = summaries
+        self.summary_state = summary_state
+        self.corpus_state = corpus_state
+        self.render_object = render_object
+        self.force = force
         self.llm_client = llm_client
         self.ai_model = ai_model
         self.summary_string: Optional[str] = summary_string
@@ -50,7 +62,65 @@ class Render:
         self.summaries_folder: str = summaries_folder
         self.output_save_location: str = output_save_location
 
+        # Get the exact content that we want to render on, depending on whether the use ran the redundancy pass or stopped at the final orphan pass ()
+
+
+        self.summary_to_render = self._get_summaries_for_render(force=force)
+
+    def _get_summaries_for_render(self, force) -> pd.DataFrame:
+        """
+        Determine which summaries to render based on the current stage of the summarization process, as indicated by summary_state.status(). If force is True, will render the summaries from the current stage even if the summarization process has not been completed. If render_object is specified, will render the specified object at the specified stage regardless of the current stage or force setting.
+        """
+        # First check whether the user has specified a render object, if so make sure they have set flag to true
+        if self.render_object is not None and force == False:
+            raise ValueError("You have specified a render_object but force is set to False. Please set force to True to render the specified object, or set render_object to None to automatically determine which summaries to render based on the current stage of the summarization process.")
+        # If render object and force flag are set return the specified object at the specified stage, make sure index is within range
+        if self.render_object is not None and force == True:
+            obj_name, index = self.render_object
+            if obj_name == "cluster_summary":
+                if not (-len(self.summary_state.cluster_summary_list) <= index < len(self.summary_state.cluster_summary_list)):
+                    raise ValueError(f"Index {index} out of range for cluster_summary_list with length {len(self.summary_state.cluster_summary_list)}.")
+                return self.summary_state.cluster_summary_list[index]
+            if obj_name == "populated_theme":
+                if not (-len(self.summary_state.populated_theme_list) <= index < len(self.summary_state.populated_theme_list)):
+                    raise ValueError(f"Index {index} out of range for populated_theme_list with length {len(self.summary_state.populated_theme_list)}.")
+                return self.summary_state.populated_theme_list[index]
+            else:
+                obj_name = "redundancy" # This is not needed, just here for explicit clarity
+                if not (-len(self.summary_state.redundancy_list) <= index < len(self.summary_state.redundancy_list)):
+                    raise ValueError(f"Index {index} out of range for redundancy_list with length {len(self.summary_state.redundancy_list)}.")
+                return self.summary_state.redundancy_list[index]
+
+
+        # If render object not set, automatically get the summary object. First get the standard approach - redundancy or orphan - if they are complete. Otherwise check the flaf force option and return other options
+        status_diagnostic = self.summary_state.status(diagnostic=True)
+        max_stage, last_stage = status_diagnostic["max_stage"], status_diagnostic["stage"]
+        # If the last stage is mapped themes or theme schema, we have to check whether a populated theme was generated - i.e. is max stage > 1 (i.e. a full pass has happened). If so the last available render is on the last populated_theme
+        if last_stage in ["theme_schema", "mapped_theme"] and max_stage > 1:
+            last_stage = "populated_theme"
+        elif last_stage in ["theme_schema", "mapped_theme", "cluster_summary"] and max_stage <= 1:
+            last_stage = "cluster_summary"
+        else:
+            last_stage = last_stage
         
+        
+        if last_stage == "redundancy":
+            print("Summaries have gone through the redundancy pass and been checked for orphans. This is a readability first output, but has a risk of insight ommission. If fidelity is your priority you should run the orphan pass again before rendering. SummaryState.handle_orphans().")
+            return(self.summary_state.redundancy_list[0])
+        if last_stage == "orphan":
+            print("Summaries have gone through the orphan pass, but not been checked for redundancy. This is a fidelity first output and may contain redundancies. If you want to handle redundancies before rendering, please run the redundancy pass: SummaryState.address_redundancy().")
+            return(self.summary_state.populated_theme_list[-1])
+        if last_stage not in ["redundancy", "orphan"] and not force:
+            raise ValueError(f"Your summary state is currently at stage '{last_stage}'. You can only render summaries if you have completed the orphan pass and/or the redundancy pass. Use SummaryState.status() to determine your current stage. " 
+                                "If you know what you are doing and want to render with the current summaries, please instantiate the Render class with force=True to override this check.")
+        if last_stage in ["cluster_summary", "populated_theme"] and force:
+            print(f"WARNING Force rendering with summaries from stage '{last_stage}'. Be aware that the summaries may not be fully processed and may contain redundancies or unhandled orphans.")
+            if last_stage == "populated_theme":
+                return(self.summary_state.populated_theme_list[-1])
+            else:
+                return(self.summary_state.cluster_summary_list[0])
+            
+
     @classmethod
     def from_parquet(cls, summaries_folder: str, llm_client: Any, ai_model: str) -> "Summaries":
         """

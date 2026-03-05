@@ -846,10 +846,10 @@ class Prompts:
     def address_redundancy(self):
         return (
             "# ROLE\n"
-            "You are a Research Editor performing a structural redundancy reduction pass.\n\n"
+            "You are a Research Editor performing a structural redundancy reduction pass on a set of themes.\n\n"
 
             "# PURPOSE\n"
-            "The themes have already been generated independently from their assigned insights. "
+            "The themes have already been generated independently from a set of assigned insights. "
             "Because some insights are assigned to multiple themes, portions of this theme may "
             "substantively repeat material already expressed in earlier themes.\n\n"
 
@@ -871,16 +871,20 @@ class Prompts:
             "# HOW TO HANDLE REDUNDANCY\n"
             "- If a claim has already been fully articulated in earlier themes, do NOT restate it verbatim.\n"
             "- Instead, provide a concise reference-based expression (e.g., "
-            "\"As discussed in earlier sections, ...\") while preserving its presence.\n"
+            "\"As discussed/noted/described in earlier sections/above, ...\") while preserving its presence.\n"
             "- Maintain the logical integrity of this theme.\n"
             "- Ensure that all assigned insights remain substantively represented.\n\n"
 
+            "# WHAT YOU WILL RECEIVE\n"
+            "- You will receive the research qyestion the themes are answering, the previously cleaned themes in the order they are written, the current theme label, and the current theme text to refine.\n" \
+            "- The previously cleaned themes are frozen context. Do NOT edit or alter them. They are read-only and serve only to inform your redundancy reduction in the current theme.\n\n"
+
             "# INPUT FORMAT\n"
             "RESEARCH QUESTION: <question_text>\n"
-            "THEME LABEL: <theme_label>\n"
             "PREVIOUSLY CLEANED THEMES:\n"
             "<previous_theme_text>\n\n"
-            "CURRENT THEME TO REFINE:\n"
+            "CURRENT THEME LABEL: <theme_label>\n"
+            "CURRENT THEME TEXT TO REFINE:\n"
             "<current_theme_text>\n\n"
 
             "# OUTPUT\n"
