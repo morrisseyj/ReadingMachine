@@ -13,6 +13,8 @@ import unicodedata
 import re
 from docx import Document
 import json
+import hashlib
+
 
 
 class Render:
@@ -24,9 +26,9 @@ class Render:
         corpus_state: CorpusState = None,
         force: bool = False,
         render_object: tuple[str, int] = None,
-        summaries_folder: str = os.path.join(config.SUMMARY_SAVE_LOCATION, "parquet"),
-        summary_string: Optional[str] = None, 
-        ai_peer_review: Optional[Dict] = None,
+        render_path: str = config.RENDER_SAVE_LOCATION,
+        render_hash = config.summary_hash,
+        render_df = config.summary_df,
         output_save_location: str = os.path.join(config.SUMMARY_SAVE_LOCATION, "results")
         ):
         """
@@ -57,15 +59,26 @@ class Render:
         self.force = force
         self.llm_client = llm_client
         self.ai_model = ai_model
-        self.summary_string: Optional[str] = summary_string
-        self.ai_peer_review: Optional[Dict] = ai_peer_review
-        self.summaries_folder: str = summaries_folder
+        self.render_hash = render_hash
+        self.render_df = render_df
         self.output_save_location: str = output_save_location
 
         # Get the exact content that we want to render on, depending on whether the use ran the redundancy pass or stopped at the final orphan pass ()
-
-
         self.summary_to_render = self._get_summaries_for_render(force=force)
+        # Add question_text to the summary_to_render so that it can be used as part of the payload for the question summaries and executive summary generation, and also added to the render_df for streaming out as part of the final document generation. We do this here so that the summary_to_render df is the complete df we need to work with for all subsequent operations, rather than having to merge in question text at multiple subsequent steps. This is a left merge because there may be some summaries that do not have question text if there are orphans that have not been handled, but we want to keep those summaries in the render_df and just have null question text for them.
+        self.summary_to_render = (
+            self.summary_to_render
+            .merge(self.corpus_state.questions[["question_id", "question_text"]], 
+                   on="question_id", 
+                   how="left")
+        )
+        # Ensure sort for subsequent operations
+        self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "doc_order"]).reset_index(drop=True)
+        # Hash the summary to eiher check against previous renders or to set if this is the first time. This guards against changes in summary objects during rendering pass
+        current_summary_hash = self._compute_df_hash(self.summary_to_render)
+
+        # Handle check and recovery of pervious renders
+        self._reinitialize_render(current_summary_hash=current_summary_hash)
 
     def _get_summaries_for_render(self, force) -> pd.DataFrame:
         """
@@ -120,116 +133,249 @@ class Render:
             else:
                 return(self.summary_state.cluster_summary_list[0])
             
-
-    @classmethod
-    def from_parquet(cls, summaries_folder: str, llm_client: Any, ai_model: str) -> "Summaries":
+    @staticmethod
+    def _compute_df_hash(df) -> str:
         """
-        Load summaries from a parquet file containing a DataFrame.
-
-        Args:
-            filepath: Path to the parquet file.
-
-        Returns:
-            Summaries instance with loaded DataFrame.
+        Create a deterministic SHA-256 hash of a DataFrame.
+        Used for state fingerprinting and resume validation.
         """
 
-        files = os.listdir(cls.output_save_location)
-        summaries_file = [file for file in files if file in ["summaries.parquet", "clean_summaries.parquet"]]
-        if len(summaries_file) == 0:
-            raise FileNotFoundError(f"No 'summaries.parquet' or 'clean_summaries.parquet' file found in {cls.output_save_location}, cannot load Summaries.")
-        elif len(summaries_file) > 1:
-            raise ValueError(f"Multiple summary files found in {cls.output_save_location}. Expected only one of 'summaries.parquet' or 'clean_summaries.parquet'. Either delete on file and retry, or load summary manually and pass to the constructor.")
+        if df is None or df.empty:
+            return "EMPTY"
 
-        summaries = pd.read_parquet(os.path.join(summaries_folder, summaries_file[0]))
+        # Defensive copy
+        df_normalized = df.copy()
 
-        return cls(summaries = summaries, 
-                   llm_client = llm_client, 
-                   ai_model = ai_model)
+        # Normalize NaNs
+        df_normalized = df_normalized.fillna("__NULL__")
 
-    def get_summary_string(self, output_result: bool = True) -> Optional[str]:
+        # Sort columns alphabetically for consistency
+        df_normalized = df_normalized.sort_index(axis=1)
+
+        # Sort rows deterministically by all columns
+        df_normalized = df_normalized.sort_values(
+            by=list(df_normalized.columns)
+        ).reset_index(drop=True)
+
+        # Convert to stable JSON representation
+        json_bytes = df_normalized.to_json().encode("utf-8")
+
+        # Hash
+        return hashlib.sha256(json_bytes).hexdigest()          
+                   
+    def _reinitialize_render(self, current_summary_hash) -> None:
         """
-        Concatenate cluster summaries into a single string per research question,
-        ordered by question_id and cluster.
+        Checks if there is another render hash file saved. If so, checks the hashes to ensure match
+        If conflict force abort or overwrite
+        If hash match, reload the render df and any attributes created thus far
+        If no previous render save the current hash and create the clean render_df from the summary_to_render   
 
-        Args:
-            output_result: If True, return the concatenated string; else only sets self.summary_string.
-
-        Returns:
-            Concatenated summary string if output_result is True; else None.
         """
-        # Ensure DataFrame is sorted by question_id and cluster for stable ordering
-        self.summaries = self.summaries.sort_values(by=["question_id", "cluster"])
+        # Check if any previous render objects exist:
+        if os.path.exists(os.path.join(self.render_path, self.render_hash)):
+            saved_hash_df = pd.from_parquet(os.path.join(self.render_path, self.render_hash))
+            saved_hash = saved_hash_df["summary_hash"].iloc[0]
+            if saved_hash != current_summary_hash:
+                restart = None
+                while restart not in ["1", "2"]:
+                    restart = input(
+                        "A previous render hash was found that does not match the current summary hash. This suggests that the summaries have changed since the last render. " \
+                        "Do you want to proceed with rendering and overwrite the previous render?\n"
+                        "(1) Yes, proceed with rendering and overwrite the previous render.\n" 
+                        "(2) No, stop the rendering process to avoid overwriting the previous render (this will abort render and require the correct summary_state be passed to Render init).\n"
+                        "(1/2):\n"
+                        .strip()
+                    )
+                if restart == "2":
+                    raise ValueError("Rendering process aborted by user to avoid overwriting previous render. Please check your summary_state and ensure it is correct before re-instantiating the Render class.")
+                else:
+                    # Clean up the render artifacts and start new render
+                    os.remove(os.path.join(self.render_path, self.render_hash))
+                    if os.path.exists(os.path.join(self.render_path, self.render_df)):
+                        os.remove(os.path.join(self.render_path, self.render_df)) 
+                    # Create and save the new hash file
+                    new_hash_df = pd.DataFrame({"summary_hash": [current_summary_hash]})
+                    new_hash_df.to_parquet(os.path.join(self.render_path, self.render_hash), index=False)
+                    print("Previous render artifacts deleted. Hash set to current summary_to_render.")
+                    return(None)
+                
+            else: # if the hash matches we load the old dataframe and create all the attributes that we can from it.
+                print("A previous render with the same summary hash was found. Loading the previous render dataframe.")
+                # Create 
+                self.render_df = pd.read_parquet(os.path.join(self.render_path, self.render_df))
+                # Check whether render artefacts created and doc_atr column created
+                if "doc_attr" in self.summary_to_render.columns:
+                    # Get all the attributes:
+                    self.title = self.render_df[self.render_df["doc_attr"] == "title"]["content"].iloc[0]
+                    self.exec_summary = self.render_df[self.render_df["doc_attr"] == "exec_summary"]["content"].iloc[0]
+                    self.question_summaries = self.render_df[self.render_df["doc_attr"] == "question_summary"][["question_id", "content"]].copy()
+                    return(None)
+
+        else: # if no previous file exists, save the hash and create the render df from the summary_to_render
+            # Create and save the new hash file
+            new_hash_df = pd.DataFrame({"summary_hash": [current_summary_hash]})
+            new_hash_df.to_parquet(os.path.join(self.render_path, self.render_hash), index=False)
+            # Note we will be working with two primary dfs.
+            # summary_to_render is the df that will generate everything and render_df is the df that will hold the state
+            # We have to separate them so that if someone recalls generation method (e.g. exec summary) it always gets created off the original content, not the newly organized render_df that will be used to stream out the outputs
+            self.render_df = self.summary_to_render.copy()
+            # Becuase this is the df we will now work from to generate the stream of the output with exec summary, question summary etc thematic_summary becomes content and doc_attr column created to specifiy content type
+            self.render_df.rename(columns={"thematic_summary": "content"}, inplace=True)
+            self.render_df["doc_attr"] = "thematic_summary"
+            self.render_df["doc_order"] = [i for i in range(len(self.render_df))] # Add doc order as this will now be the main ordering for streaming the content out.
+            self.title = None
+            self.exec_summary = None
+            self.question_summaries = None
+            return(None)
+
+
+    # def get_summary_string(self, output_result: bool = True) -> Optional[str]:
+    #     """
+    #     Concatenate theme summaries into a single string per research question,
+    #     ordered by question_id and cluster.
+
+    #     Args:
+    #         output_result: If True, return the concatenated string; else only sets self.summary_string.
+
+    #     Returns:
+    #         Concatenated summary string if output_result is True; else None.
+    #     """
+    #     # Ensure DataFrame is sorted by question_id and theme_id for stable ordering - this is done above, so this is defensive
+    #     self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "theme_id"]).copy()
+
+    #     output_string = ""
+    #     for qid in self.summary_to_render["question_id"].unique():
+    #         qtext = self.summary_to_render.loc[self.summary_to_render["question_id"] == qid, "question_text"].iloc[0]
+    #         question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
+
+    #         question_string = (
+    #             f"Research question id: {qid}\n"
+    #             f"Research question text: {qtext}\n"
+    #             "Review:\n"
+    #             f"{'\n\n'.join(question_df['thematic_summary'].tolist())}\n\n"
+    #         )
+    #         output_string += question_string
+
+    #     self.summary_string = output_string
+
+    #     if output_result:
+    #         return output_string
+   
+
+    def _gen_question_payload(self, qid) -> str:
+        """
+        Generates a string that can be used as the payload to the llm call.
+        The string is a concat of the themmatic summaries preceeded with the question text and with clear boundaries between the themes
+        It can be used as the payload for the question summries and as part of the exec summaries
+        """
+        question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
+        output = ""
+        for _, row in question_df.iterrows():
+            output += f"Question ID: {row['question_id']}\n"
+            output += f"Question Text: {row['question_text']}\n"
+            output += f"Theme: {row['theme_label']}\n"
+            output += f"{row['thematic_summary']}\n"
+            output += "--- END THEME ---\n"
+
+        return(output)
+    
+    def _gen_exec_summary_payload(self) -> str:
+        summary_df = self.summary_to_render.copy()
+        summary_df = summary_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
 
         output_string = ""
-        for qid in self.summaries["question_id"].unique():
-            qtext = self.summaries.loc[self.summaries["question_id"] == qid, "question_text"].iloc[0]
-            question_df = self.summaries[self.summaries["question_id"] == qid]
+        # Loop over the questions
+        output = ""
+        for qid in summary_df["question_id"].unique():
+            question_output = self._gen_question_payload(qid)
+            output += question_output
+            output += "\n=== END QUESTION ===\n\n"
 
-            question_string = (
-                f"Research question id: {qid}\n"
-                f"Research question text: {qtext}\n"
-                "Review:\n"
-                f"{'\n\n'.join(question_df['cluster_summary'].tolist())}\n\n"
-            )
-            output_string += question_string
+        return output
+    
+    def _add_exec_summary_to_render_df(self, exec_summary: str, title: str) -> None:
+        """
+        Adds the executive summary and title to the render_df with appropriate doc_attr labels and doc_order for streaming out in the final doc generation.
+        """
 
-        self.summary_string = output_string
+        content_title_df =pd.DataFrame({
+            "content": [title, exec_summary],
+            "doc_attr": ["title", "exec_summary"]})
+        
+        render_df = pd.concat([content_title_df, self.render_df], ignore_index=True)
+        render_df["doc_order"] = [i for i in range(len(render_df))]
 
-        if output_result:
-            return output_string
-   
-    def gen_executive_summary(self, token_length: int = 600) -> Optional[str]:
-        if not hasattr(self, "summaries"):
-            raise ValueError("summaries attribute not found.")
+        return(render_df)
 
-        df = self.summaries.copy()
-        df = df.reset_index(drop=False).rename(columns={"index": "_row"})  # preserve original order
-        themed = {"label", "contents"}.issubset(df.columns)
 
-        parts: list[str] = []
-        for qtext, qdf in df.groupby("question_text", sort=False):
-            parts.append(f"Question: {qtext}\n")
-            qdf = qdf.sort_values("_row")
-            if themed:
-                for _, r in qdf.iterrows():
-                    label = (r.get("label") or "").strip()
-                    content = (r.get("contents") or "").strip()
-                    if not content:
-                        continue
-                    parts.append(
-                        f"Theme: {label}\n"
-                        f"{content}\n"
-                        "--- END THEME ---\n"
-                    )
-            else:
-                for _, r in qdf.iterrows():
-                    summ = (r.get("summary") or "").strip()
-                    if not summ:
-                        continue
-                    parts.append(f"{summ}\n")
-            parts.append("=== END QUESTION ===\n")
+    def gen_exec_summary(self, word_length: int = 500) -> str:
 
-        if not parts:
-            return None
+        if self.exec_summary is not None and self.title is not None:
+            rerun = None
+            while rerun not in ["1", "2"]:
+                rerun = input(
+                    "An executive summary and title have already been generated. Do you want to regenerate the executive summary and title?\n"
+                    "(1) Yes, regenerate the executive summary and title.\n" 
+                    "(2) No, keep the existing executive summary and title.\n"
+                    "(1/2):\n"
+                    .strip()
+                )
+            if rerun == "2":
+                print("Keeping existing executive summary and title.")
+                return self.exec_summary, self.title
+            else:                
+                print("Regenerating executive summary and title.")
 
-        all_text = "\n".join(parts).strip()
+        exec_summary_payload = self._gen_full_paper_payload()
+        
+        sys_prompt = Prompts().exec_summary(word_length=word_length)
+        user_prompt = exec_summary_payload
+        fall_back = {"executive_summary": "", "title": ""}
+        json_schema = {
+            "name": "executive_summary_generator",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "executive_summary": {
+                        "type": "string",
+                        "description": "The final executive summary text in continuous prose."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "A concise descriptive title, maximum 12 words, no subtitle."
+                    }
+                },
+                "required": ["executive_summary", "title"],
+                "additionalProperties": False
+            }
+        }
 
-        sys_prompt = Prompts().exec_summary(token_length=token_length)
-        resp = utils.call_chat_completion(
+        response = utils.call_chat_completion(
             sys_prompt=sys_prompt,
-            user_prompt=all_text,
+            user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
             return_json=True,
-            fall_back={"executive_summary": "", "title": ""},
+            json_schema=json_schema,
+            fall_back=fall_back
         )
 
-        summary = (resp.get("executive_summary") or "").strip()
-        title = (resp.get("title") or "").strip()
-        self.exec_summary = summary or None
-        self.title = title or None
-        return self.title, self.exec_summary
+        exec_summary = response["executive_summary"]
+        title = response["title"]
 
+        self.exec_summary = exec_summary
+        self.title = title
+
+        # Add the exec summary and title to the render df
+        render_df = self._add_exec_summary_to_render_df(exec_summary=exec_summary, title=title)
+        # Update the render_df attribute
+        self.render_df = render_df
+        # Save to parquet
+        render_df.to_parquet(os.path.join(self.render_path, self.render_df), index=False)
+
+
+#--------------------------------        
 
     def gen_question_summaries(self) -> Optional[pd.DataFrame]:
         # Preconditions

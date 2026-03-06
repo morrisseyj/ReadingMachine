@@ -5,8 +5,11 @@ import os
 # Location in which the object states are located and which are updated afgter each step of the pipeline completes
 STATE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "runs")
 
-# Location in which the summary object is saved after the summarization step of the pipeline completes
+# Location in which the summary objects are saved after the summarization step of the pipeline completes
 SUMMARY_SAVE_LOCATION = os.path.join(STATE_SAVE_LOCATION, "summaries")
+
+# Location in which the render objects are saved after the rendering step of the pipeline completes
+RENDER_SAVE_LOCATION = os.path.join(STATE_SAVE_LOCATION, "renders")
 
 # Location in which the paper chunks are saved after the chunking step of the pipeline completes
 PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
@@ -20,4 +23,9 @@ summary_state_prefix = {
     "orphan_list": "orphan_list",
     "redundancy_list": "redundancy_list"
 }
+
+# Filename for render objects:
+summary_hash = "summary_hash.parquet"
+summary_df = "summary_df.parquet"
+
 

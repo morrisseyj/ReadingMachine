@@ -981,30 +981,37 @@ class Prompts:
 
 
 
-    def exec_summary(self, token_length: int):
+    def exec_summary(self, word_count: int):
         return (
-            "You synthesize literature into an executive summary and suggest paper titles. Do not invent facts. Use only information present in the input. "
-            "You are part of a process generating a literature review, specifically generating an executive summary and suggesting a paper title.\n\n"
+            "## ROLE\n"
+            "You are a writing agent specialized in developing executive summaries for corpus reviews. "
+            "Your task is to synthesize a concise, coherent executive summary that captures the key insights and themes across a body of literature organized by research question. "
+            "You will also generate a concise, descriptive title for the review.\n\n"
 
             "## INPUT FORMAT\n"
-            "You will receive a single string containing the review content organized by research question. It may include theme labels and citations.\n\n"
+            "You will receive a single string containing the full review content organized by research question. "
+            "It includes theme labels and citations. Question and theme boundaries are explicit.\n\n"
 
             "## OUTPUT FORMAT\n"
-            '{\n'
-            '  "executive_summary": "<final text only>"\n'
-            '  "title": "<one concise, descriptive title>"\n'
-            '}\n\n'
+            "{\n"
+            '  "executive_summary": "<final text only>",\n'
+            '  "title": "<concise descriptive title, max 12 words>"\n'
+            "}\n\n"
 
             "## INSTRUCTIONS\n"
-            "- Tone/style: formal, concise, neutral, suitable for an academic literature review.\n"
-            "- No headings, no bullet lists, no citations; write continuous prose.\n"
+            "- Tone/style: formal, concise, neutral, suitable for an academic content review.\n"
+            "- No headings, no bullet lists, no citations; write continuous prose only.\n"
             "- Structure: 4-6 short paragraphs with clear topic sentences.\n"
-            "- Order: (1) cross-cutting themes; (2) notable divergences by geography/sector/time; (3) implications or recommendations.\n"
-            "- Coverage: synthesize across all questions; do not restate the questions verbatim.\n"
-            "- Fidelity: preserve qualifiers and uncertainty from the source; do not add new claims or numbers.\n"
-            f"- Length target: ~{token_length} tokens. If needed, compress rather than omit key findings. End at a sentence boundary.\n"
-            "- Acronyms: define on first use if not defined in input.\n"
-            "- De-duplication: avoid repeating the same point; consolidate overlapping statements.\n"
+            "- Order: (1) cross-cutting themes; (2) notable divergences by geography, sector, or time; "
+            "(3) implications emerging from the literature.\n"
+            "- Coverage: synthesize across all research questions; do not restate the questions verbatim.\n"
+            "- Fidelity: preserve qualifiers, uncertainty, and limitations from the source text. "
+            "Do not introduce new claims, numbers, trends, causal inferences, or recommendations unless they are explicitly supported across multiple themes in the input.\n"
+            f"- Length target: approximately {word_count} words (±10%). "
+            "Compress phrasing rather than omitting key findings. End at a sentence boundary.\n"
+            "- Acronyms: define on first use if not defined in the input.\n"
+            "- De-duplication: consolidate overlapping statements and avoid repeating the same point.\n"
+            "- Title: maximum 12 words; no subtitle; avoid colons.\n"
             "- Do not include any text outside the JSON object."
         )
     

@@ -362,7 +362,8 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
                         "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
         "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000)")
+                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000).\n\n"
+                        "NOTE: If you are working in Summrize you can determine your position in the Summarize pipeline via: Summarize.status()")
         }
         
         # Call the dict to return the text
