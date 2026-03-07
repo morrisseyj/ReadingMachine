@@ -30,5 +30,6 @@ dependencies = [
     "crossref",
     "backoff", 
     "tiktoken", 
-    "habanero"
+    "habanero",
+    "reportlab"
 ]

@@ -25,7 +25,11 @@ summary_state_prefix = {
 }
 
 # Filename for render objects:
-summary_hash = "summary_hash.parquet"
-summary_df = "summary_df.parquet"
+summary_hash = "summary_hash.parquet" # The hash for the summary df passed on init
 
-
+render_prefix = {
+    "final_render_df": "final_render_df", # The final render df that is populated with the artifacts from the render process and is used to generate the final output
+    "render_title_exec_summary_df": "render_title_exec_summary_df", # The df that contains the title and executive summary for the render
+    "render_question_summary_df": "render_question_summary_df", # The df that contains the question summaries for the render
+    "render_stylized_rewrite_df": "render_stylized_rewrite_df" # The df that contains the stylized rewrites for the render
+}

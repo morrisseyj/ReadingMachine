@@ -14,6 +14,11 @@ import re
 from docx import Document
 import json
 import hashlib
+from pathlib import Path
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.units import inch
 
 
 
@@ -28,7 +33,6 @@ class Render:
         render_object: tuple[str, int] = None,
         render_path: str = config.RENDER_SAVE_LOCATION,
         render_hash = config.summary_hash,
-        render_df = config.summary_df,
         output_save_location: str = os.path.join(config.SUMMARY_SAVE_LOCATION, "results")
         ):
         """
@@ -60,7 +64,7 @@ class Render:
         self.llm_client = llm_client
         self.ai_model = ai_model
         self.render_hash = render_hash
-        self.render_df = render_df
+        self.render_path = render_path
         self.output_save_location: str = output_save_location
 
         # Get the exact content that we want to render on, depending on whether the use ran the redundancy pass or stopped at the final orphan pass ()
@@ -73,7 +77,7 @@ class Render:
                    how="left")
         )
         # Ensure sort for subsequent operations
-        self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "doc_order"]).reset_index(drop=True)
+        self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         # Hash the summary to eiher check against previous renders or to set if this is the first time. This guards against changes in summary objects during rendering pass
         current_summary_hash = self._compute_df_hash(self.summary_to_render)
 
@@ -172,8 +176,10 @@ class Render:
 
         """
         # Check if any previous render objects exist:
+        os.makedirs(self.render_path, exist_ok=True) # Ensure the render path exists
+
         if os.path.exists(os.path.join(self.render_path, self.render_hash)):
-            saved_hash_df = pd.from_parquet(os.path.join(self.render_path, self.render_hash))
+            saved_hash_df = pd.read_parquet(os.path.join(self.render_path, self.render_hash))
             saved_hash = saved_hash_df["summary_hash"].iloc[0]
             if saved_hash != current_summary_hash:
                 restart = None
@@ -184,8 +190,8 @@ class Render:
                         "(1) Yes, proceed with rendering and overwrite the previous render.\n" 
                         "(2) No, stop the rendering process to avoid overwriting the previous render (this will abort render and require the correct summary_state be passed to Render init).\n"
                         "(1/2):\n"
-                        .strip()
-                    )
+                        ).strip()
+
                 if restart == "2":
                     raise ValueError("Rendering process aborted by user to avoid overwriting previous render. Please check your summary_state and ensure it is correct before re-instantiating the Render class.")
                 else:
@@ -200,67 +206,33 @@ class Render:
                     return(None)
                 
             else: # if the hash matches we load the old dataframe and create all the attributes that we can from it.
-                print("A previous render with the same summary hash was found. Loading the previous render dataframe.")
-                # Create 
-                self.render_df = pd.read_parquet(os.path.join(self.render_path, self.render_df))
-                # Check whether render artefacts created and doc_atr column created
-                if "doc_attr" in self.summary_to_render.columns:
-                    # Get all the attributes:
-                    self.title = self.render_df[self.render_df["doc_attr"] == "title"]["content"].iloc[0]
-                    self.exec_summary = self.render_df[self.render_df["doc_attr"] == "exec_summary"]["content"].iloc[0]
-                    self.question_summaries = self.render_df[self.render_df["doc_attr"] == "question_summary"][["question_id", "content"]].copy()
-                    return(None)
+                print("A previous render with the same summary hash was found. Loading the previous generate cosmetic artifacts\n")
+                path = Path(self.render_path)
+                loaded_artefacts = []
+                for file in path.glob("*.parquet"):
+                    if file.stem == config.render_prefix["render_df"]:
+                        self.render_df = pd.read_parquet(file)
+                        loaded_artefacts.append("render_df")
+                    elif file.stem == config.render_prefix["render_title_exec_summary_df"]:
+                        self.title_exec_summary_df = pd.read_parquet(file)
+                        loaded_artefacts.append("title_summary_df")
+                    elif file.stem == config.render_prefix["render_question_summary_df"]:
+                        self.question_summary_df = pd.read_parquet(file)
+                        loaded_artefacts.append("question_summary_df")
+                    else:
+                        if file.stem == config.render_prefix["render_sylized_rewrite_df"]:
+                            self.stylized_rewrite_df = pd.read_parquet(file)
+                            loaded_artefacts.append("stylized_rewrite_df")
+                
+                if not hasattr(self, "render_df"):
+                    print(f"Cosmetic artifacts loaded: {loaded_artefacts}, but final render_df not found. You should add any missing artifacts and call integrat_cosmetic_artifacts() to construct the render_df)")
+
 
         else: # if no previous file exists, save the hash and create the render df from the summary_to_render
             # Create and save the new hash file
             new_hash_df = pd.DataFrame({"summary_hash": [current_summary_hash]})
             new_hash_df.to_parquet(os.path.join(self.render_path, self.render_hash), index=False)
-            # Note we will be working with two primary dfs.
-            # summary_to_render is the df that will generate everything and render_df is the df that will hold the state
-            # We have to separate them so that if someone recalls generation method (e.g. exec summary) it always gets created off the original content, not the newly organized render_df that will be used to stream out the outputs
-            self.render_df = self.summary_to_render.copy()
-            # Becuase this is the df we will now work from to generate the stream of the output with exec summary, question summary etc thematic_summary becomes content and doc_attr column created to specifiy content type
-            self.render_df.rename(columns={"thematic_summary": "content"}, inplace=True)
-            self.render_df["doc_attr"] = "thematic_summary"
-            self.render_df["doc_order"] = [i for i in range(len(self.render_df))] # Add doc order as this will now be the main ordering for streaming the content out.
-            self.title = None
-            self.exec_summary = None
-            self.question_summaries = None
             return(None)
-
-
-    # def get_summary_string(self, output_result: bool = True) -> Optional[str]:
-    #     """
-    #     Concatenate theme summaries into a single string per research question,
-    #     ordered by question_id and cluster.
-
-    #     Args:
-    #         output_result: If True, return the concatenated string; else only sets self.summary_string.
-
-    #     Returns:
-    #         Concatenated summary string if output_result is True; else None.
-    #     """
-    #     # Ensure DataFrame is sorted by question_id and theme_id for stable ordering - this is done above, so this is defensive
-    #     self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "theme_id"]).copy()
-
-    #     output_string = ""
-    #     for qid in self.summary_to_render["question_id"].unique():
-    #         qtext = self.summary_to_render.loc[self.summary_to_render["question_id"] == qid, "question_text"].iloc[0]
-    #         question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
-
-    #         question_string = (
-    #             f"Research question id: {qid}\n"
-    #             f"Research question text: {qtext}\n"
-    #             "Review:\n"
-    #             f"{'\n\n'.join(question_df['thematic_summary'].tolist())}\n\n"
-    #         )
-    #         output_string += question_string
-
-    #     self.summary_string = output_string
-
-    #     if output_result:
-    #         return output_string
-   
 
     def _gen_question_payload(self, qid) -> str:
         """
@@ -271,46 +243,128 @@ class Render:
         question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
         output = ""
         for _, row in question_df.iterrows():
-            output += f"Question ID: {row['question_id']}\n"
-            output += f"Question Text: {row['question_text']}\n"
             output += f"Theme: {row['theme_label']}\n"
             output += f"{row['thematic_summary']}\n"
             output += "--- END THEME ---\n"
 
         return(output)
     
-    def _gen_exec_summary_payload(self) -> str:
-        summary_df = self.summary_to_render.copy()
-        summary_df = summary_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+    
+    def gen_question_summaries(self) -> pd.DataFrame:
 
-        output_string = ""
+        # First check whether question summaries already exist, if so offer reload or regenerate options
+        if hasattr(self, "question_summary_df"):
+            rerun = None
+            while rerun not in ["1", "2"]:
+                rerun = input(
+                    "Question summaries already exist. Do you want to regenerate the question summaries?\n"
+                    "(1) Yes, regenerate the question summaries.\n" 
+                    "(2) No, keep the existing question summaries.\n"
+                    "(1/2):\n"
+                ).strip()
+            if rerun == "2":
+                print("Keeping existing question summaries.")
+                return self.question_summary_df
+            else:                
+                print("Regenerating question summaries.")
+
+        # Then check whether a stylistic re-write has been done. Flag for the user that if they want a stylistic re-write its likely better to do it after the summaries have been generated, but they can proceed as they like
+        if not hasattr(self, "stylized_rewrite_df"):
+            abort = None
+            while abort not in ["1", "2"]:
+                abort = input(
+                    "You have not done a stylistic rewrite of the themes. This is not neccesary to proceed, "
+                    "however if you intend to do a stylistic rewrite and want  the style of the re-write to appear in your summaries it is reccomended to do the re-write first. "
+                    "Do you want to proceed with generating question summaries without doing a stylistic rewrite?\n"
+                    "(1) Yes, proceed with generating question summaries without doing a stylistic rewrite.\n" 
+                    "(2) No, I want to do a stylistic rewrite before generating question summaries.\n"
+                    "(1/2):\n"
+                ).strip()
+
+                if abort == "2":
+                    print("Aborting question summary generation so that you can do a stylistic rewrite first. Please run stylistic_rewrite() and then re-run gen_question_summaries() to generate the question summaries with the rewritten themes.")
+                    return(self.render_df)
+        
+        # loop over question id to get the question payload
+        question_summaries_df_list = []
+
+        working_render_df = self.summary_to_render.copy()
+
+        for qid in working_render_df["question_id"].unique():
+            question_id = qid
+            question_text = working_render_df[working_render_df["question_id"] == qid]["question_text"].iloc[0]
+            question_payload = self._gen_question_payload(qid=question_id)
+
+        # Prepare the full payload for the llm call
+            sys_prompt = Prompts().question_summaries()
+            user_prompt = (
+            f"Research question: {question_text}\n\n"
+            "CONTENT TO SUMMARIZE:\n"
+            f"{question_payload}\n\n"
+            )
+
+            fall_back = {"summary": ""}
+            json_schema = {
+                "name": "question_summary_generator",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {
+                            "type": "string",
+                            "description": "A single-paragraph thematic overview (3-5 sentences) synthesizing the themes for the research question."
+                        }
+                    },
+                    "required": ["summary"],
+                    "additionalProperties": False
+                }
+            }
+            
+            # Call the llm
+            response = utils.call_chat_completion(
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                llm_client=self.llm_client,
+                ai_model=self.ai_model,
+                return_json=True,
+                json_schema=json_schema,
+                fall_back=fall_back
+            )
+
+            question_summary_txt = response["summary"]
+            question_summary_df = pd.DataFrame({
+                "content": [question_summary_txt],
+                "doc_attr": ["question_summary"],
+                "question_id": [qid],
+            })
+
+            question_summaries_df_list.append(question_summary_df)
+
+        question_summaries_df_out = pd.concat(question_summaries_df_list, ignore_index=True).sort_values(by=["question_id"]).reset_index(drop=True)
+
+        self.question_summary_df = question_summaries_df_out
+        self.question_summary_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_question_summary_df"] + ".parquet"), index=False)       
+        return(self.question_summary_df)
+    
+    
+    def _gen_exec_summary_payload(self) -> str:
+        temp_summary_df = self.summary_to_render.copy()
+        temp_summary_df = temp_summary_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+
         # Loop over the questions
         output = ""
-        for qid in summary_df["question_id"].unique():
+        for qid in temp_summary_df["question_id"].unique():
+            output += f"Research Question: {temp_summary_df[temp_summary_df['question_id'] == qid]['question_text'].iloc[0]}\n"
             question_output = self._gen_question_payload(qid)
             output += question_output
             output += "\n=== END QUESTION ===\n\n"
 
         return output
     
-    def _add_exec_summary_to_render_df(self, exec_summary: str, title: str) -> None:
-        """
-        Adds the executive summary and title to the render_df with appropriate doc_attr labels and doc_order for streaming out in the final doc generation.
-        """
-
-        content_title_df =pd.DataFrame({
-            "content": [title, exec_summary],
-            "doc_attr": ["title", "exec_summary"]})
-        
-        render_df = pd.concat([content_title_df, self.render_df], ignore_index=True)
-        render_df["doc_order"] = [i for i in range(len(render_df))]
-
-        return(render_df)
-
 
     def gen_exec_summary(self, word_length: int = 500) -> str:
 
-        if self.exec_summary is not None and self.title is not None:
+        if hasattr(self, "title_exec_summary_df"):
             rerun = None
             while rerun not in ["1", "2"]:
                 rerun = input(
@@ -318,15 +372,15 @@ class Render:
                     "(1) Yes, regenerate the executive summary and title.\n" 
                     "(2) No, keep the existing executive summary and title.\n"
                     "(1/2):\n"
-                    .strip()
-                )
+                ).strip()
+                
             if rerun == "2":
                 print("Keeping existing executive summary and title.")
-                return self.exec_summary, self.title
+                return self.title_exec_summary_df
             else:                
                 print("Regenerating executive summary and title.")
 
-        exec_summary_payload = self._gen_full_paper_payload()
+        exec_summary_payload = self._gen_exec_summary_payload()
         
         sys_prompt = Prompts().exec_summary(word_length=word_length)
         user_prompt = exec_summary_payload
@@ -363,339 +417,599 @@ class Render:
 
         exec_summary = response["executive_summary"]
         title = response["title"]
-
-        self.exec_summary = exec_summary
-        self.title = title
-
-        # Add the exec summary and title to the render df
-        render_df = self._add_exec_summary_to_render_df(exec_summary=exec_summary, title=title)
-        # Update the render_df attribute
-        self.render_df = render_df
-        # Save to parquet
-        render_df.to_parquet(os.path.join(self.render_path, self.render_df), index=False)
-
-
-#--------------------------------        
-
-    def gen_question_summaries(self) -> Optional[pd.DataFrame]:
-        # Preconditions
-        if not hasattr(self, "summaries"):
-            return None
-        df = self.summaries
-        if "question_text" not in df.columns:
-            raise ValueError("summaries must contain 'question_text'")
-
-        # Decide input mode
-        has_themes = {"label", "contents"}.issubset(df.columns)
-        has_raw    = "summary" in df.columns
-        if not (has_themes or has_raw):
-            raise ValueError("summaries must have either ['label','contents'] or ['summary']")
-
-        out_rows = []
-
-        for qtext, qdf in df.groupby("question_text", sort=False):
-            # Build payload for this question
-            parts = [f"Question: {qtext}", ""]
-            if has_themes:
-                for _, r in qdf.iterrows():
-                    parts.append(f"Theme: {r['label']}\n{r['contents']}\n")
-            else:
-                for _, r in qdf.iterrows():
-                    parts.append(f"{r['summary']}\n")
-            payload = "\n".join(parts).strip()
-
-            # Call LLM
-            sys_prompt = Prompts().question_summaries()
-            fall_back = {"summary": ""}
-
-            resp = utils.call_chat_completion(
-                sys_prompt=sys_prompt,
-                user_prompt=payload,
-                llm_client=self.llm_client,
-                ai_model=self.ai_model,
-                return_json=True,
-                fall_back=fall_back,
-            )
-
-            out_rows.append({
-                "question_text": qtext,
-                "question_summary": (resp.get("summary") or "").strip(),
+        
+        title_exec_summary_df = pd.DataFrame({
+            "content": [title, exec_summary],
+            "doc_attr": ["title", "exec_summary"]
             })
 
-        if not out_rows:
-            return None
+        self.title_exec_summary_df = title_exec_summary_df
 
-        qsum = (
-            pd.DataFrame(out_rows)
-            .drop_duplicates(subset=["question_text"], keep="last")
-        )
+        self.title_exec_summary_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_title_exec_summary_df"] + ".parquet"), index=False)
 
-        # One summary per question_text
-        self.summaries = self.summaries.merge(qsum, on="question_text", how="left", validate="m:1")
-        return self.summaries
+        return self.title_exec_summary_df
 
-
-    def summary_to_doc(self, paper_title: str = None, summary_filename: str = None) -> str:
-        
-        def _sanitize(text: str) -> str:
-            control_chars = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
-            if text is None:
-                return ""
-            # ensure str
-            s = str(text)
-            # normalize unicode
-            s = unicodedata.normalize("NFC", s)
-            # drop XML-illegal control chars (keep \t, \n, \r)
-            s = control_chars.sub('', s)
-            return s
-        
-        if summary_filename is None:
-            summary_filename = "literature_review.docx"
-
-        if paper_title is None and hasattr(self, "title"):
-            paper_title = self.title
-        elif paper_title is None:
-            raise ValueError("Paper_title must be provided. Either pass it in summary_to_doc or call get_executive_summary() which will provide a title.")
-
-        doc = Document()
-        doc.add_heading(_sanitize(paper_title), level=0)
-
-        # Executive summary
-        if getattr(self, "exec_summary", None):
-            doc.add_heading("Executive summary", level=1)
-            for para in str(self.exec_summary).splitlines():
-                p = _sanitize(para)
-                if p.strip():
-                    doc.add_paragraph(p)
-            doc.add_page_break()
-        else: 
-            raise ValueError("exec_summary attribute not found. Please run gen_executive_summary() before exporting to doc.")
-
-        df = self.summaries.copy().reset_index(drop=False).rename(columns={"index": "_row"})
-        themed = {"label", "contents"}.issubset(df.columns)
-
-        if themed:
-            for question_text, qdf in df.groupby("question_text", sort=False):
-                doc.add_heading(_sanitize(question_text), level=1)
-                if "question_summary" in qdf.columns:
-                    qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
-                        if not qdf["question_summary"].dropna().empty else "")
-                    if qs.strip():
-                        doc.add_paragraph(_sanitize(qs))
-                qdf = qdf.sort_values("_row")
-                for _, r in qdf.iterrows():
-                    label = _sanitize(r.get("label", ""))
-                    contents = _sanitize(r.get("contents", ""))
-                    if label:
-                        doc.add_heading(f"Theme: {label}", level=2)
-                    if contents:
-                        for para in contents.splitlines():
-                            p = _sanitize(para)
-                            if p.strip():
-                                doc.add_paragraph(p)
-                doc.add_page_break()
-        else:
-            for question_text, qdf in df.groupby("question_text", sort=False):
-                doc.add_heading(_sanitize(question_text), level=1)
-                if "question_summary" in qdf.columns:
-                    qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
-                        if not qdf["question_summary"].dropna().empty else "")
-                    if qs.strip():
-                        doc.add_paragraph(_sanitize(qs))
-                qdf = qdf.sort_values("_row")
-                for _, r in qdf.iterrows():
-                    summ = _sanitize(r.get("summary", ""))
-                    if summ:
-                        for para in summ.splitlines():
-                            p = _sanitize(para)
-                            if p.strip():
-                                doc.add_paragraph(p)
-                doc.add_page_break()
-
-        
-        # Save
-        save_dir = self.output_save_location
-        os.makedirs(save_dir, exist_ok=True)
-        
-        out_path = os.path.join(save_dir, summary_filename)
-        doc.save(out_path)
-        
-        # Mark that doc has been generated - as flag for running the AI peer review (neccesary as all the steps for running the dog generation are needed for peer reviewn).
-        self.doc = True
-
-        return (
-            f'Word doc of the literature review generated and save here: {out_path}'
-        )
     
-    def get_ai_peer_review(self, 
-                           save_directory: str = None,
-                           save_filename: str = "ai_peer_review.parquet",
-                           output_length: int = 5000, 
-                           max_tokens: int = 10000) -> pd.DataFrame:
+    def stylistic_rewrite(self, style: str = "academic") -> pd.DataFrame:
         """
-        Request an AI peer review of the concatenated summaries.
+        Rewrites the themes in render_df in a specific style. Default is academic, but this can be varied (e.g. journalistic, conversational, engaging,etc) depending on user preference and intended audience. The rewrite will attempt to maintain the original meaning and insights while improving readability and engagement.
+        Also goes about varying the language to make the content more engaging and less monotonous. 
+        While this re-write intends to maintain complete fidelity any re-write risks some insight loss. 
+        This is an optional pass for the user if they want to prioritize readability over fidelity. 
+        """
+        # First check wheter a stylistic rewrite has already been done, if so offer reload or regenerate options
+        if hasattr(self, "stylized_rewrite_df"): 
+            rerun = None
+            while rerun not in ["1", "2"]:
+                rerun = input(
+                    "A stylistic rewrite of the themes has already been generated. Do you want to regenerate the stylistic rewrite?\n"
+                    "(1) Yes, regenerate the stylistic rewrite.\n" 
+                    "(2) No, keep the existing stylistic rewrite.\n"
+                    "(1/2):\n"
+                ).strip()
+                
+            if rerun == "2":
+                print("Keeping existing stylistic rewrite.")
+                return self.stylized_rewrite
+            else:                
+                print("Regenerating stylistic rewrite.")
+        
+        # Then check whether the summaries have already been generated. If they have, send a warning that it is better to run the stylistic re-write prior to summarizing so that the tone is carried through
+        if hasattr(self, "question_summary_df"):
+            abort = None
+            while abort not in ["1", "2"]:
+                abort = input(
+                    "You have already generated question summaries. It is generally recommended to do the stylistic rewrite before generating the question summaries so that the style is carried through to the question summaries. Do you want to proceed with the stylistic rewrite even though you have already generated question summaries?\n"
+                    "(1) Yes, proceed with the stylistic rewrite even though I have already generated question summaries.\n" 
+                    "(2) No, I want to do a stylistic rewrite before generating question summaries.\n"
+                    "(1/2):\n"
+                ).strip()
+
+                if abort == "2":
+                    print("Aborting stylistic rewrite so that you can do it before generating question summaries. Please run stylistic_rewrite() and then re-run gen_question_summaries() to generate the question summaries with the rewritten themes.")
+                    return(self.render_df)
+        
+        stylized_content_df_out = pd.DataFrame(columns=["stylized_text", "question_id", "theme_id"])
+
+        for qid in self.summary_to_render["question_id"].unique():
+            question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
+            # Place frozen content here so that it resets for each rq
+            frozen_content = ""
+            for idx, row in question_df.iterrows():
+                question_text = row["question_text"]
+                content = row["thematic_summary"]
+                theme_label = row["theme_label"]
+                theme_id = row["theme_id"]
+                sys_prompt = Prompts().stylistic_rewrite(style=style, index = idx)
+                user_prompt = (
+                    f"CURRENT RESEARCH QUESTION: {question_text}\n"
+                    "FROZEN CONTENT:\n"
+                    f"{frozen_content}\n\n"
+                    f"CURRENT THEME LABEL: {theme_label}\n"
+                    "THEMATIC SUMMARY TO STYLE:\n"
+                    f"{content}\n\n"
+                )
+                fall_back = {"refined_summary": ""}
+
+                json_schema = {
+                    "name": "stylistic_rewrite_generator",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "refined_summary": {
+                                "type": "string",
+                                "description": "Refined thematic summary text."
+                            }
+                        },
+                        "required": ["refined_summary"],
+                        "additionalProperties": False
+                    }
+                }
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    return_json=True,
+                    json_schema=json_schema,
+                    fall_back=fall_back
+                )
+
+                # Get the data, transform to df
+                stylized_content = response["refined_summary"]
+                stylized_content_df = pd.DataFrame({
+                    "stylized_text": [stylized_content],
+                    "question_d_id": [qid],
+                    "theme_id": [theme_id],
+                    })
+                
+                # Append to the output df
+                stylized_content_df_out = pd.concat([stylized_content_df_out, stylized_content_df], ignore_index=True)
+                frozen_content += f"{row['theme_label']}\n\n{stylized_content}\n\n"
+        
+        self.stylized_rewrite_df = stylized_content_df_out
+        self.stylized_rewrite_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_sylized_rewrite_df"] + ".parquet"), index=False)
+        return(stylized_content_df_out)
+    
+    def _add_question_summaries_to_render_df(self, render_df, question_summaries: list) -> pd.DataFrame:
+        """
+        Add question summaries to the render dataframe.
+        Outputs a dataframe with questions and summaries
+        This will still have to be integrated title and exec summary from the in render_df - this check happens in gen_question_summaries
+        """
+        working_render_df = render_df.copy()
+
+        # Separate the working_render_df into a list of dataframes, one for each question
+        list_of_qdfs = []
+        for qid in self.corpus_state.questions["question_id"].to_list():
+            question_df = working_render_df[working_render_df["question_id"] == qid].copy()
+            list_of_qdfs.append(question_df)
+        
+        # Concat the question summaries with the corresponding question dfs and create a new list of dataframes with summaries
+        list_of_qdfs_with_summaries = []
+        for qdf, q_summary in zip(list_of_qdfs, question_summaries):
+            question_summary_df = pd.DataFrame({
+                "content": [q_summary],
+                "doc_attr": ["question_summary"],
+                "question_id": [qdf["question_id"].iloc[0]]
+            })
+            qdf_with_summary = pd.concat([question_summary_df, qdf], ignore_index=True)
+            list_of_qdfs_with_summaries.append(qdf_with_summary)
+
+        # Concat the list of question dfs with summaries into a single dataframe
+        questions_with_summaries_df = pd.concat(list_of_qdfs_with_summaries, ignore_index=True)
+        # Return the resulting dataframe
+        return questions_with_summaries_df
+
+
+    def integrate_cosmetic_changes(self) -> pd.DataFrame:
+
+        # --- Hash validation ---
+        current_summary_hash = self._compute_df_hash(self.summary_to_render)
+        saved_hash_df = pd.read_parquet(os.path.join(self.render_path, self.render_hash))
+        saved_hash = saved_hash_df["summary_hash"].iloc[0]
+
+        if current_summary_hash != saved_hash:
+            raise ValueError(
+                "The summary_to_render has changed since Render initialization. "
+                "Reinitialize Render before integrating artifacts."
+            )
+
+        # --- Base render df ---
+        render_df = (
+            self.summary_to_render
+            .sort_values(by=["question_id", "theme_id"])
+            .copy()
+        )
+
+        render_df.rename(columns={"thematic_summary": "content"}, inplace=True)
+        render_df["doc_attr"] = "thematic_summary"
+
+        # --- Question summaries ---
+        if hasattr(self, "question_summary_df"):
+            render_df = self._add_question_summaries_to_render_df(
+                render_df,
+                self.question_summary_df
+            )
+
+        # --- Stylized rewrite ---
+        if hasattr(self, "stylized_rewrite_df"):
+            render_df = render_df.merge(
+                self.stylized_rewrite_df[["question_id", "theme_id", "stylized_text"]],
+                on=["question_id", "theme_id"],
+                how="left"
+            )
+            render_df["stylized_text"] = render_df["stylized_text"].fillna(render_df["content"])
+
+        # --- Title + Exec summary ---
+        if hasattr(self, "title_exec_summary_df"):
+            title_exec_df = self.title_exec_summary_df.copy()
+            title_exec_df["question_id"] = None
+            title_exec_df["theme_id"] = None
+            render_df = pd.concat([title_exec_df, render_df], ignore_index=True)
+
+        # --- Final ordering ---
+        render_df["doc_order"] = range(len(render_df))
+
+        # --- Save ---
+        self.render_df = render_df
+        render_df.to_parquet(
+            os.path.join(self.render_path, config.render_prefix["render_df"] + ".parquet"),
+            index=False
+        )
+        return self.render_df
+    
+    def render_output(
+        self,
+        output_type: str = "md",
+        use_stylized: bool = False,
+        filename: str = "rendered_output"
+    ) -> None:
+        """
+        Renders the integrated render_df into the selected output format.
 
         Args:
-            output_length: Suggested maximum word count for the review.
-            max_tokens: Hard limit on token usage for the AI model.
+            output_type: "md", "docx", or "pdf"
+            use_stylized: If True uses stylized_text when available.
+            filename: Base filename (no extension)
+        """
 
-        Returns:
-            AI review as a dataframe. If the review exceeds token budget, 'error' key may appear.
-        """        
-        # Function specific utilities ---------------------
-        # Get the RQ and summaries excluding the current RQ
-        def get_rq_summaries(self, current_rq_id) -> str:
-            output_parts = []
-            for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
-                if rq_id == current_rq_id:
-                    continue
-                else:
-                    output_parts.append(f"RESEARCH QUESTION:\n{rq_id}\n")
-                    question_summary = rq_df["question_summary"].iloc[0]
-                    output_parts.append(f"SUMMARY:\n{question_summary}\n")
-            return "\n".join(output_parts)
-        
-        # Get the RQ and its associated content
-        def get_rq_content(self, current_rq_id) -> str:
-            current_rq_df = self.summaries[self.summaries["question_id"] == current_rq_id]
-            current_rq_text = current_rq_df["question_text"].iloc[0]
-            output_parts = []
-            output_parts.append(f"RESEARCH QUESTION:\n{current_rq_text}\n")
-            themed = {"label", "contents"}.issubset(self.summaries.columns)
-            if themed:
-                for _, row in current_rq_df.iterrows():
-                    label = row["label"].strip()
-                    content = row["contents"].strip()
-                    output_parts.append(
-                        f"Theme: {label}\n"
-                        f"Summary: {content}\n"
-                    )
-
-                return "\n".join(output_parts)
-            
-            else:
-                for _, row in current_rq_df.iterrows():
-                    summary = row["summary"].strip()
-                    output_parts.append(f"Summary: {summary}\n")
-                return "\n".join(output_parts)
-        
-        # END UTILS -------------------------------
-
-        # Check that executive summary has been generated
-        if getattr(self, "exec_summary", None) is None:
-            raise ValueError("Please run gen_executive_summary() before requesting an AI peer review.")
-        
-        # Check that the peer review has not already been generated
-        if save_directory is None:
-            save_directory = self.summaries_folder
-
-        if os.path.exists(os.path.join(save_directory, save_filename)):
-            recover = None
-            while recover not in ["r", "n"]:
-                recover = input("AI peer review file already exists. Loading existing file. (r)eload or create (n)ew? ")
-            if recover == "r":
-                self.ai_peer_review = pd.read_parquet(os.path.join(save_directory, save_filename))
-                return self.ai_peer_review
-            else:
-                print("Generating new AI peer review and overwriting existing file.")
-
-        # Populate the list that will form the prompt for the LLM
-        output_list = []
-        for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
-            output_parts = []
-            output_parts.append("INFORMATION FOR CONTEXT\n")
-            output_parts.append("EXECUTIVE SUMMARY:\n")
-            output_parts.append(self.exec_summary + "\n")
-            output_parts.append("OTHER RESEARCH QUESTIONS AND SUMMARIES:\n")
-            output_parts.append(get_rq_summaries(self, current_rq_id=rq_id))
-            output_parts.append("CURRENT RESEARCH QUESTION AND CONTENT:\n")
-            output_parts.append(get_rq_content(self, current_rq_id=rq_id))
-
-            output_string = "\n".join(output_parts)
-            
-            # Call the reasoning model
-            resp = utils.call_reasoning_model(
-                prompt=Prompts().ai_peer_review(
-                    lit_review=output_string,
-                    output_length=output_length,
-                    max_tokens=max_tokens,
-                    themed={"label", "contents"}.issubset(self.summaries.columns)
-                ),
-                llm_client=self.llm_client,
-                ai_model=self.ai_model,
-                timeout=1200
+        if not hasattr(self, "render_df"):
+            raise ValueError(
+                "render_df not found. Please run integrate_cosmetic_changes() first."
             )
 
-            # Handle the response with a retry to clean the JSON via an LLM
-            try:
-                response_dict = json.loads(resp)
-            except json.JSONDecodeError:
-                response_retry = utils.llm_json_clean(x = resp,
-                                                prompt = Prompts().peer_review_format_check(),
-                                                llm_client=self.llm_client,
-                                                ai_model=self.ai_model)
-                response_dict = json.loads(response_retry)
+        if output_type not in ["md", "docx", "pdf"]:
+            raise ValueError("output_type must be one of: 'md', 'docx', 'pdf'.")
 
-            overall_comment_df = pd.DataFrame({"comment_id": "overall", 
-                                               "comment": response_dict.get("overall_comment"),
-                                               "severity": pd.NA, 
-                                               "location": "overall"}, index=[0])
+        df = self.render_df.copy()
+
+        # Choose text source
+        if use_stylized and "stylized_text" in df.columns:
+            df["final_text"] = df["stylized_text"].fillna(df["content"])
+        else:
+            df["final_text"] = df["content"]
+
+        # Dispatch
+        if output_type == "md":
+            self._render_to_markdown(df, filename)
+
+        elif output_type == "docx":
+            self._render_to_docx(df, filename)
+
+        elif output_type == "pdf":
+            self._render_to_pdf(df, filename)
+
+        print(f"Render complete: {filename}.{output_type}")
+
+
+    def _render_to_markdown(self, df, filename):
+
+        lines = []
+
+        for _, row in df.sort_values("doc_order").iterrows():
+
+            text = row["final_text"]
+            attr = row["doc_attr"]
+
+            if attr == "title":
+                lines.append(f"# {text}\n")
+
+            elif attr == "exec_summary":
+                lines.append(f"{text}\n")
+
+            elif attr == "question_summary":
+                lines.append(f"## Question Overview\n{text}\n")
+
+            elif attr == "thematic_summary":
+                lines.append(f"### {row.get('theme_label','')}\n{text}\n")
+
+        output_path = os.path.join(self.output_save_location, f"{filename}.md")
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    def _render_to_docx(self, df, filename):
+
+        document = Document()
+
+        for _, row in df.sort_values("doc_order").iterrows():
+
+            text = row["final_text"]
+            attr = row["doc_attr"]
+
+            if attr == "title":
+                document.add_heading(text, level=0)
+
+            elif attr == "exec_summary":
+                document.add_paragraph(text)
+
+            elif attr == "question_summary":
+                document.add_heading("Question Overview", level=1)
+                document.add_paragraph(text)
+
+            elif attr == "thematic_summary":
+                document.add_heading(row.get("theme_label",""), level=2)
+                document.add_paragraph(text)
+
+        output_path = os.path.join(self.output_save_location, f"{filename}.docx")
+        document.save(output_path)
+
+    def _render_to_docx(self, df, filename):
+
+        document = Document()
+
+        for _, row in df.sort_values("doc_order").iterrows():
+
+            text = row["final_text"]
+            attr = row["doc_attr"]
+
+            if attr == "title":
+                document.add_heading(text, level=0)
+
+            elif attr == "exec_summary":
+                document.add_paragraph(text)
+
+            elif attr == "question_summary":
+                document.add_heading("Question Overview", level=1)
+                document.add_paragraph(text)
+
+            elif attr == "thematic_summary":
+                document.add_heading(row.get("theme_label",""), level=2)
+                document.add_paragraph(text)
+
+        output_path = os.path.join(self.output_save_location, f"{filename}.docx")
+        document.save(output_path)
+
+    
+    
+    
+    
+    
+    
+    
+    # def summary_to_doc(self, paper_title: str = None, summary_filename: str = None) -> str:
+        
+    #     def _sanitize(text: str) -> str:
+    #         control_chars = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
+    #         if text is None:
+    #             return ""
+    #         # ensure str
+    #         s = str(text)
+    #         # normalize unicode
+    #         s = unicodedata.normalize("NFC", s)
+    #         # drop XML-illegal control chars (keep \t, \n, \r)
+    #         s = control_chars.sub('', s)
+    #         return s
+        
+    #     if summary_filename is None:
+    #         summary_filename = "literature_review.docx"
+
+    #     if paper_title is None and hasattr(self, "title"):
+    #         paper_title = self.title
+    #     elif paper_title is None:
+    #         raise ValueError("Paper_title must be provided. Either pass it in summary_to_doc or call get_executive_summary() which will provide a title.")
+
+    #     doc = Document()
+    #     doc.add_heading(_sanitize(paper_title), level=0)
+
+    #     # Executive summary
+    #     if getattr(self, "exec_summary", None):
+    #         doc.add_heading("Executive summary", level=1)
+    #         for para in str(self.exec_summary).splitlines():
+    #             p = _sanitize(para)
+    #             if p.strip():
+    #                 doc.add_paragraph(p)
+    #         doc.add_page_break()
+    #     else: 
+    #         raise ValueError("exec_summary attribute not found. Please run gen_executive_summary() before exporting to doc.")
+
+    #     df = self.summaries.copy().reset_index(drop=False).rename(columns={"index": "_row"})
+    #     themed = {"label", "contents"}.issubset(df.columns)
+
+    #     if themed:
+    #         for question_text, qdf in df.groupby("question_text", sort=False):
+    #             doc.add_heading(_sanitize(question_text), level=1)
+    #             if "question_summary" in qdf.columns:
+    #                 qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
+    #                     if not qdf["question_summary"].dropna().empty else "")
+    #                 if qs.strip():
+    #                     doc.add_paragraph(_sanitize(qs))
+    #             qdf = qdf.sort_values("_row")
+    #             for _, r in qdf.iterrows():
+    #                 label = _sanitize(r.get("label", ""))
+    #                 contents = _sanitize(r.get("contents", ""))
+    #                 if label:
+    #                     doc.add_heading(f"Theme: {label}", level=2)
+    #                 if contents:
+    #                     for para in contents.splitlines():
+    #                         p = _sanitize(para)
+    #                         if p.strip():
+    #                             doc.add_paragraph(p)
+    #             doc.add_page_break()
+    #     else:
+    #         for question_text, qdf in df.groupby("question_text", sort=False):
+    #             doc.add_heading(_sanitize(question_text), level=1)
+    #             if "question_summary" in qdf.columns:
+    #                 qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
+    #                     if not qdf["question_summary"].dropna().empty else "")
+    #                 if qs.strip():
+    #                     doc.add_paragraph(_sanitize(qs))
+    #             qdf = qdf.sort_values("_row")
+    #             for _, r in qdf.iterrows():
+    #                 summ = _sanitize(r.get("summary", ""))
+    #                 if summ:
+    #                     for para in summ.splitlines():
+    #                         p = _sanitize(para)
+    #                         if p.strip():
+    #                             doc.add_paragraph(p)
+    #             doc.add_page_break()
+
+        
+    #     # Save
+    #     save_dir = self.output_save_location
+    #     os.makedirs(save_dir, exist_ok=True)
+        
+    #     out_path = os.path.join(save_dir, summary_filename)
+    #     doc.save(out_path)
+        
+    #     # Mark that doc has been generated - as flag for running the AI peer review (neccesary as all the steps for running the dog generation are needed for peer reviewn).
+    #     self.doc = True
+
+    #     return (
+    #         f'Word doc of the literature review generated and save here: {out_path}'
+    #     )
+    
+    # def get_ai_peer_review(self, 
+    #                        save_directory: str = None,
+    #                        save_filename: str = "ai_peer_review.parquet",
+    #                        output_length: int = 5000, 
+    #                        max_tokens: int = 10000) -> pd.DataFrame:
+    #     """
+    #     Request an AI peer review of the concatenated summaries.
+
+    #     Args:
+    #         output_length: Suggested maximum word count for the review.
+    #         max_tokens: Hard limit on token usage for the AI model.
+
+    #     Returns:
+    #         AI review as a dataframe. If the review exceeds token budget, 'error' key may appear.
+    #     """        
+    #     # Function specific utilities ---------------------
+    #     # Get the RQ and summaries excluding the current RQ
+    #     def get_rq_summaries(self, current_rq_id) -> str:
+    #         output_parts = []
+    #         for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
+    #             if rq_id == current_rq_id:
+    #                 continue
+    #             else:
+    #                 output_parts.append(f"RESEARCH QUESTION:\n{rq_id}\n")
+    #                 question_summary = rq_df["question_summary"].iloc[0]
+    #                 output_parts.append(f"SUMMARY:\n{question_summary}\n")
+    #         return "\n".join(output_parts)
+        
+    #     # Get the RQ and its associated content
+    #     def get_rq_content(self, current_rq_id) -> str:
+    #         current_rq_df = self.summaries[self.summaries["question_id"] == current_rq_id]
+    #         current_rq_text = current_rq_df["question_text"].iloc[0]
+    #         output_parts = []
+    #         output_parts.append(f"RESEARCH QUESTION:\n{current_rq_text}\n")
+    #         themed = {"label", "contents"}.issubset(self.summaries.columns)
+    #         if themed:
+    #             for _, row in current_rq_df.iterrows():
+    #                 label = row["label"].strip()
+    #                 content = row["contents"].strip()
+    #                 output_parts.append(
+    #                     f"Theme: {label}\n"
+    #                     f"Summary: {content}\n"
+    #                 )
+
+    #             return "\n".join(output_parts)
+            
+    #         else:
+    #             for _, row in current_rq_df.iterrows():
+    #                 summary = row["summary"].strip()
+    #                 output_parts.append(f"Summary: {summary}\n")
+    #             return "\n".join(output_parts)
+        
+    #     # END UTILS -------------------------------
+
+    #     # Check that executive summary has been generated
+    #     if getattr(self, "exec_summary", None) is None:
+    #         raise ValueError("Please run gen_executive_summary() before requesting an AI peer review.")
+        
+    #     # Check that the peer review has not already been generated
+    #     if save_directory is None:
+    #         save_directory = self.summaries_folder
+
+    #     if os.path.exists(os.path.join(save_directory, save_filename)):
+    #         recover = None
+    #         while recover not in ["r", "n"]:
+    #             recover = input("AI peer review file already exists. Loading existing file. (r)eload or create (n)ew? ")
+    #         if recover == "r":
+    #             self.ai_peer_review = pd.read_parquet(os.path.join(save_directory, save_filename))
+    #             return self.ai_peer_review
+    #         else:
+    #             print("Generating new AI peer review and overwriting existing file.")
+
+    #     # Populate the list that will form the prompt for the LLM
+    #     output_list = []
+    #     for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
+    #         output_parts = []
+    #         output_parts.append("INFORMATION FOR CONTEXT\n")
+    #         output_parts.append("EXECUTIVE SUMMARY:\n")
+    #         output_parts.append(self.exec_summary + "\n")
+    #         output_parts.append("OTHER RESEARCH QUESTIONS AND SUMMARIES:\n")
+    #         output_parts.append(get_rq_summaries(self, current_rq_id=rq_id))
+    #         output_parts.append("CURRENT RESEARCH QUESTION AND CONTENT:\n")
+    #         output_parts.append(get_rq_content(self, current_rq_id=rq_id))
+
+    #         output_string = "\n".join(output_parts)
+            
+    #         # Call the reasoning model
+    #         resp = utils.call_reasoning_model(
+    #             prompt=Prompts().ai_peer_review(
+    #                 lit_review=output_string,
+    #                 output_length=output_length,
+    #                 max_tokens=max_tokens,
+    #                 themed={"label", "contents"}.issubset(self.summaries.columns)
+    #             ),
+    #             llm_client=self.llm_client,
+    #             ai_model=self.ai_model,
+    #             timeout=1200
+    #         )
+
+    #         # Handle the response with a retry to clean the JSON via an LLM
+    #         try:
+    #             response_dict = json.loads(resp)
+    #         except json.JSONDecodeError:
+    #             response_retry = utils.llm_json_clean(x = resp,
+    #                                             prompt = Prompts().peer_review_format_check(),
+    #                                             llm_client=self.llm_client,
+    #                                             ai_model=self.ai_model)
+    #             response_dict = json.loads(response_retry)
+
+    #         overall_comment_df = pd.DataFrame({"comment_id": "overall", 
+    #                                            "comment": response_dict.get("overall_comment"),
+    #                                            "severity": pd.NA, 
+    #                                            "location": "overall"}, index=[0])
                  
 
-            specific_comments_df = pd.DataFrame(
-                response_dict.get("specific_comments", []), 
-                columns=["comment_id", "comment", "severity", "location"]
-            )
+    #         specific_comments_df = pd.DataFrame(
+    #             response_dict.get("specific_comments", []), 
+    #             columns=["comment_id", "comment", "severity", "location"]
+    #         )
 
 
-            output = pd.concat([overall_comment_df, specific_comments_df], ignore_index=True)
-            output["research_question_id"] = rq_id
-            output["research_question_text"] = rq_df["question_text"].iloc[0]
-            output["resubmit"] = response_dict.get("resubmit", False)
+    #         output = pd.concat([overall_comment_df, specific_comments_df], ignore_index=True)
+    #         output["research_question_id"] = rq_id
+    #         output["research_question_text"] = rq_df["question_text"].iloc[0]
+    #         output["resubmit"] = response_dict.get("resubmit", False)
 
-            output_list.append(output)
+    #         output_list.append(output)
 
-        output_df = pd.concat(output_list).reset_index(drop=True)
-        # Convert to string and fill missing severity with "None" so that parquet will accept it
-        output_df["severity"] = output_df["severity"].apply(lambda x: x if pd.notna(x) else "None")
-        # Also make all id str (handle int and "overall" fields)
-        output_df["comment_id"] = output_df["comment_id"].astype(str)
+    #     output_df = pd.concat(output_list).reset_index(drop=True)
+    #     # Convert to string and fill missing severity with "None" so that parquet will accept it
+    #     output_df["severity"] = output_df["severity"].apply(lambda x: x if pd.notna(x) else "None")
+    #     # Also make all id str (handle int and "overall" fields)
+    #     output_df["comment_id"] = output_df["comment_id"].astype(str)
 
-        self.ai_peer_review = output_df
+    #     self.ai_peer_review = output_df
 
-        os.makedirs(save_directory, exist_ok=True)
-        self.ai_peer_review.to_parquet(os.path.join(save_directory, save_filename), index=False)
+    #     os.makedirs(save_directory, exist_ok=True)
+    #     self.ai_peer_review.to_parquet(os.path.join(save_directory, save_filename), index=False)
         
-        return self.ai_peer_review
+    #     return self.ai_peer_review
     
-    def peer_review_to_doc(self):
-        if self.ai_peer_review is None:
-            print("No AI peer review data available. Please run get_ai_peer_review() first.")
-            return None
+    # def peer_review_to_doc(self):
+    #     if self.ai_peer_review is None:
+    #         print("No AI peer review data available. Please run get_ai_peer_review() first.")
+    #         return None
         
-        # Convert the AI peer review DataFrame to a formatted string or document
-        # This is a placeholder for actual document generation logic
-        doc = Document()
-        for _, row in self.ai_peer_review.iterrows():
-            doc.add_paragraph(f"Comment ID: {row['comment_id']}")
-            if row["severity"] is not None:
-                doc.add_paragraph(f"Severity: {row['severity']}")
-            if row["resubmit"]:
-                doc.add_paragraph("**Resubmission Required**")
-            if row["location"] == "overall":
-                doc.add_paragraph(f"Location: {row['research_question_text']}")
-            else:
-                doc.add_paragraph(f"Location: {row['research_question_text']} - {row['location']}")
-            doc.add_paragraph(f"Comment: {row['comment']}")
-            doc.add_paragraph("---------------------")
+    #     # Convert the AI peer review DataFrame to a formatted string or document
+    #     # This is a placeholder for actual document generation logic
+    #     doc = Document()
+    #     for _, row in self.ai_peer_review.iterrows():
+    #         doc.add_paragraph(f"Comment ID: {row['comment_id']}")
+    #         if row["severity"] is not None:
+    #             doc.add_paragraph(f"Severity: {row['severity']}")
+    #         if row["resubmit"]:
+    #             doc.add_paragraph("**Resubmission Required**")
+    #         if row["location"] == "overall":
+    #             doc.add_paragraph(f"Location: {row['research_question_text']}")
+    #         else:
+    #             doc.add_paragraph(f"Location: {row['research_question_text']} - {row['location']}")
+    #         doc.add_paragraph(f"Comment: {row['comment']}")
+    #         doc.add_paragraph("---------------------")
 
 
-        # Save
-        save_dir = self.output_save_location
-        os.makedirs(save_dir, exist_ok=True)
+    #     # Save
+    #     save_dir = self.output_save_location
+    #     os.makedirs(save_dir, exist_ok=True)
 
-        out_path = os.path.join(save_dir, "peer_review.docx")
-        doc.save(out_path)
+    #     out_path = os.path.join(save_dir, "peer_review.docx")
+    #     doc.save(out_path)
 
-        print(f"Peer review generated and saved to {out_path}")
+    #     print(f"Peer review generated and saved to {out_path}")
         

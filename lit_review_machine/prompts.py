@@ -897,85 +897,92 @@ class Prompts:
             "Do not include commentary."
         )
 
-    # def address_redundancy(self, label: str):
+    def stylistic_rewrite(self, style:str , label: str, index: int):
         
-    #     style_guidelines = {
-    #         "dominant": [
-    #             "Focus on the weight of evidence (e.g., 'The most prominent narrative identified...')",
-    #             "Use a structural framing (e.g., 'A primary pillar of the feedback relates to...')",
-    #             "Use an empirical lens (e.g., 'Participant responses were most densely clustered around...')",
-    #             "Use a centralizing opener (e.g., 'At the core of the user experience was...')",
-    #             "Focus on the frequency of observation (e.g., 'A recurring point of emphasis across the data was...')",
-    #             "Use a foundational approach (e.g., 'Fundamental to the participants\' perspective was...')",
-    #             "Highlight a consistent trend (e.g., 'A highly consistent pattern emerged regarding...')",
-    #             "Frame as a primary driver (e.g., 'The analysis suggests that the primary driver of participant sentiment was...')"
-    #         ],
-    #         "other": [
-    #             "Frame as divergent data (e.g., 'While not forming part of the dominant narrative, several minority positions emerged...')",
-    #             "Use a 'breadth' framing (e.g., 'The analysis also captured a series of distinct, outlier observations...')",
-    #             "Frame as complementary nuance (e.g., 'Beyond the main thematic clusters, participant feedback also touched upon...')",
-    #             "Use a 'niche' framing (e.g., 'Less frequent, but nonetheless significant, were reports regarding...')",
-    #             "Frame as localized insight (e.g., 'A subset of the data provided more localized insights into...')",
-    #             "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy perspectives also highlighted...')",
-    #             "Use a 'peripheral' framing (e.g., 'On the periphery of the core themes, some participants also raised...')",
-    #             "Frame as granular detail (e.g., 'Providing further granularity to the report, distinct observations were made regarding...')"
-    #         ],
-    #         "conflict": [
-    #             "Frame as a stark polarization (e.g., 'The research revealed a significant tension in participant feedback regarding...')",
-    #             "Use an 'internal friction' lens (e.g., 'A notable point of contradiction emerged where...')",
-    #             "Use a 'divergence' framing (e.g., 'Participant perspectives were sharply divided when discussing...')",
-    #             "Focus on the nuance of disagreement (e.g., 'The data reflects a complex landscape of conflicting views concerning...')",
-    #             "Frame as a lack of consensus (e.g., 'Consensus was noticeably absent regarding the topic of...')",
-    #             "Use a 'dualistic' framing (e.g., 'The feedback was characterized by a clear dichotomy between...')",
-    #             "Frame as an interpretative struggle (e.g., 'The data presents an interpretative challenge, as participants provided conflicting accounts of...')",
-    #             "Highlight competing priorities (e.g., 'A friction was identified between competing priorities, specifically...')"
-    #         ]
-    #     }
+        style_guidelines = {
+            "dominant": [
+                "Focus on the weight of evidence (e.g., 'The most prominent narrative identified...')",
+                "Use a structural framing (e.g., 'A primary pillar of the feedback relates to...')",
+                "Use an empirical lens (e.g., 'Participant responses were most densely clustered around...')",
+                "Use a centralizing opener (e.g., 'At the core of the user experience was...')",
+                "Focus on the frequency of observation (e.g., 'A recurring point of emphasis across the data was...')",
+                "Use a foundational approach (e.g., 'Fundamental to the participants\' perspective was...')",
+                "Highlight a consistent trend (e.g., 'A highly consistent pattern emerged regarding...')",
+                "Frame as a primary driver (e.g., 'The analysis suggests that the primary driver of participant sentiment was...')"
+            ],
+            "other": [
+                "Frame as divergent data (e.g., 'While not forming part of the dominant narrative, several minority positions emerged...')",
+                "Use a 'breadth' framing (e.g., 'The analysis also captured a series of distinct, outlier observations...')",
+                "Frame as complementary nuance (e.g., 'Beyond the main thematic clusters, participant feedback also touched upon...')",
+                "Use a 'niche' framing (e.g., 'Less frequent, but nonetheless significant, were reports regarding...')",
+                "Frame as localized insight (e.g., 'A subset of the data provided more localized insights into...')",
+                "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy perspectives also highlighted...')",
+                "Use a 'peripheral' framing (e.g., 'On the periphery of the core themes, some participants also raised...')",
+                "Frame as granular detail (e.g., 'Providing further granularity to the report, distinct observations were made regarding...')"
+            ],
+            "conflict": [
+                "Frame as a stark polarization (e.g., 'The research revealed a significant tension in participant feedback regarding...').",
+                "Use an 'internal friction' lens (e.g., 'A notable point of contradiction emerged where...').",
+                "Use a 'divergence' framing (e.g., 'Participant perspectives were sharply divided when discussing...').",
+                "Focus on the nuance of disagreement (e.g., 'The data reflects a complex landscape of conflicting views concerning...').",
+                "Frame as a lack of consensus (e.g., 'Consensus was noticeably absent regarding the topic of...').",
+                "Use a 'dualistic' framing (e.g., 'The feedback was characterized by a clear dichotomy between...').",
+                "Frame as an interpretative struggle (e.g., 'The data presents an interpretative challenge, as participants provided conflicting accounts of...').",
+                "Highlight competing priorities (e.g., 'A friction was identified between competing priorities, specifically...')."
+            ]
+        }
 
-    #     label_lower = label.lower()
-    #     if any(word in label_lower for word in ["other", "minority", "outlier"]):
-    #         category = "other"
-    #     elif any(word in label_lower for word in ["conflict", "tension", "contradiction"]):
-    #         category = "conflict"
-    #     else:
-    #         category = "dominant"
+        label_lower = label.lower()
+        if label_lower == "other":
+            category = "other"
+        elif label_lower in ["conflicts", "conflict"]:
+            category = "conflict"
+        else:
+            category = "dominant"
+        
+        guidelines = style_guidelines[category][index % len(style_guidelines[category])]  # Rotate through style guidelines for the category
 
-    #     guidelines = random.choice(style_guidelines[category])
+        return (
+            '# ROLE\n'
+            f'You are a Research Editor. Your task is to refine a {category.upper()} thematic summary into a cohesive, dynamic narrative in an {style} style.\n\n'
 
-    #     return (
-    #         '# ROLE\n'
-    #         f'You are an Academic Research Editor. Your task is to refine a {category.upper()} thematic summary into a cohesive, non-redundant narrative.\n\n'
+            '# TASK\n'
+            'You will receive a thematic summary that potentially contains monotonous or mechanical phrasing and prose. '
+            'Your task is to refine the thematic summary into a cohesive, dynamic narrative.\n'
+            'To achieve this task you will receive previously cleaned up summaries as frozen context as well as the summary to clean.\n'
 
-    #         '# TASK\n'
-    #         'You will receive a thematic summary that potentially contains some redundancy with other themes due to overlapping insights in the generation of these summaries. '
-    #         'Your task is to refine the thematic summary into a cohesive, non-redundant narrative.\n'
-    #         'To achieve this task you will recieve previously cleaned up summaries as frozen conext as well as the summary to clean.\n'
+            '# INPUT FORMAT\n'
+            'CURRENT RESEARCH QUESTION: <question_text>\n'
+            'FROZEN CONTEXT:\n'
+            '<frozen_context>\n'
+            'CURRENT THEME LABEL: <theme_label>\n'
+            'THEMATIC SUMMARY TO STYLE:\n'
+            '<thematic summary to clean>\n\n'
 
-    #         '# INPUT FORMAT\n'
-    #         'RESEARCH QUESTION: <question_text>\n'
-    #         f'THEME LABEL: {label}\n'
-    #         'FROZEN CONTEXT:\n'
-    #         '<frozen_context>\n'
-    #         'SUMMARY TO CLEAN:\n'
-    #         '<summary_to_clean>\n\n'
+            "OUTPUT FORMAT:\n"
+                '{\n'
+                '  "refined_summary": "<Your refined thematic summary text here>"\n'
+                '}\n\n'
 
-    #         '# MANDATORY OPENING STYLE\n'
-    #         f'You MUST open this theme by invoking a relevant spin on this specific guidance: {guidelines}\n\n'
+            '# MANDATORY OPENING STYLE\n'
+            f'Begin this theme using a refined framing inspired by the following stylistic guidance: {guidelines}. Ensure the phrasing feels natural and integrated into the narrative.\n\n'
 
-    #         '# EDITORIAL GUIDELINES\n'
-    #         '- **Zero Information Loss**: Every data point, finding, and citation from the TARGET THEME must be retained. Do not prune.\n'
-    #         '- **Explicit Linkage**: Use the FROZEN CONTEXT (previously written themes) to create narrative bridges. If information is repeated, do not delete it; instead, make the connection explicit (e.g., "As noted in the previous section..." or "Consistent with earlier findings...").\n'
-    #         '- **Academic Tone**: Use creative, professional academic prose. Avoid monotonic "Theme X is..." structures.\n'
-    #         '- **Citation Integrity**: Preserve all citations [ID_1, ID_2] exactly as they appear.\n\n'
+            '# EDITORIAL GUIDELINES\n'
+            '- **Zero Information Loss**: Every data point, finding, and citation from the ORIGINAL THEME must be retained. Do not prune.\n'
+            '- Maintain approximate length parity with the original summary.\n'
+            '- Do not compress, expand, or alter substantive meaning.\n'
+            '- **Explicit Linkage**: Use the FROZEN CONTEXT (previously written themes) to create narrative bridges. If information is repeated, do not delete it; instead, make the connection explicit (e.g., "As noted in the previous section..." or "Consistent with earlier findings...").\n'
+            '- **Dynamic Tone**: Use varied, professional prose. Avoid monotonic "Theme X is..." structures and repeated phrasing.\n'
+            '- **Citation Integrity**: Preserve all citations (author date) exactly as they appear.\n\n'
 
-    #         '# NOTES\n'
-    #         '- This is a refinement process, not a rewrite. The core content must remain intact; your role is to enhance clarity and coherence while eliminating redundancy.\n'
-    #         '- If there is no frozen context (i.e., this is the first theme), simply follow the opening style guidance and ensure a strong, engaging introduction to the theme.\n\n'
+            '# NOTES\n'
+            '- This is a refinement process, not a rewrite. The core content must remain intact; your role is to enhance prose while maintaining coherence and keeping to the specified style.\n'
+            '- If there is no frozen context (i.e., this is the first theme), simply follow the opening style guidance and ensure a strong, engaging introduction to the theme.\n\n'
 
-    #         '# OUTPUT PROTOCOL\n'
-    #         '- Return ONLY a JSON object with the key "refined_summary".\n'
-    #         '- Do not provide preamble or commentary.'
-    #     )
+            '# OUTPUT PROTOCOL\n'
+            '- Return ONLY a JSON object with the key "refined_summary".\n'
+            '- Do not provide preamble or commentary.'
+        )
 
 
 
@@ -1017,13 +1024,16 @@ class Prompts:
     
     def question_summaries(self):
         return (
-            "You synthesize thematic content for a specific research question. Do not invent facts. Use only the provided content.\n\n"
+            "## ROLE\n"
+            "You are an agent specialized in text synthesis. Your task is to synthesize thematic descriptions for a specific research question. Do not invent facts. Use only the provided content.\n"
+            "You will receive the research question and the full thematic summaries. The boundary between each theme will be clearly marked.\n"
+            "The content you generate will appear between the question text and the first theme. It is intended to overview the thematic landscape that follows and to orient the reader to the way the question was answered.\n\n"
 
             "## INPUT FORMAT\n"
             "- Research question: <question_text>\n"
             "- CONTENT TO SUMMARIZE:\n"
-            "<content_para_1>\n"
-            "<content_para_2>\n"
+            "<theme_1>\n"
+            "<theme_2>\n"
             "...\n\n"
 
             "## OUTPUT FORMAT\n"
@@ -1032,11 +1042,12 @@ class Prompts:
             '}\n\n'
 
             "## INSTRUCTIONS\n"
-            "- Write a single paragraph (3–5 sentences) that previews what follows.\n"
+            "- Write a single paragraph (3-5 sentences) that previews what follows.\n"
             "- Be specific but concise. Synthesize; do not list every detail.\n"
             "- Maintain fidelity to the content. No new claims, numbers, or sources.\n"
+            "- Do not introduce causal interpretations or policy implications unless explicitly present in the content.\n"
             "- Keep formal academic tone. No headings, no bullets, no first person, no meta commentary.\n"
-            "- Address the research question implicitly; do not restate it verbatim.\n"
+            "- Ensure the paragraph clearly answers the research question through synthesis, without restating it verbatim.\n"
             "- Avoid duplication: do not repeat long phrases from the content; abstract them.\n"
             "- If the content clearly enumerates themes, you may note the count briefly (e.g., 'three themes'). Only do this when unambiguous.\n"
             "- End at a natural sentence boundary. Output valid JSON only."
