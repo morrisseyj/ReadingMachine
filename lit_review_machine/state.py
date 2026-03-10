@@ -319,7 +319,7 @@ class CorpusState:
         Only includes fields relevant to downstream summarization.
         """
 
-        relevant_columns = ["insight_id", "insight", "cluster_id"]
+        relevant_columns = ["insight_id", "insight", "cluster"]
 
         df = self.insights[relevant_columns].copy()
 
@@ -743,13 +743,19 @@ class SummaryState:
 
         for df_list in state_lists:
             if df_list:
-                df_list = (
-                    df_list[-1].fillna("__NULL__")
+                df = df_list[-1].copy()
+
+                df = (
+                    df.fillna("__NULL__")
                     .sort_index(axis=1)
-                    .sort_values(by=sorted(df_list.columns))
+                    .sort_values(by=sorted(df.columns))
                     .reset_index(drop=True)
                 )
-                parts.append(_hash_dataframe(df_list))
+
+                json_bytes = df.to_json().encode("utf-8")
+                hashed_df = hashlib.sha256(json_bytes).hexdigest()
+
+                parts.append(hashed_df)
             else:
                 parts.append("EMPTY")
 

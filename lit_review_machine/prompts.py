@@ -510,8 +510,8 @@ class Prompts:
     #     )
     
     def gen_theme_schema(self):
-       return(
-           "## ROLE\n"
+        return(
+            "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
             "Your task is to analyze the provided text and design a 'Thematic Codebook' "
             "that maps the semantic landscape while ensuring total coverage of the ideas expressed.\n"
@@ -522,16 +522,23 @@ class Prompts:
             "Themes must be conceptually exclusive—each should represent a distinct semantic territory.\n\n"
 
             "2. **Identify Discursive Conflicts (Conditional):** "
-            "If the text indicates structured disagreement, contradiction, or trade-offs, "
-            "you MUST create a theme object where the field \"theme_label\" is exactly \"Conflicts\". "
-            "Do NOT paraphrase this label. Do NOT rename it. Use exactly \"Conflicts\". "
-            "If no meaningful tension exists, OMIT this theme entirely.\n\n"
+            "If and only if the text contains substantively incompatible interpretations, "
+            "claims, or prescriptions that cannot be jointly maintained within a single "
+            "coherent analytical frame, create a theme object where \"theme_label\" is exactly \"Conflicts\".\n\n"
+            "Do NOT paraphrase or rename this label. Use exactly \"Conflicts\".\n\n"
+            "Do NOT create a Conflicts theme if the text merely:\n"
+            "- Presents multiple reinforcing critiques,\n"
+            "- Describes layered constraints or complexities,\n"
+            "- Articulates trade-offs within a shared analytical orientation,\n"
+            "- Or expresses variations that do not represent incompatible positions.\n\n"
+            "A Conflicts theme requires identifiable polarity between positions. "
+            "If no such incompatibility exists, omit this theme entirely.\n\n"
 
             "3. **Identify 'Other' Category (Conditional):** "
             "If necessary to ensure full semantic coverage without inducing theme bloat, "
-            "you MUST create a theme object where the field \"theme_label\" is exactly \"Other\". "
-            "Do NOT paraphrase this label. Do NOT rename it. Use exactly \"Other\". "
-            "If no minority or residual concepts exist, OMIT this theme entirely.\n\n"
+            "create a theme object where the field \"theme_label\" is exactly \"Other\".\n"
+            "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n"
+            "If no minority or residual concepts exist, omit this theme entirely.\n\n"
 
             "4. **Establish Precise Instructions:** Every category must have bespoke instructions. "
             "Use the following logic styles:\n"
@@ -566,8 +573,11 @@ class Prompts:
             "The 'EXCLUDE' criteria for a theme should explicitly reference the territories of other themes "
             "to prevent conceptual overlap.\n"
             "- **Relational Flagger (Conflicts):** The theme whose \"theme_label\" is \"Conflicts\" "
-            "is a secondary overlay. It must NOT use standard 'Exclusion' logic. "
-            "Use DETECTION TRIGGERS to explicitly define opposing positions or fault lines. "
+            "is a secondary overlay. It must NOT use standard 'EXCLUDE' logic. "
+            "Use DETECTION TRIGGERS to define the precise dimension along which "
+            "positions are incompatible (e.g., interpretation, causal explanation, "
+            "normative claim, or proposed course of action). "
+            "The object of disagreement must be explicitly stated in abstract terms. "
             "When generating a Conflicts category, preserve polarity rather than harmonizing positions.\n"
             "- **The 'Other' Bucket:** The theme whose \"theme_label\" is \"Other\" prevents theme bloat. "
             "It should house valid but lower-frequency ideas that do not warrant a standalone theme. "
@@ -752,6 +762,10 @@ class Prompts:
             "7. Tone:\n"
             "   Maintain a formal, academic, analytic tone.\n\n"
 
+            "NOTE\n"
+            "Some insights may be duplicates. If the exact same claims appears in multiple insights with the same citation, treat it as a single point. " 
+            "However, if the same claim is supported by distinct citations in different insights, this should increase its salience and be reflected in the synthesis accordingly.\n\n"
+
             f"{specific_instructions}"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n\n"
@@ -766,7 +780,7 @@ class Prompts:
     def identify_orphans(self):
         return(
             '# ROLE\n'
-            'You are a Research Auditor. Your task is to verify the "groundedness" of a thematic summary by mapping source insights to the text.\n\n'
+            'You are a Research Auditor. Your task is to verify the groundedness of a thematic summary by mapping source insights to the text.\n\n'
 
             '# TASK\n'
             'I will provide you with:\n'
@@ -781,22 +795,27 @@ class Prompts:
             '<insight_id_2>: <insight_text_2>\n'
             '...\n\n'
 
-            'You must determine which specific insights are reflected in the summary.\n\n'
+            'You must determine which specific insights are substantively reflected in the summary.\n\n'
 
-            '# DEFINITION OF "MENTIONED"\n'
-            'An insight is considered "mentioned" if:\n'
-            '- Its core finding is present in the summary, even if the language is more abstract or generalized.\n'
-            '- It provides supporting evidence for a claim made in the summary.\n'
-            '- It is part of a group of insights that have been synthesized into a single broader sentence.\n\n'
+            '# DEFINITION OF "REFLECTED"\n'
+            'An insight is considered reflected if:\n'
+            '- Its core claim, finding, or argument is clearly represented in the summary, even if expressed at a higher level of abstraction.\n'
+            '- It meaningfully contributes to a synthesized claim in the summary.\n'
+            '- It is incorporated as part of a broader grouping of similar insights without loss of its substantive meaning.\n\n'
 
-            'An insight is "omitted" ONLY if:\n'
-            '- The summary completely ignores the specific data point or observation.\n'
-            '- The summary contradicts the insight without acknowledging the tension.\n\n'
+            'An insight is NOT reflected if:\n'
+            '- The specific claim, finding, or argument is absent from the summary.\n'
+            '- The summary contradicts the insight without explicitly acknowledging that tension.\n'
+            '- The insight is reduced to a vague generalization that erases its substantive contribution.\n\n'
+
+            '# IMPORTANT\n'
+            '- Reflection requires substantive representation, not mere topic overlap.\n'
+            '- Do not infer inclusion unless the summary clearly captures the insight’s conceptual contribution.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
             '- The object must contain a single key "mentioned_insight_ids" containing an array of strings.\n'
-            '- Only include IDs from the provided list that are reflected in the summary.\n'
+            '- Only include IDs from the provided list that are substantively reflected in the summary.\n'
             '- Do not provide explanations or commentary.\n\n'
 
             '# JSON SCHEMA\n'
@@ -808,13 +827,13 @@ class Prompts:
     def integrate_orphans(self):
         return (
             '# ROLE\n'
-            'You are a Research Synthesizer. Your task is to update an existing thematic summary to include specific insights that were previously omitted.\n\n'
+            'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected.\n\n'
 
             '# TASK\n'
             'I will provide you with:\n'
-            '1. THEMATIC CONTEXT: The Theme Label, theme Description, and research question the theme forms a partial answer to.\n'
+            '1. THEMATIC CONTEXT: The Theme Label, Theme Description, and Research Question.\n'
             '2. ORIGINAL SUMMARY: The current version of the summary.\n'
-            '3. ORPHAN INSIGHTS: A list of relevant insights that MUST be integrated.\n\n'
+            '3. ORPHAN INSIGHTS: A list of insights that must be integrated.\n\n'
 
             '# INPUT FORMAT\n'
             'RESEARCH QUESTION: <question_text>\n'
@@ -828,26 +847,44 @@ class Prompts:
             '<insight_text_2>\n'
             '...\n\n'
 
+            '# OBJECTIVE\n'
+            'Produce a revised summary in which every orphan insight is substantively reflected, '
+            'using the same definition of reflection as defined below.\n\n'
+
+            '# DEFINITION OF "REFLECTED"\n'
+            'An orphan insight is reflected if:\n'
+            '- Its core claim, finding, or argument is clearly represented in the revised summary.\n'
+            '- It contributes meaningfully to a synthesized claim.\n'
+            '- Its substantive contribution is preserved even if phrased at a higher level of abstraction.\n\n'
+
+            'An orphan insight is NOT reflected if:\n'
+            '- It is only loosely implied without preserving its conceptual contribution.\n'
+            '- It is reduced to a vague generalization that erases its distinct meaning.\n\n'
+
             '# INTEGRATION GUIDELINES\n'
             '- DO NOT remove or contradict existing findings in the original summary.\n'
-            '- EXPAND the narrative to weave in the new insights naturally.\n'
-            '- MAINTAIN the original level of abstraction; do not just "tack on" a list of facts.\n'
-            '- ENSURE the final summary remains a cohesive, grounded synthesis.\n'
-            '- If the new insights introduce a contradiction or a nuance, explicitly state that tension within the theme summary. Do not hide or smooth over contradictions.\n'
-            '- Preserve all citations exactly as they appear in the source insights. If multiple insights support a single claim, list all relevant citations together.\n'
-            '- Use the research questions and theme description as guiding "North Stars" to ensure the integrated summary remains focused and coherent.\n\n'
+            '- EXPAND or refine the narrative where necessary to integrate orphan insights coherently.\n'
+            '- MAINTAIN the existing abstraction level; do not append isolated sentences mechanically.\n'
+            '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
+            '- Preserve all citations exactly as they appear in the source insights.\n'
+            '- Multiple insights may be synthesized together, but each must remain substantively represented.\n'
+            '- Use the Research Question and Theme Description as guiding constraints.\n\n'
+
+            '# CONVERGENCE REQUIREMENT\n'
+            'After revision, the updated summary should allow an auditor applying the reflection definition '
+            'to identify all orphan insights as reflected.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
-            '- The object must contain a single key "updated_summary" containing the full, revised text.\n'
+            '- The object must contain a single key "updated_summary".\n'
             '- Do not provide explanations, preamble, or commentary.\n\n'
 
             '# JSON SCHEMA\n'
             '{\n'
-            '  "updated_summary": "The full revised text of the thematic summary..."\n'
+            '  "updated_summary": "The full revised thematic summary..."\n'
             '}'
         )
-
+    
     def address_redundancy(self):
         return (
             "# ROLE\n"

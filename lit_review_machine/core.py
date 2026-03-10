@@ -1650,7 +1650,8 @@ class Summarize:
 
         else:
             # Clear out existing summaries if we are regenerating
-            os.remove(summary_save_location)  
+            for file in Path(summary_save_location).glob("*.parquet"):
+                file.unlink()  
             # And load the empty summary_state
             self.summary_state = SummaryState(summary_save_location=summary_save_location)
 
@@ -2414,6 +2415,15 @@ class Summarize:
             # This is duplicative because we tested earlier, but this makes the logic more explicit
             if schema_len < 1:
                 raise ValueError("No schema available to map.")
+            
+            # If no mappings exist and there is no resume and as we are not forcing, then we should run under normal mode (i.e. a fresh run)
+            mapped_insights_df = self._map_insights_via_llm(
+                batch_size=batch_size,
+                already_mapped_insight_ids=[],
+                mapped_insights_df_list=[],
+                in_progress_path=in_progress_path,
+                mode="normal"
+            )
         
         #### --------------------------------------------------
         #### FINALIZATION ON NORMAL MODE (non-force)
