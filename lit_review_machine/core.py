@@ -2038,13 +2038,15 @@ class Summarize:
 
             # Rewind to just before the last schema pass
             last_index = schema_len - 1
-            self.rewind_to("schema", last_index)
+            self.summary_state.rewind_to("schema", last_index)
 
-            source_name = (
-                "cluster summaries"
-                if last_index == 0 and populate_len == 0
-                else "populated themes"
-            )
+            # Re-evaluate state AFTER rewind
+            populate_len_after = len(self.summary_state.populated_theme_list)
+
+            if last_index == 0 and populate_len_after == 0:
+                source_name = "cluster summaries"
+            else:
+                source_name = "populated themes"
 
             new_schema = self._run_llm_schema_gen(source=source_name)
 

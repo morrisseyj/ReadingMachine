@@ -158,7 +158,7 @@ cluster.cum_prop_cluster.to_html("cum_prop_cluster.html")
 # For this small corpus i am happy with the way the clusters look so i don't pass any dict.
 cluster.clean_clusters()
 
-
+reload()
 
 # Now we move to summarizing the clusters and generating the themes. 
 # Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
