@@ -11,6 +11,9 @@ SUMMARY_SAVE_LOCATION = os.path.join(STATE_SAVE_LOCATION, "summaries")
 # Location in which the render objects are saved after the rendering step of the pipeline completes
 RENDER_SAVE_LOCATION = os.path.join(STATE_SAVE_LOCATION, "renders")
 
+# Location in which the final outputs are saved after the output generation from the render class
+OUTPUT_SAVE_LOCATION = os.path.join(os.getcwd(), "outputs")
+
 # Location in which the paper chunks are saved after the chunking step of the pipeline completes
 PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
 
@@ -33,3 +36,4 @@ render_prefix = {
     "render_question_summary_df": "render_question_summary_df", # The df that contains the question summaries for the render
     "render_stylized_rewrite_df": "render_stylized_rewrite_df" # The df that contains the stylized rewrites for the render
 }
+

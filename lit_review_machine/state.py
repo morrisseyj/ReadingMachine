@@ -375,371 +375,386 @@ class CorpusState:
     #             setattr(self, attr_name, attr_value)
     
 
-    class SummaryState:
+class SummaryState:
+    """
+    Holds all interpretive artifacts generated during the summarization stage.
+
+    Attributes
+    ----------
+    cluster_summary_list : List[pd.DataFrame]
+    theme_schema_list : List[pd.DataFrame]
+    mapped_theme_list : List[pd.DataFrame]
+    populated_theme_list : List[pd.DataFrame]
+    orphan_list : List[pd.DataFrame]
+    redundancy_list : List[pd.DataFrame]
+
+    This object represents the full state of the thematic summarization pipeline.
+
+    The SummaryState is distinguished from CorpusState as the latter is focused on tracking the way insights are developed, SummaryState tracks the evolution of the summary artefacts
+    """
+    def __init__(
+        self,
+        summary_save_location: str = config.SUMMARY_SAVE_LOCATION,
+    ) -> None:
+        self.summary_save_location = summary_save_location
+
+        # Ensure summary save location exists
+        if not os.path.exists(self.summary_save_location):
+            os.makedirs(self.summary_save_location, exist_ok=True)
+
+        self.cluster_summary_list = []
+        self.theme_schema_list = []
+        self.mapped_theme_list = []
+        self.populated_theme_list = []
+        self.orphan_list = []
+        self.redundancy_list = []
+
+    @classmethod
+    def load(cls, summary_save_location:str = config.SUMMARY_SAVE_LOCATION) -> "SummaryState":
         """
-        Holds all interpretive artifacts generated during the summarization stage.
-
-        Attributes
-        ----------
-        cluster_summary_list : List[pd.DataFrame]
-        theme_schema_list : List[pd.DataFrame]
-        mapped_theme_list : List[pd.DataFrame]
-        populated_theme_list : List[pd.DataFrame]
-        orphan_list : List[pd.DataFrame]
-        redundancy_list : List[pd.DataFrame]
-
-        This object represents the full state of the thematic summarization pipeline.
-
-        The SummaryState is distinguished from CorpusState as the latter is focused on tracking the way insights are developed, SummaryState tracks the evolution of the summary artefacts
+        Class method that allows us to load summary state from file, which otherwise would initalize with an empty list
         """
-        def __init__(
-            self,
-            summary_save_location: str = config.SUMMARY_SAVE_LOCATION,
-        ) -> None:
-            self.summary_save_location = summary_save_location
 
-            # Ensure summary save location exists
-            if not os.path.exists(self.summary_save_location):
-                os.makedirs(self.summary_save_location, exist_ok=True)
+        state = cls(summary_save_location=summary_save_location)
 
-            # Reload any runs that might have already happened, or create place holders for that data. 
-            # These are in a different form to corpus_state - as we start collapsing insights - so we want to be able to exhaust them sommewhere so all mutations can be tracked and inspected
-            self.cluster_summary_list = self.load(config.summary_state_prefix["cluster_summary_list"]) # List of len(1) containing the cluster summaries
-            self.theme_schema_list = self.load(config.summary_state_prefix["theme_schema_list"]) # List of len(n) containing the theme schemas for each re-theming pass
-            self.mapped_theme_list = self.load(config.summary_state_prefix["mapped_theme_list"]) # List of len(n) containing the mapped themes for each theme mapping pass
-            self.populated_theme_list = self.load(config.summary_state_prefix["populated_theme_list"]) # List of len(n) containing the populated themes for each theme population pass
-            self.orphan_list = self.load(config.summary_state_prefix["orphan_list"]) # List of len(n) containing the orphaned insights for each theme population pass
-            self.redundancy_list = self.load(config.summary_state_prefix["redundancy_list"]) # List of len(1) containing the output of the final redundancy pass
+        state.cluster_summary_list = state._load_attribute_from_file(config.summary_state_prefix["cluster_summary_list"]) # List of len(1) containing the cluster summaries
+        state.theme_schema_list = state._load_attribute_from_file(config.summary_state_prefix["theme_schema_list"]) # List of len(n) containing the theme schemas for each re-theming pass
+        state.mapped_theme_list = state._load_attribute_from_file(config.summary_state_prefix["mapped_theme_list"]) # List of len(n) containing the mapped themes for each theme mapping pass
+        state.populated_theme_list = state._load_attribute_from_file(config.summary_state_prefix["populated_theme_list"]) # List of len(n) containing the populated themes for each theme population pass
+        state.orphan_list = state._load_attribute_from_file(config.summary_state_prefix["orphan_list"]) # List of len(n) containing the orphaned insights for each theme population pass
+        state.redundancy_list = state._load_attribute_from_file(config.summary_state_prefix["redundancy_list"]) # List of len(1) containing the output of the final redundancy pass
+
+        return state
 
 
-        def load(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
-            """
-            Finds and loads all parquet versions of a specific file, sorted by creation time.
+    def _load_attribute_from_file(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
+        """
+        Finds and loads all parquet versions of a specific file, sorted by creation time.
 
-            This method searches the summary save location for files matching the 
-            pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
-            ordered from oldest to newest.
+        This method searches the summary save location for files matching the 
+        pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
+        ordered from oldest to newest.
 
-            Args:
-                file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
+        Args:
+            file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
 
-            Returns:
-                A list of pandas DataFrames if matching files exist, otherwise None.
-                The list is sorted by file creation time (st_birthtime/st_mtime).
-            """
-            base_dir = Path(self.summary_save_location)
-            
-            # 1. Grab all potential matches using the prefix wildcard
-            # We wrap in list() so we can check if any files were actually found
-            paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
+        Returns:
+            A list of pandas DataFrames if matching files exist, otherwise None.
+            The list is sorted by file creation time (st_birthtime/st_mtime).
+        """
+        base_dir = Path(self.summary_save_location)
+        
+        # 1. Grab all potential matches using the prefix wildcard
+        # We wrap in list() so we can check if any files were actually found
+        paths = list(base_dir.glob(f"{file_prefix}*.parquet"))
 
-            if not paths:
-                return []
+        if not paths:
+            return []
 
-            # 2. Sort by creation/birth time
-            # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
-            paths_sorted = sorted(
-                paths, 
-                key=lambda p: getattr(p.stat(), 'st_birthtime', p.stat().st_mtime)
+        # 2. Sort by creation/birth time
+        # Uses st_birthtime (Creation) if available, falls back to st_mtime (Modified)
+        paths_sorted = sorted(
+            paths, 
+            key=lambda p: getattr(p.stat(), 'st_birthtime', p.stat().st_mtime)
+        )
+
+        # 3. Load and return the list of DataFrames
+        output = [pd.read_parquet(p.absolute()) for p in paths_sorted]
+        self._assert_state_integrity(output, context = f"Load: {file_prefix}")
+        return output
+    
+    def _assert_state_integrity(self, df_list: list, context: str = ""):
+        """
+        Developer-facing integrity check for summarize pipeline corpus_state.
+
+        - Ensures structural keys like `theme_id` maintain expected dtype.
+        - Prints loud warnings but does NOT raise errors.
+        - Intended as a guardrail during development and refactoring.
+
+        Args:
+            df_list: A list of pandas DataFrames to validate.
+            context: Optional string indicating where this check is being run
+                    (e.g., 'reload', 'save', 'post-populate').
+        """
+
+        if not isinstance(df_list, list):
+            print(
+                f"⚠️ STATE WARNING [{context}]: Expected list of DataFrames, "
+                f"received {type(df_list)}"
             )
+            return
 
-            # 3. Load and return the list of DataFrames
-            output = [pd.read_parquet(p.absolute()) for p in paths_sorted]
-            self._assert_state_integrity(output, context = f"Load: {file_prefix}")
-            return output
-        
-        def _assert_state_integrity(self, df_list: list, context: str = ""):
-            """
-            Developer-facing integrity check for summarize pipeline corpus_state.
+        for idx, df in enumerate(df_list):
 
-            - Ensures structural keys like `theme_id` maintain expected dtype.
-            - Prints loud warnings but does NOT raise errors.
-            - Intended as a guardrail during development and refactoring.
-
-            Args:
-                df_list: A list of pandas DataFrames to validate.
-                context: Optional string indicating where this check is being run
-                        (e.g., 'reload', 'save', 'post-populate').
-            """
-
-            if not isinstance(df_list, list):
+            if df is None:
                 print(
-                    f"⚠️ STATE WARNING [{context}]: Expected list of DataFrames, "
-                    f"received {type(df_list)}"
+                    f"STATE WARNING [{context}]: "
+                    f"DataFrame at index {idx} is None."
                 )
-                return
+                continue
 
-            for idx, df in enumerate(df_list):
+            if not hasattr(df, "columns"):
+                print(
+                    f"STATE WARNING [{context}]: "
+                    f"Object at index {idx} is not a DataFrame "
+                    f"(type={type(df)})."
+                )
+                continue
 
-                if df is None:
+            # Check structural identity key
+            if "theme_id" in df.columns:
+                if not pd.api.types.is_integer_dtype(df["theme_id"]):
                     print(
-                        f"STATE WARNING [{context}]: "
-                        f"DataFrame at index {idx} is None."
-                    )
-                    continue
+                        f"\nSTATE WARNING [{context}]\n"
+                        f"DataFrame index: {idx}\n"
+                        f"'theme_id' dtype is {df['theme_id'].dtype}, "
+                        f"expected integer.\n"
+                        f"This may cause ordering or join errors downstream.\n"
+                        f"Correct dtype drift before proceeding.\n"
+                )
 
-                if not hasattr(df, "columns"):
-                    print(
-                        f"STATE WARNING [{context}]: "
-                        f"Object at index {idx} is not a DataFrame "
-                        f"(type={type(df)})."
-                    )
-                    continue
+    def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
+        """
+        Deletes summary output files matching the given prefixes.
 
-                # Check structural identity key
-                if "theme_id" in df.columns:
-                    if not pd.api.types.is_integer_dtype(df["theme_id"]):
-                        print(
-                            f"\nSTATE WARNING [{context}]\n"
-                            f"DataFrame index: {idx}\n"
-                            f"'theme_id' dtype is {df['theme_id'].dtype}, "
-                            f"expected integer.\n"
-                            f"This may cause ordering or join errors downstream.\n"
-                            f"Correct dtype drift before proceeding.\n"
-                    )
+        Args:
+            file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
+        """
+        if not self.summary_save_location:
+            return
 
-        def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
-            """
-            Deletes summary output files matching the given prefixes.
-
-            Args:
-                file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
-            """
-            if not self.summary_save_location:
-                return
-
-            base_dir = Path(self.summary_save_location)
-            
-            # Ensure we don't try to glob an empty path or a non-existent directory
-            if not base_dir.is_dir():
-                return
-
-            for prefix in file_prefixes:
-                # glob finds every file starting with prefix and ending in .parquet
-                for file_path in base_dir.glob(f"{prefix}*.parquet"):
-                    # missing_ok=True prevents crashes if another process 
-                    # deletes the file between globbing and unlinking
-                    file_path.unlink(missing_ok=True)
-
+        base_dir = Path(self.summary_save_location)
         
-        def save(self) -> None:
-            """
-            Atomically saves the current SummaryState to disk.
-            Writes to a temporary directory first, then replaces the live directory.
-            """
+        # Ensure we don't try to glob an empty path or a non-existent directory
+        if not base_dir.is_dir():
+            return
 
+        for prefix in file_prefixes:
+            # glob finds every file starting with prefix and ending in .parquet
+            for file_path in base_dir.glob(f"{prefix}*.parquet"):
+                # missing_ok=True prevents crashes if another process 
+                # deletes the file between globbing and unlinking
+                file_path.unlink(missing_ok=True)
+
+    
+    def save(self) -> None:
+        """
+        Atomically saves the current SummaryState to disk.
+        Writes to a temporary directory first, then replaces the live directory.
+        """
+
+        save_path = Path(self.summary_save_location)
+
+        # Ensure parent directory exists
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create a true temporary directory next to target
+        temp_path = save_path.parent / f"{save_path.name}_tmp"
+
+        # If temp exists from previous crash, clean it
+        if temp_path.exists():
+            shutil.rmtree(temp_path)
+
+        temp_path.mkdir()
+
+        # Write all summary state lists into temp directory
+        for name in config.summary_state_prefix.values():
+            data_list = getattr(self, name)
+            
+            # Check the data integrity to id any issues. 
+            self._assert_state_integrity(data_list, context=f"Saving: {name}")
+
+            for idx, df in enumerate(data_list, start=1):
+                filename = f"{name}_{idx}.parquet"
+                df.to_parquet(temp_path / filename, index=False)
+
+
+        # Now atomically replace old directory
+        if save_path.exists():
+            shutil.rmtree(save_path)
+
+        temp_path.rename(save_path)
+
+        print(f"Summary outputs saved successfully to {save_path}.")
+        
+
+    def rewind_to(self, stage: str, index: int):
+
+        stage_order = {
+            "schema": 0,
+            "mapping": 1,
+            "populate": 2,
+            "orphan": 3,
+        }
+
+        if stage not in stage_order:
+            raise ValueError("Invalid stage name.")
+
+        target_depth = stage_order[stage]
+
+        structural = [
+            self.theme_schema_list,
+            self.mapped_theme_list,
+            self.populated_theme_list,
+            self.orphan_list,
+        ]
+
+        if index < 0:
+            raise ValueError("Index must be >= 0.")
+
+        target_list = structural[target_depth]
+        if index >= len(target_list):
+            raise ValueError("Index exceeds available passes.")
+
+        # Now realign explicitly
+        if target_depth == 0:  # schema
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index]
+            self.populated_theme_list = self.populated_theme_list[:index]
+            self.orphan_list = self.orphan_list[:index]
+
+        elif target_depth == 1:  # mapping
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index]
+            self.orphan_list = self.orphan_list[:index]
+
+        elif target_depth == 2:  # populate
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index+1]
+            self.orphan_list = self.orphan_list[:index]
+
+        elif target_depth == 3:  # orphan
+            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.populated_theme_list = self.populated_theme_list[:index+1]
+            self.orphan_list = self.orphan_list[:index+1]
+
+        # Always clear redundancy
+        self.redundancy_list = []
+        
+        # Save the state after rewinding (handles the deleting of old files and writes the current state objects to file)
+        self.save()
+
+    def restart(self, confirm = None):
+        while confirm not in ["yes", "no"]:
+            confirm = input(
+                "Are you sure you want to restart? This will clear all summary state. Enter 'yes' or 'no':\n"
+            ).lower()
+
+        if confirm == "yes":
+            # Clear in-memory state
+            self.cluster_summary_list = []
+            self.theme_schema_list = []
+            self.mapped_theme_list = []
+            self.populated_theme_list = []
+            self.orphan_list = []
+            self.redundancy_list = []
+
+            # Clear disk state
             save_path = Path(self.summary_save_location)
-
-            # Ensure parent directory exists
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Create a true temporary directory next to target
-            temp_path = save_path.parent / f"{save_path.name}_tmp"
-
-            # If temp exists from previous crash, clean it
-            if temp_path.exists():
-                shutil.rmtree(temp_path)
-
-            temp_path.mkdir()
-
-            # Write all summary state lists into temp directory
-            for name in config.summary_state_prefix.values():
-                data_list = getattr(self, name)
-                
-                # Check the data integrity to id any issues. 
-                self._assert_state_integrity(data_list, context=f"Saving: {name}")
-
-                for idx, df in enumerate(data_list, start=1):
-                    filename = f"{name}_{idx}.parquet"
-                    df.to_parquet(temp_path / filename, index=False)
-
-
-            # Now atomically replace old directory
             if save_path.exists():
                 shutil.rmtree(save_path)
 
-            temp_path.rename(save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
 
-            print(f"Summary outputs saved successfully to {save_path}.")
-            
+            print("SummaryState reset successfully.")
+        else:
+            print("Restart cancelled.")
 
-        def rewind_to(self, stage: str, index: int):
-
-            stage_order = {
-                "schema": 0,
-                "mapping": 1,
-                "populate": 2,
-                "orphan": 3,
-            }
-
-            if stage not in stage_order:
-                raise ValueError("Invalid stage name.")
-
-            target_depth = stage_order[stage]
-
-            structural = [
-                self.theme_schema_list,
-                self.mapped_theme_list,
-                self.populated_theme_list,
-                self.orphan_list,
-            ]
-
-            if index < 0:
-                raise ValueError("Index must be >= 0.")
-
-            target_list = structural[target_depth]
-            if index >= len(target_list):
-                raise ValueError("Index exceeds available passes.")
-
-            # Now realign explicitly
-            if target_depth == 0:  # schema
-                self.theme_schema_list = self.theme_schema_list[:index+1]
-                self.mapped_theme_list = self.mapped_theme_list[:index]
-                self.populated_theme_list = self.populated_theme_list[:index]
-                self.orphan_list = self.orphan_list[:index]
-
-            elif target_depth == 1:  # mapping
-                self.theme_schema_list = self.theme_schema_list[:index+1]
-                self.mapped_theme_list = self.mapped_theme_list[:index+1]
-                self.populated_theme_list = self.populated_theme_list[:index]
-                self.orphan_list = self.orphan_list[:index]
-
-            elif target_depth == 2:  # populate
-                self.theme_schema_list = self.theme_schema_list[:index+1]
-                self.mapped_theme_list = self.mapped_theme_list[:index+1]
-                self.populated_theme_list = self.populated_theme_list[:index+1]
-                self.orphan_list = self.orphan_list[:index]
-
-            elif target_depth == 3:  # orphan
-                self.theme_schema_list = self.theme_schema_list[:index+1]
-                self.mapped_theme_list = self.mapped_theme_list[:index+1]
-                self.populated_theme_list = self.populated_theme_list[:index+1]
-                self.orphan_list = self.orphan_list[:index+1]
-
-            # Always clear redundancy
-            self.redundancy_list = []
-            
-            # Save the state after rewinding (handles the deleting of old files and writes the current state objects to file)
-            self.save()
-
-        def restart(self, confirm = None):
-            while confirm not in ["yes", "no"]:
-                confirm = input(
-                    "Are you sure you want to restart? This will clear all summary state. Enter 'yes' or 'no':\n"
-                ).lower()
-
-            if confirm == "yes":
-                # Clear in-memory state
-                self.cluster_summary_list = []
-                self.theme_schema_list = []
-                self.mapped_theme_list = []
-                self.populated_theme_list = []
-                self.orphan_list = []
-                self.redundancy_list = []
-
-                # Clear disk state
-                save_path = Path(self.summary_save_location)
-                if save_path.exists():
-                    shutil.rmtree(save_path)
-
-                save_path.mkdir(parents=True, exist_ok=True)
-
-                print("SummaryState reset successfully.")
-            else:
-                print("Restart cancelled.")
-
-        def status(self, diagnostic = False):
-            # Get the status of the current summary state by checking the lengths of each list of artifacts.            
-            status = {
-                "cluster_summary_list": len(self.cluster_summary_list),
-                "theme_schema_list": len(self.theme_schema_list),
-                "mapped_theme_list": len(self.mapped_theme_list),
-                "populated_theme_list": len(self.populated_theme_list),
-                "orphan_list": len(self.orphan_list),
-                "redundancy_list": len(self.redundancy_list)
-            }
+    def status(self, diagnostic = False):
+        # Get the status of the current summary state by checking the lengths of each list of artifacts.            
+        status = {
+            "cluster_summary_list": len(self.cluster_summary_list),
+            "theme_schema_list": len(self.theme_schema_list),
+            "mapped_theme_list": len(self.mapped_theme_list),
+            "populated_theme_list": len(self.populated_theme_list),
+            "orphan_list": len(self.orphan_list),
+            "redundancy_list": len(self.redundancy_list)
+        }
+        if not diagnostic:
+            # Pretty print the status with indentation for readability
+            pprint.pprint(status, indent=4)
+        
+        # Calculate  maximum number of passes completed across all stages
+        max_stage = max([val for val in status.values()])
+        # Now determine where in the process the user must be based on which objects have equal the latest run
+        if max_stage == 0:
             if diagnostic:
-                # Pretty print the status with indentation for readability
-                pprint.pprint(status, indent=4)
-            
-            # Calculate  maximum number of passes completed across all stages
-            max_stage = max([val for val in status.values()])
-            # Now determine where in the process the user must be based on which objects have equal the latest run
-            if max_stage == 0:
-                if diagnostic:
-                    return {"stage": "no_runs", "max_stage": max_stage}
-                else:
-                    print("No summarization runs detected. You can start the summarization process by running the cluster summary stage.")
-                    return None
-            if status["redundancy_list"] > 0:
-                if diagnostic:
-                    return {"stage": "redundancy", "max_stage": max_stage}
-                else:
-                    print("You Summaries are complete. You can now proceed to instantiate the render class")
-                    return None
-            if status["orphan_list"] == max_stage:
-                if diagnostic:
-                    return {"stage": "orphan", "max_stage": max_stage}
-                else:
-                    print(f"You have identified orphaned insights on your most recent run (run: {max_stage}). Your next step should be to handle redundancy.")
-                    return None
-            elif status["populated_theme_list"] == max_stage:
-                if diagnostic:
-                    return {"stage": "populated_theme", "max_stage": max_stage}
-                else:
-                    print(f"You have populated themes on your most recent run (run: {max_stage}). Your next step should be to handle handle orphans.")
-                    return None
-            elif status["mapped_theme_list"] == max_stage:
-                if diagnostic:
-                    return {"stage": "mapped_theme", "max_stage": max_stage}
-                else:
-                    print(f"You have mapped themes on your most recent run (run: {max_stage}). Your next step should be to populate themes.")
-                    return None
-            elif status["theme_schema_list"] == max_stage:
-                if diagnostic:
-                    return {"stage": "theme_schema", "max_stage": max_stage}
-                else:
-                    print(f"You have generated a theme schema on your most recent run (run: {max_stage}). Your next step should be to map themes.")
-                    return None
+                return {"stage": "no_runs", "max_stage": max_stage}
             else:
-                if diagnostic:
-                    return {"stage": "cluster_summary", "max_stage": max_stage}
-                else:
-                    print(f"You have generated a cluster summary on your most recent run (run: {max_stage}). Your next step should be to generate a theme schema.")
-                    return None
+                print("No summarization runs detected. You can start the summarization process by running the cluster summary stage.")
+                return None
+        if status["redundancy_list"] > 0:
+            if diagnostic:
+                return {"stage": "redundancy", "max_stage": max_stage}
+            else:
+                print("You Summaries are complete. You can now proceed to instantiate the render class")
+                return None
+        if status["orphan_list"] == max_stage:
+            if diagnostic:
+                return {"stage": "orphan", "max_stage": max_stage}
+            else:
+                print(f"You have identified orphaned insights on your most recent run (run: {max_stage}). Your next step should be to handle redundancy.")
+                return None
+        elif status["populated_theme_list"] == max_stage:
+            if diagnostic:
+                return {"stage": "populated_theme", "max_stage": max_stage}
+            else:
+                print(f"You have populated themes on your most recent run (run: {max_stage}). Your next step should be to handle handle orphans.")
+                return None
+        elif status["mapped_theme_list"] == max_stage:
+            if diagnostic:
+                return {"stage": "mapped_theme", "max_stage": max_stage}
+            else:
+                print(f"You have mapped themes on your most recent run (run: {max_stage}). Your next step should be to populate themes.")
+                return None
+        elif status["theme_schema_list"] == max_stage:
+            if diagnostic:
+                return {"stage": "theme_schema", "max_stage": max_stage}
+            else:
+                print(f"You have generated a theme schema on your most recent run (run: {max_stage}). Your next step should be to map themes.")
+                return None
+        else:
+            if diagnostic:
+                return {"stage": "cluster_summary", "max_stage": max_stage}
+            else:
+                print(f"You have generated a cluster summary on your most recent run (run: {max_stage}). Your next step should be to generate a theme schema.")
+                return None
 
-        def fingerprint(self):
-            """
-            Deterministic fingerprint of the summary state.
-            Uses the latest DataFrame from each summary artifact list.
-            If anything changes, resume becomes invalid.
-            """
+    def fingerprint(self):
+        """
+        Deterministic fingerprint of the summary state.
+        Uses the latest DataFrame from each summary artifact list.
+        If anything changes, resume becomes invalid.
+        """
 
-            parts = []
+        parts = []
 
-            state_lists = [
-                self.cluster_summary_list,
-                self.theme_schema_list,
-                self.mapped_theme_list,
-                self.populated_theme_list,
-                self.orphan_list,
-                self.redundancy_list,
-            ]
+        state_lists = [
+            self.cluster_summary_list,
+            self.theme_schema_list,
+            self.mapped_theme_list,
+            self.populated_theme_list,
+            self.orphan_list,
+            self.redundancy_list,
+        ]
 
-            for df_list in state_lists:
-                if df_list:
-                    df_list = (
-                        df_list[-1].fillna("__NULL__")
-                        .sort_index(axis=1)
-                        .sort_values(by=sorted(df_list.columns))
-                        .reset_index(drop=True)
-                    )
-                    parts.append(_hash_dataframe(df_list))
-                else:
-                    parts.append("EMPTY")
+        for df_list in state_lists:
+            if df_list:
+                df_list = (
+                    df_list[-1].fillna("__NULL__")
+                    .sort_index(axis=1)
+                    .sort_values(by=sorted(df_list.columns))
+                    .reset_index(drop=True)
+                )
+                parts.append(_hash_dataframe(df_list))
+            else:
+                parts.append("EMPTY")
 
-            combined = "".join(parts).encode("utf-8")
-            return hashlib.sha256(combined).hexdigest()
+        combined = "".join(parts).encode("utf-8")
+        return hashlib.sha256(combined).hexdigest()
 
 
 

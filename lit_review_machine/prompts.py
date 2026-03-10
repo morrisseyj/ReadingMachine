@@ -674,17 +674,22 @@ class Prompts:
 
         conflict_theme_instructions = (
             "## STRUCTURAL INSTRUCTION — DISCURSIVE CONFLICT THEME\n\n"
-            "This theme captures structured disagreement, tension, or fault lines.\n"
-            "Organize the section explicitly around opposing positions.\n\n"
+            "This theme captures structured disagreement, definitional divergence, or "
+            "interpretive fault lines present in the literature.\n\n"
 
-            "REQUIREMENTS:\n"
-            "- Present opposing arguments in contrastive form (e.g., 'Proponents argue… while critics contend…').\n"
-            "- Structure the narrative around identifiable fault lines.\n"
-            "- Do NOT resolve the disagreement.\n"
-            "- Preserve tension rather than harmonizing positions.\n"
-            "- Make asymmetries in evidentiary weight visible using analytic language "
-            "(e.g., widely supported, frequently cited, minority view).\n"
-            "- Avoid smoothing language that implies convergence unless explicitly supported by the insights.\n\n"
+            "STRUCTURAL REQUIREMENTS:\n"
+
+            "- Organize the section explicitly around identifiable positions or camps.\n"
+            "- Clearly demarcate positions using analytic contrastive language "
+            "  (e.g., 'One strand argues...', 'A contrasting view holds...', "
+            "  'A minority perspective contends...').\n"
+            "- Explicitly state what is in dispute (e.g., definition, mechanism, policy design, "
+            "  normative goal, institutional constraint).\n"
+            "- Present positions sequentially and in contrast.\n"
+            "- Do NOT blend positions into a single harmonized narrative.\n"
+            "- Do NOT resolve or adjudicate the disagreement.\n"
+            "- Do NOT imply convergence unless it is explicitly present in the material you are summarizing.\n"
+            "- Preserve visible tension where present in the source material.\n\n"
         )
 
         instructions_dict = {
@@ -901,34 +906,34 @@ class Prompts:
         
         style_guidelines = {
             "dominant": [
-                "Focus on the weight of evidence (e.g., 'The most prominent narrative identified...')",
-                "Use a structural framing (e.g., 'A primary pillar of the feedback relates to...')",
-                "Use an empirical lens (e.g., 'Participant responses were most densely clustered around...')",
-                "Use a centralizing opener (e.g., 'At the core of the user experience was...')",
-                "Focus on the frequency of observation (e.g., 'A recurring point of emphasis across the data was...')",
-                "Use a foundational approach (e.g., 'Fundamental to the participants\' perspective was...')",
-                "Highlight a consistent trend (e.g., 'A highly consistent pattern emerged regarding...')",
-                "Frame as a primary driver (e.g., 'The analysis suggests that the primary driver of participant sentiment was...')"
+                "Focus on the weight of evidence (e.g., 'The most prominent narrative identified across the corpus...')",
+                "Use a structural framing (e.g., 'A primary pillar of the analysis concerns...')",
+                "Use an evidentiary lens (e.g., 'The material most densely clusters around...')",
+                "Use a centralizing opener (e.g., 'At the core of the discussion lies...')",
+                "Focus on frequency of observation (e.g., 'A recurring point of emphasis across the record is...')",
+                "Use a foundational approach (e.g., 'Fundamental to this body of work is...')",
+                "Highlight a consistent pattern (e.g., 'A highly consistent pattern emerges regarding...')",
+                "Frame as a primary driver (e.g., 'The analysis suggests that a central driver of this theme is...')"
             ],
             "other": [
-                "Frame as divergent data (e.g., 'While not forming part of the dominant narrative, several minority positions emerged...')",
-                "Use a 'breadth' framing (e.g., 'The analysis also captured a series of distinct, outlier observations...')",
-                "Frame as complementary nuance (e.g., 'Beyond the main thematic clusters, participant feedback also touched upon...')",
-                "Use a 'niche' framing (e.g., 'Less frequent, but nonetheless significant, were reports regarding...')",
-                "Frame as localized insight (e.g., 'A subset of the data provided more localized insights into...')",
-                "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy perspectives also highlighted...')",
-                "Use a 'peripheral' framing (e.g., 'On the periphery of the core themes, some participants also raised...')",
-                "Frame as granular detail (e.g., 'Providing further granularity to the report, distinct observations were made regarding...')"
+                "Frame as divergent material (e.g., 'While not forming part of the dominant narrative, several distinct strands also emerge...')",
+                "Use a breadth framing (e.g., 'The analysis also captures a series of less central but substantively meaningful positions...')",
+                "Frame as complementary nuance (e.g., 'Beyond the primary thematic clusters, the material also reflects...')",
+                "Use a niche framing (e.g., 'Less frequent, but nonetheless analytically significant, are discussions of...')",
+                "Frame as localized insight (e.g., 'A subset of the corpus provides more focused insight into...')",
+                "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy strands also highlight...')",
+                "Use a peripheral framing (e.g., 'On the periphery of the dominant themes, the record also indicates...')",
+                "Frame as granular detail (e.g., 'Providing additional granularity, specific contributions note...')"
             ],
             "conflict": [
-                "Frame as a stark polarization (e.g., 'The research revealed a significant tension in participant feedback regarding...').",
-                "Use an 'internal friction' lens (e.g., 'A notable point of contradiction emerged where...').",
-                "Use a 'divergence' framing (e.g., 'Participant perspectives were sharply divided when discussing...').",
-                "Focus on the nuance of disagreement (e.g., 'The data reflects a complex landscape of conflicting views concerning...').",
-                "Frame as a lack of consensus (e.g., 'Consensus was noticeably absent regarding the topic of...').",
-                "Use a 'dualistic' framing (e.g., 'The feedback was characterized by a clear dichotomy between...').",
-                "Frame as an interpretative struggle (e.g., 'The data presents an interpretative challenge, as participants provided conflicting accounts of...').",
-                "Highlight competing priorities (e.g., 'A friction was identified between competing priorities, specifically...')."
+                "Frame as structured tension (e.g., 'The literature reveals a significant tension concerning...')",
+                "Use an internal friction lens (e.g., 'A notable point of contradiction emerges where...')",
+                "Use a divergence framing (e.g., 'The material reflects a clear divergence regarding...')",
+                "Focus on the complexity of disagreement (e.g., 'The record presents a complex landscape of competing interpretations of...')",
+                "Frame as lack of consensus (e.g., 'Consensus is noticeably absent on the question of...')",
+                "Use a dual-position framing (e.g., 'The debate is characterized by a clear division between...')",
+                "Frame as interpretative disagreement (e.g., 'The analysis highlights conflicting accounts concerning...')",
+                "Highlight competing priorities (e.g., 'A friction emerges between competing priorities, specifically...')"
             ]
         }
 
@@ -983,9 +988,6 @@ class Prompts:
             '- Return ONLY a JSON object with the key "refined_summary".\n'
             '- Do not provide preamble or commentary.'
         )
-
-
-
 
 
     def exec_summary(self, word_count: int):

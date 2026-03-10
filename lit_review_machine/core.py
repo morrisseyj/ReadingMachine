@@ -1620,9 +1620,39 @@ class Summarize:
             paper_output_length: Total word length for paper; used to proportion cluster summaries.
             summaries_pickle_path: Optional path to pickle the resulting summaries DataFrame.
         """
+        
+        # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
+        if not os.path.exists(insight_embedding_path):
+            raise FileNotFoundError(f"Insight embeddings pickle not found at {insight_embedding_path}. Please run clustering first or amend the path to where you pickled your insight embeddings.")
+        else:
+            with open(insight_embedding_path, "rb") as f:
+                self.insight_embeddings_array: np.ndarray = pickle.load(f)
+        
         # Load the two states that this class operates on. Note this class has a SummaryState which will manage all the objects the class generates
-        self.corpus_state: Any = deepcopy(corpus_state)
-        self.summary_state = SummaryState()
+        self.corpus_state: CorpusState = deepcopy(corpus_state)
+        # Check whether SummaryState already has some summaries on disk - if so offer to reload or regenerate (regen will overwrite everything)
+        os.makedirs(summary_save_location, exist_ok=True)
+        path = Path(summary_save_location)
+        possible_summary_files = list(path.glob("*.parquet"))
+        if possible_summary_files:
+            load = None
+            while load not in ["1", "2"]:
+                load = input(
+                    f"Previous summarization files found in '{summary_save_location}'. Do you want to:\n"
+                    "(1) reload existing summaries\n"
+                    "(2) regenerate summaries (NOTE:this will overwrite all existing summary attributres\n"
+                    "Enter 1 or 2:\n"
+                ).strip()
+
+        if load == "1":
+            self.summary_state = SummaryState.load(summary_save_location=summary_save_location)
+            print("Summaries loaded. To see where you are in the summarization process run var.summary_state.status())")
+
+        else:
+            # Clear out existing summaries if we are regenerating
+            os.remove(summary_save_location)  
+            # And load the empty summary_state
+            self.summary_state = SummaryState(summary_save_location=summary_save_location)
 
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
@@ -1630,13 +1660,6 @@ class Summarize:
         self.summary_save_location = summary_save_location
         pickle_save_location = pickle_save_location
 
-        # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
-        if not os.path.exists(insight_embedding_path):
-            raise FileNotFoundError(f"Insight embeddings pickle not found at {insight_embedding_path}. Please run clustering first or amend the path to where you pickled your insight embeddings.")
-        else:
-            with open(insight_embedding_path, "rb") as f:
-                self.insight_embeddings_array: np.ndarray = pickle.load(f)
-     
     def _calculate_centroid(self, col="full_insight_embedding"):
         rows = []
         for rq, d in self.corpus_state.insights.groupby("question_id", sort=False):
@@ -1779,15 +1802,18 @@ class Summarize:
                 # Get the summaries frozen so far if there are any
                 frozen_summaries = pd.DataFrame(summaries_dict_lst)["summary"].tolist() if summaries_dict_lst else []
 
+                frozen_summaries_str = "\n".join(frozen_summaries) if frozen_summaries else ""
+                insights_str = "\n".join(insights)
+
                 # Build user prompt for LLM
                 user_prompt: str = (
                     f"Research question id: {rq_id}\n"
                     f"Research question text: {rq_text}\n"
                     "PRECEDING CLUSTER SUMMARIES (for context only; may be empty):\n"
-                    f"{'\n'.join(frozen_summaries) if frozen_summaries else ''}\n"
+                    f"{frozen_summaries_str}\n"
                     f"Cluster: {cluster}\n"
-                    "INSIGHTS:\n" +
-                    "\n".join(insights)
+                    "INSIGHTS:\n" 
+                    f"{insights_str}\n"
                 )
 
                 json_schema = {
@@ -3121,10 +3147,14 @@ class Summarize:
         ordered_themes = self.summary_state.populated_theme_list[-1].sort_values(by=["question_id", "theme_id"]).reset_index(drop=True).copy()
         refined_rows = []
 
+        total_themes = ordered_themes.shape[0]
+        count = 1
+
         for q_id, q_group in ordered_themes.groupby("question_id"):
             previous_theme_text = "" # Reset for each Research Question
             
             for _, row in q_group.iterrows():
+                print(f"Addressing redundancy for theme {count} of {total_themes}")
                 # Prepare the Payload
                 question_text = row["question_text"]
                 theme_label = row["theme_label"]
@@ -3172,6 +3202,7 @@ class Summarize:
                 refined_row = row.copy()
                 refined_row["thematic_summary"] = refined_theme
                 refined_rows.append(refined_row)
+                count += 1
 
         # Push to State
         refined_df = pd.DataFrame(refined_rows)

@@ -1,5 +1,7 @@
 
 # Import custom libraries and modules
+from ast import pattern
+
 from lit_review_machine import config, utils
 from lit_review_machine.prompts import Prompts
 from lit_review_machine.state import SummaryState, CorpusState
@@ -19,6 +21,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+import shutil
 
 
 
@@ -33,7 +36,7 @@ class Render:
         render_object: tuple[str, int] = None,
         render_path: str = config.RENDER_SAVE_LOCATION,
         render_hash = config.summary_hash,
-        output_save_location: str = os.path.join(config.SUMMARY_SAVE_LOCATION, "results")
+        output_save_location: str = os.path.join(config.OUTPUT_SAVE_LOCATION)
         ):
         """
         Wrapper for a DataFrame of summaries and tools for AI-assisted peer review.
@@ -45,7 +48,7 @@ class Render:
             render_object: Optional tuple specifying which object to render and at which stage (articulated as list index) (e.g. "cluster_summary", 0" or "populated_theme", -1"). Must be passed with force=True. If None, the class will automatically determine which summaries to render based on the current stage of the summarization process as indicated by summary_state.status().
             summary_string: Optional; pre-computed concatenated summary string.
             ai_peer_review: Optional; stores the AI peer review output as a dictionary.
-            output_save_location: Directory to save Word documents.
+            output_save_location: Directory to save documents.
         """
         # Check that we can instantiate this class - i.e. summaries have been generated
         if summary_state.cluster_summary_list == [] and summary_state.populated_theme_list == []:
@@ -69,13 +72,7 @@ class Render:
 
         # Get the exact content that we want to render on, depending on whether the use ran the redundancy pass or stopped at the final orphan pass ()
         self.summary_to_render = self._get_summaries_for_render(force=force)
-        # Add question_text to the summary_to_render so that it can be used as part of the payload for the question summaries and executive summary generation, and also added to the render_df for streaming out as part of the final document generation. We do this here so that the summary_to_render df is the complete df we need to work with for all subsequent operations, rather than having to merge in question text at multiple subsequent steps. This is a left merge because there may be some summaries that do not have question text if there are orphans that have not been handled, but we want to keep those summaries in the render_df and just have null question text for them.
-        self.summary_to_render = (
-            self.summary_to_render
-            .merge(self.corpus_state.questions[["question_id", "question_text"]], 
-                   on="question_id", 
-                   how="left")
-        )
+
         # Ensure sort for subsequent operations
         self.summary_to_render = self.summary_to_render.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         # Hash the summary to eiher check against previous renders or to set if this is the first time. This guards against changes in summary objects during rendering pass
@@ -172,7 +169,7 @@ class Render:
         Checks if there is another render hash file saved. If so, checks the hashes to ensure match
         If conflict force abort or overwrite
         If hash match, reload the render df and any attributes created thus far
-        If no previous render save the current hash and create the clean render_df from the summary_to_render   
+        If no previous render files save the current hash  
 
         """
         # Check if any previous render objects exist:
@@ -196,9 +193,8 @@ class Render:
                     raise ValueError("Rendering process aborted by user to avoid overwriting previous render. Please check your summary_state and ensure it is correct before re-instantiating the Render class.")
                 else:
                     # Clean up the render artifacts and start new render
-                    os.remove(os.path.join(self.render_path, self.render_hash))
-                    if os.path.exists(os.path.join(self.render_path, self.render_df)):
-                        os.remove(os.path.join(self.render_path, self.render_df)) 
+                    shutil.rmtree(self.render_path) # This will remove all the previous render artifacts, which is important to avoid confusion and ensure a clean slate for the new render. We can be aggressive here with the cleanup because we have already confirmed with the user that they want to proceed with overwriting the previous render.
+                    os.makedirs(self.render_path, exist_ok=True) # Re-create the render path after cleanup
                     # Create and save the new hash file
                     new_hash_df = pd.DataFrame({"summary_hash": [current_summary_hash]})
                     new_hash_df.to_parquet(os.path.join(self.render_path, self.render_hash), index=False)
@@ -206,34 +202,147 @@ class Render:
                     return(None)
                 
             else: # if the hash matches we load the old dataframe and create all the attributes that we can from it.
-                print("A previous render with the same summary hash was found. Loading the previous generate cosmetic artifacts\n")
+                print("A previous render with the same summary hash was found. Loading the previously generated cosmetic artifacts. You can overwrite these by recalling the generation methods.\n")
                 path = Path(self.render_path)
                 loaded_artefacts = []
                 for file in path.glob("*.parquet"):
-                    if file.stem == config.render_prefix["render_df"]:
-                        self.render_df = pd.read_parquet(file)
-                        loaded_artefacts.append("render_df")
-                    elif file.stem == config.render_prefix["render_title_exec_summary_df"]:
+                    if file.stem == config.render_prefix["render_title_exec_summary_df"]:
                         self.title_exec_summary_df = pd.read_parquet(file)
                         loaded_artefacts.append("title_summary_df")
                     elif file.stem == config.render_prefix["render_question_summary_df"]:
                         self.question_summary_df = pd.read_parquet(file)
                         loaded_artefacts.append("question_summary_df")
                     else:
-                        if file.stem == config.render_prefix["render_sylized_rewrite_df"]:
+                        if file.stem == config.render_prefix["render_stylized_rewrite_df"]:
                             self.stylized_rewrite_df = pd.read_parquet(file)
                             loaded_artefacts.append("stylized_rewrite_df")
                 
-                if not hasattr(self, "render_df"):
-                    print(f"Cosmetic artifacts loaded: {loaded_artefacts}, but final render_df not found. You should add any missing artifacts and call integrat_cosmetic_artifacts() to construct the render_df)")
+                # If all three artefacts are loaded, we can integrate the cosmetic changes into a render_df that can be used for the final output generation. If some but not all cosmetic artefacts are loaded, we do not automatically integrate as the render_df would be incomplete, but we do inform the user of which artefacts were loaded and that they can be integrated by calling integrate_cosmetic_changes() once they have added any missing artefacts. If no cosmetic artefacts are loaded, we do not attempt to integrate and just inform the user that no cosmetic artefacts were found and they can proceed with generating new cosmetic artefacts or check their render save location if they believe they should be there.
+                if len(loaded_artefacts) == 3:
+                    final_render_df = self.integrate_cosmetic_changes() # I don't call render_df here (self.final_render_df gets set in integrate_cosmetic_changes), but mention it to be explicit
+                    print("All cosmetic artefacts loaded and integrated. You can proceed with generating the final outputs.")
+                
+                if not hasattr(self, "final_render_df"):
+                    print(f"{len(loaded_artefacts)} cosmetic artifacts loaded: {loaded_artefacts}. Final render_df not found. You should add any missing artifacts and/or call integrate_cosmetic_changes() to construct the final_render_df)")
 
 
         else: # if no previous file exists, save the hash and create the render df from the summary_to_render
             # Create and save the new hash file
+            os.makedirs(self.render_path, exist_ok=True) # Ensure the render path exists
             new_hash_df = pd.DataFrame({"summary_hash": [current_summary_hash]})
             new_hash_df.to_parquet(os.path.join(self.render_path, self.render_hash), index=False)
             return(None)
 
+    
+    
+    def stylistic_rewrite(self, style: str = "academic") -> pd.DataFrame:
+        """
+        Rewrites the themes in render_df in a specific style. Default is academic, but this can be varied (e.g. journalistic, conversational, engaging,etc) depending on user preference and intended audience. The rewrite will attempt to maintain the original meaning and insights while improving readability and engagement.
+        Also goes about varying the language to make the content more engaging and less monotonous. 
+        While this re-write intends to maintain complete fidelity any re-write risks some insight loss. 
+        This is an optional pass for the user if they want to prioritize readability over fidelity. 
+        """
+        # First check wheter a stylistic rewrite has already been done, if so offer reload or regenerate options
+        if hasattr(self, "stylized_rewrite_df"): 
+            rerun = None
+            while rerun not in ["1", "2"]:
+                rerun = input(
+                    "A stylistic rewrite of the themes has already been generated. Do you want to regenerate the stylistic rewrite?\n"
+                    "(1) Yes, regenerate the stylistic rewrite.\n" 
+                    "(2) No, keep the existing stylistic rewrite.\n"
+                    "(1/2):\n"
+                ).strip()
+                
+            if rerun == "2":
+                print("Keeping existing stylistic rewrite.")
+                return self.stylized_rewrite
+            else:                
+                print("Regenerating stylistic rewrite.")
+        
+        # Then check whether the summaries have already been generated. If they have, send a warning that it is better to run the stylistic re-write prior to summarizing so that the tone is carried through
+        if hasattr(self, "question_summary_df"):
+            abort = None
+            while abort not in ["1", "2"]:
+                abort = input(
+                    "You have already generated question summaries. It is generally recommended to do the stylistic rewrite before generating the question summaries so that the style is carried through to the question summaries. Do you want to proceed with the stylistic rewrite even though you have already generated question summaries?\n"
+                    "(1) Yes, proceed with the stylistic rewrite even though I have already generated question summaries.\n" 
+                    "(2) No, I want to do a stylistic rewrite before generating question summaries.\n"
+                    "(1/2):\n"
+                ).strip()
+
+                if abort == "2":
+                    print("Aborting stylistic rewrite so that you can do it before generating question summaries. Please run stylistic_rewrite() and then re-run gen_question_summaries() to generate the question summaries with the rewritten themes.")
+                    return None
+        
+        stylized_content_df_out = pd.DataFrame(columns=["stylized_text", "question_id", "theme_id"])
+
+        total_themes = self.summary_to_render.shape[0]
+        count = 1
+
+        for qid in self.summary_to_render["question_id"].unique():
+            question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
+            # Place frozen content here so that it resets for each rq
+            frozen_content = ""
+            for idx, row in question_df.iterrows():
+                print(f"Stylistic rewrite for theme {count} of {total_themes}")
+                question_text = row["question_text"]
+                content = row["thematic_summary"]
+                theme_label = row["theme_label"]
+                theme_id = row["theme_id"]
+                sys_prompt = Prompts().stylistic_rewrite(style=style, index=idx, label=theme_label)
+                user_prompt = (
+                    f"CURRENT RESEARCH QUESTION: {question_text}\n"
+                    "FROZEN CONTENT:\n"
+                    f"{frozen_content}\n\n"
+                    f"CURRENT THEME LABEL: {theme_label}\n"
+                    "THEMATIC SUMMARY TO STYLE:\n"
+                    f"{content}\n\n"
+                )
+                fall_back = {"refined_summary": ""}
+
+                json_schema = {
+                    "name": "stylistic_rewrite_generator",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "refined_summary": {
+                                "type": "string",
+                                "description": "Refined thematic summary text."
+                            }
+                        },
+                        "required": ["refined_summary"],
+                        "additionalProperties": False
+                    }
+                }
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    return_json=True,
+                    json_schema=json_schema,
+                    fall_back=fall_back
+                )
+
+                # Get the data, transform to df
+                stylized_content = response["refined_summary"]
+                stylized_content_df = pd.DataFrame({
+                    "stylized_text": [stylized_content],
+                    "question_id": [qid],
+                    "theme_id": [theme_id],
+                    })
+                
+                # Append to the output df
+                stylized_content_df_out = pd.concat([stylized_content_df_out, stylized_content_df], ignore_index=True)
+                frozen_content += f"{row['theme_label']}\n\n{stylized_content}\n\n"
+                count += 1
+        
+        self.stylized_rewrite_df = stylized_content_df_out
+        self.stylized_rewrite_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_stylized_rewrite_df"] + ".parquet"), index=False)
+        return(stylized_content_df_out)
+    
+    
     def _gen_question_payload(self, qid) -> str:
         """
         Generates a string that can be used as the payload to the llm call.
@@ -251,7 +360,7 @@ class Render:
     
     
     def gen_question_summaries(self) -> pd.DataFrame:
-
+        
         # First check whether question summaries already exist, if so offer reload or regenerate options
         if hasattr(self, "question_summary_df"):
             rerun = None
@@ -283,14 +392,18 @@ class Render:
 
                 if abort == "2":
                     print("Aborting question summary generation so that you can do a stylistic rewrite first. Please run stylistic_rewrite() and then re-run gen_question_summaries() to generate the question summaries with the rewritten themes.")
-                    return(self.render_df)
+                    return None
         
         # loop over question id to get the question payload
         question_summaries_df_list = []
 
         working_render_df = self.summary_to_render.copy()
 
+        total_questions = working_render_df["question_id"].nunique()
+        count = 1
+
         for qid in working_render_df["question_id"].unique():
+            print(f"Generating summary for question {count} of {total_questions}")
             question_id = qid
             question_text = working_render_df[working_render_df["question_id"] == qid]["question_text"].iloc[0]
             question_payload = self._gen_question_payload(qid=question_id)
@@ -339,8 +452,16 @@ class Render:
             })
 
             question_summaries_df_list.append(question_summary_df)
+            count += 1
 
         question_summaries_df_out = pd.concat(question_summaries_df_list, ignore_index=True).sort_values(by=["question_id"]).reset_index(drop=True)
+        question_summaries_df_out = (
+            question_summaries_df_out
+            .merge(self.corpus_state.questions[["question_id", "question_text"]],
+                   on="question_id",
+                   how="left")
+        )
+
 
         self.question_summary_df = question_summaries_df_out
         self.question_summary_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_question_summary_df"] + ".parquet"), index=False)       
@@ -362,7 +483,7 @@ class Render:
         return output
     
 
-    def gen_exec_summary(self, word_length: int = 500) -> str:
+    def gen_exec_summary(self, word_count: int = 500) -> str:
 
         if hasattr(self, "title_exec_summary_df"):
             rerun = None
@@ -382,7 +503,7 @@ class Render:
 
         exec_summary_payload = self._gen_exec_summary_payload()
         
-        sys_prompt = Prompts().exec_summary(word_length=word_length)
+        sys_prompt = Prompts().exec_summary(word_count=word_count)
         user_prompt = exec_summary_payload
         fall_back = {"executive_summary": "", "title": ""}
         json_schema = {
@@ -430,108 +551,6 @@ class Render:
         return self.title_exec_summary_df
 
     
-    def stylistic_rewrite(self, style: str = "academic") -> pd.DataFrame:
-        """
-        Rewrites the themes in render_df in a specific style. Default is academic, but this can be varied (e.g. journalistic, conversational, engaging,etc) depending on user preference and intended audience. The rewrite will attempt to maintain the original meaning and insights while improving readability and engagement.
-        Also goes about varying the language to make the content more engaging and less monotonous. 
-        While this re-write intends to maintain complete fidelity any re-write risks some insight loss. 
-        This is an optional pass for the user if they want to prioritize readability over fidelity. 
-        """
-        # First check wheter a stylistic rewrite has already been done, if so offer reload or regenerate options
-        if hasattr(self, "stylized_rewrite_df"): 
-            rerun = None
-            while rerun not in ["1", "2"]:
-                rerun = input(
-                    "A stylistic rewrite of the themes has already been generated. Do you want to regenerate the stylistic rewrite?\n"
-                    "(1) Yes, regenerate the stylistic rewrite.\n" 
-                    "(2) No, keep the existing stylistic rewrite.\n"
-                    "(1/2):\n"
-                ).strip()
-                
-            if rerun == "2":
-                print("Keeping existing stylistic rewrite.")
-                return self.stylized_rewrite
-            else:                
-                print("Regenerating stylistic rewrite.")
-        
-        # Then check whether the summaries have already been generated. If they have, send a warning that it is better to run the stylistic re-write prior to summarizing so that the tone is carried through
-        if hasattr(self, "question_summary_df"):
-            abort = None
-            while abort not in ["1", "2"]:
-                abort = input(
-                    "You have already generated question summaries. It is generally recommended to do the stylistic rewrite before generating the question summaries so that the style is carried through to the question summaries. Do you want to proceed with the stylistic rewrite even though you have already generated question summaries?\n"
-                    "(1) Yes, proceed with the stylistic rewrite even though I have already generated question summaries.\n" 
-                    "(2) No, I want to do a stylistic rewrite before generating question summaries.\n"
-                    "(1/2):\n"
-                ).strip()
-
-                if abort == "2":
-                    print("Aborting stylistic rewrite so that you can do it before generating question summaries. Please run stylistic_rewrite() and then re-run gen_question_summaries() to generate the question summaries with the rewritten themes.")
-                    return(self.render_df)
-        
-        stylized_content_df_out = pd.DataFrame(columns=["stylized_text", "question_id", "theme_id"])
-
-        for qid in self.summary_to_render["question_id"].unique():
-            question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
-            # Place frozen content here so that it resets for each rq
-            frozen_content = ""
-            for idx, row in question_df.iterrows():
-                question_text = row["question_text"]
-                content = row["thematic_summary"]
-                theme_label = row["theme_label"]
-                theme_id = row["theme_id"]
-                sys_prompt = Prompts().stylistic_rewrite(style=style, index = idx)
-                user_prompt = (
-                    f"CURRENT RESEARCH QUESTION: {question_text}\n"
-                    "FROZEN CONTENT:\n"
-                    f"{frozen_content}\n\n"
-                    f"CURRENT THEME LABEL: {theme_label}\n"
-                    "THEMATIC SUMMARY TO STYLE:\n"
-                    f"{content}\n\n"
-                )
-                fall_back = {"refined_summary": ""}
-
-                json_schema = {
-                    "name": "stylistic_rewrite_generator",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "refined_summary": {
-                                "type": "string",
-                                "description": "Refined thematic summary text."
-                            }
-                        },
-                        "required": ["refined_summary"],
-                        "additionalProperties": False
-                    }
-                }
-                response = utils.call_chat_completion(
-                    sys_prompt=sys_prompt,
-                    user_prompt=user_prompt,
-                    llm_client=self.llm_client,
-                    ai_model=self.ai_model,
-                    return_json=True,
-                    json_schema=json_schema,
-                    fall_back=fall_back
-                )
-
-                # Get the data, transform to df
-                stylized_content = response["refined_summary"]
-                stylized_content_df = pd.DataFrame({
-                    "stylized_text": [stylized_content],
-                    "question_d_id": [qid],
-                    "theme_id": [theme_id],
-                    })
-                
-                # Append to the output df
-                stylized_content_df_out = pd.concat([stylized_content_df_out, stylized_content_df], ignore_index=True)
-                frozen_content += f"{row['theme_label']}\n\n{stylized_content}\n\n"
-        
-        self.stylized_rewrite_df = stylized_content_df_out
-        self.stylized_rewrite_df.to_parquet(os.path.join(self.render_path, config.render_prefix["render_sylized_rewrite_df"] + ".parquet"), index=False)
-        return(stylized_content_df_out)
-    
     def _add_question_summaries_to_render_df(self, render_df, question_summaries: list) -> pd.DataFrame:
         """
         Add question summaries to the render dataframe.
@@ -559,6 +578,13 @@ class Render:
 
         # Concat the list of question dfs with summaries into a single dataframe
         questions_with_summaries_df = pd.concat(list_of_qdfs_with_summaries, ignore_index=True)
+        questions_with_summaries_df = (
+            questions_with_summaries_df
+            .drop(columns=["question_text"], errors="ignore")
+            .merge(self.corpus_state.questions[["question_id", "question_text"]],
+                   on="question_id",
+                   how="left")
+        )
         # Return the resulting dataframe
         return questions_with_summaries_df
 
@@ -590,7 +616,7 @@ class Render:
         if hasattr(self, "question_summary_df"):
             render_df = self._add_question_summaries_to_render_df(
                 render_df,
-                self.question_summary_df
+                self.question_summary_df["content"].to_list()
             )
 
         # --- Stylized rewrite ---
@@ -607,18 +633,23 @@ class Render:
             title_exec_df = self.title_exec_summary_df.copy()
             title_exec_df["question_id"] = None
             title_exec_df["theme_id"] = None
+            # Check if there is a stylized rewrite, in which case copy the content column to the stylized text so we have something to render
+            if "stylized_text" in render_df.columns:
+                title_exec_df["stylized_text"] = title_exec_df["content"] # This is to ensure that if there is a stylized rewrite for the title and exec summary, which otherwise are under content.
             render_df = pd.concat([title_exec_df, render_df], ignore_index=True)
+
 
         # --- Final ordering ---
         render_df["doc_order"] = range(len(render_df))
+        render_df.drop(columns = ["allocated_length", "current_length", "perc_of_max_length", "length_flag"], inplace=True, errors="ignore") # We don't need this column in the render df and it can cause issues if it is left in with null values, so we drop it if it exists. We set errors to ignore just in case it doesn't exist, which can happen if the summary_to_render was generated with an older version of the code that didn't have allocated_length in the summary df.
 
         # --- Save ---
-        self.render_df = render_df
-        render_df.to_parquet(
-            os.path.join(self.render_path, config.render_prefix["render_df"] + ".parquet"),
+        self.final_render_df = render_df
+        self.final_render_df.to_parquet(
+            os.path.join(self.render_path, config.render_prefix["final_render_df"] + ".parquet"),
             index=False
         )
-        return self.render_df
+        return self.final_render_df
     
     def render_output(
         self,
@@ -635,15 +666,17 @@ class Render:
             filename: Base filename (no extension)
         """
 
-        if not hasattr(self, "render_df"):
+        if not hasattr(self, "final_render_df"):
             raise ValueError(
-                "render_df not found. Please run integrate_cosmetic_changes() first."
+                "final_render_df not found. Please run integrate_cosmetic_changes() first."
             )
 
         if output_type not in ["md", "docx", "pdf"]:
             raise ValueError("output_type must be one of: 'md', 'docx', 'pdf'.")
+        
+        os.makedirs(self.output_save_location, exist_ok=True)
 
-        df = self.render_df.copy()
+        df = self.final_render_df.copy()
 
         # Choose text source
         if use_stylized and "stylized_text" in df.columns:
@@ -672,15 +705,16 @@ class Render:
 
             text = row["final_text"]
             attr = row["doc_attr"]
+            question_text = row["question_text"]
 
             if attr == "title":
                 lines.append(f"# {text}\n")
 
             elif attr == "exec_summary":
-                lines.append(f"{text}\n")
+                lines.append(f"## EXECUTIVE SUMMARY\n{text}\n")
 
             elif attr == "question_summary":
-                lines.append(f"## Question Overview\n{text}\n")
+                lines.append(f"## {question_text}\n## Question Overview\n{text}\n")
 
             elif attr == "thematic_summary":
                 lines.append(f"### {row.get('theme_label','')}\n{text}\n")
@@ -698,14 +732,17 @@ class Render:
 
             text = row["final_text"]
             attr = row["doc_attr"]
+            question_text = row["question_text"]
 
             if attr == "title":
                 document.add_heading(text, level=0)
 
             elif attr == "exec_summary":
+                document.add_heading("EXECUTIVE SUMMARY", level=1)
                 document.add_paragraph(text)
 
             elif attr == "question_summary":
+                document.add_heading(question_text, level=1)
                 document.add_heading("Question Overview", level=1)
                 document.add_paragraph(text)
 
@@ -716,31 +753,101 @@ class Render:
         output_path = os.path.join(self.output_save_location, f"{filename}.docx")
         document.save(output_path)
 
-    def _render_to_docx(self, df, filename):
+    def _render_to_pdf(self, df, filename):
 
-        document = Document()
+        def normalize_for_pdf(text):
+            # Convert double newlines into paragraph breaks
+            text = re.sub(r"\n\s*\n", "<br/><br/>", text)
+            # Convert remaining single newlines
+            text = text.replace("\n", "<br/>")
+            return text
+
+        output_path = os.path.join(self.output_save_location, f"{filename}.pdf")
+        doc = SimpleDocTemplate(output_path)
+
+        styles = getSampleStyleSheet()
+        elements = []
 
         for _, row in df.sort_values("doc_order").iterrows():
 
             text = row["final_text"]
+            text = normalize_for_pdf(text)
             attr = row["doc_attr"]
+            question_text = row["question_text"]
 
             if attr == "title":
-                document.add_heading(text, level=0)
+                elements.append(Paragraph(f"<b>{text}</b>", styles["Title"]))
+                elements.append(Spacer(1, 0.3 * inch))
 
             elif attr == "exec_summary":
-                document.add_paragraph(text)
+                elements.append(Paragraph("<b>EXECUTIVE SUMMARY</b>", styles["Heading1"]))
+                elements.append(Paragraph(text, styles["BodyText"]))
+                elements.append(Spacer(1, 0.2 * inch))
 
             elif attr == "question_summary":
-                document.add_heading("Question Overview", level=1)
-                document.add_paragraph(text)
+                elements.append(Paragraph(f"<b>{question_text}</b>", styles["Heading1"]))
+                elements.append(Paragraph("<b>Question Overview</b>", styles["Heading1"]))
+                elements.append(Paragraph(text, styles["BodyText"]))
+                elements.append(Spacer(1, 0.2 * inch))
 
             elif attr == "thematic_summary":
-                document.add_heading(row.get("theme_label",""), level=2)
-                document.add_paragraph(text)
+                elements.append(Paragraph(f"<b>{row.get('theme_label','')}</b>", styles["Heading2"]))
+                elements.append(Paragraph(text, styles["BodyText"]))
+                elements.append(Spacer(1, 0.2 * inch))
 
-        output_path = os.path.join(self.output_save_location, f"{filename}.docx")
-        document.save(output_path)
+        doc.build(elements)
+
+    def trace_claim(self, 
+                    question_id: str, 
+                    theme_label:str, 
+                    citation_lastname: list, 
+                    citation_year: int):
+        
+        """
+        Function that returns the chunks associated with a particular claim in the render_df and returns all the possible insights and chunks associated with that claim. 
+        Takes question_id, theme_label, and citation info. 
+        Note citation_lastname last name is a list of strings for the authors last names. This is a fuzzy match and will return insights for any of the authors in the list. 
+        This is to account for the fact that a paper might have lots of authors and there might be inconsistencies in how authors are listed. 
+        Returns a datafram with the relevant details that the user can parse
+        Down the line we will look to add a insight id to all claims (rather than author date) which can make direct insight and chunk retrieval faster and more accurate, but for now we are checking that this works.
+
+        """
+        
+        # Get the theme_id for the question and theme label
+        theme_id = self.final_render_df[
+            (self.final_render_df["question_id"] == question_id) & (self.final_render_df["theme_label"] == theme_label)
+        ]["theme_id"].iloc[0]
+
+        # use theme id to get the insights that were mapped to the theme in the summary state
+        possible_insights_df = self.summary_state.mapped_theme_list[-1][
+            (self.summary_state.mapped_theme_list[-1]["theme_id"] == theme_id)
+            & (self.summary_state.mapped_theme_list[-1]["question_id"] == question_id)
+        ].copy()
+
+        possible_insights_lst = possible_insights_df["insight_id"].tolist()
+
+        # Get all the insights that match the citation info and the theme_id, merge with chunks to get the chunk_text
+        possible_insights_df = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(possible_insights_lst)].copy()
+        regex_pattern = "|".join(citation_lastname)
+        possible_insights_df = (
+            possible_insights_df[
+            possible_insights_df["paper_author"].str.contains(
+                pattern = regex_pattern, ase=False, na=False, regex=True
+                ) 
+                & (possible_insights_df["paper_date"] == citation_year)
+            ].merge(
+                self.corpus_state.chunks[["paper_id", "chunk_id", "chunk_text"]], 
+                how="left",
+                on=["chunk_id","paper_id"]
+            ).copy()
+        )
+        # Return the relevant columns for the user to parse. Allows them to confirm they have the correct citation.
+        possible_insights_df = possible_insights_df[["insight_id", "insight", "chunk_id", "chunk_text", "paper_title", "paper_author", "paper_date"]]
+        return(possible_insights_df)
+        
+
+
+
 
     
     
