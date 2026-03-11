@@ -466,3 +466,13 @@ We are actively seeking collaboration in the following areas:
 Researchers are encouraged not only to use the system, but to challenge it. Identifying failure modes, instability conditions, or systematic distortions is considered a productive contribution to the development of the method.
 
 This project should be understood as an open methodological experiment in large-scale structured reading.
+
+## Environment
+
+ReadingMachine has been tested on:
+
+- Python 3.12
+- scikit-learn 1.3.2
+- umap-learn 0.5.7
+
+These versions are pinned to avoid compatibility issues between UMAP, HDBSCAN, and sklearn.

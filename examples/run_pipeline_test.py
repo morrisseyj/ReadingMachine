@@ -1,6 +1,6 @@
 
 # Import custom libraries
-from lit_review_machine import core, utils, state, render
+from . import core, utils, state, render
 
 from typing import List
 from dotenv import load_dotenv

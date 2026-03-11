@@ -1,10 +1,10 @@
 
 # import custom libraries
 
-from lit_review_machine import config, utils
-from lit_review_machine.state import CorpusState, SummaryState
-from lit_review_machine.render import Render
-from lit_review_machine.prompts import Prompts
+from . import config, utils
+from .state import CorpusState, SummaryState
+from .render import Render
+from .prompts import Prompts
 
 # import standard libraries
 from typing import List, Any, Optional

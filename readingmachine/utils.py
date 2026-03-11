@@ -1,4 +1,4 @@
-from lit_review_machine.state import CorpusState
+from .state import CorpusState
 
 import ast
 import pandas as pd

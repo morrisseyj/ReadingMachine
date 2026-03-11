@@ -1,10 +1,7 @@
-
 # Import custom libraries and modules
-from ast import pattern
-
-from lit_review_machine import config, utils
-from lit_review_machine.prompts import Prompts
-from lit_review_machine.state import SummaryState, CorpusState
+from . import config, utils
+from .prompts import Prompts
+from .state import SummaryState, CorpusState
 
 
 # Import standard libraries
@@ -22,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 import shutil
+from ast import pattern
 
 
 

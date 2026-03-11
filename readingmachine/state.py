@@ -1,7 +1,5 @@
-
 # Import custom libraries
-from lit_review_machine import utils
-from lit_review_machine import config
+from . import config
 
 # Import standard libraries
 import pandas as pd
@@ -366,14 +364,6 @@ class CorpusState:
                         )
                 setattr(self, attr_name, attr_value)
 
-    # def normalize_list_columns(self, columns):
-    #     for attr_name, attr_value in self.__dict__.items():
-    #         if isinstance(attr_value, pd.DataFrame):
-    #             for col in columns:
-    #                 if col in attr_value.columns:
-    #                     attr_value[col] = attr_value[col].apply(utils.ensure_list_of_strings)
-    #             setattr(self, attr_name, attr_value)
-    
 
 class SummaryState:
     """
