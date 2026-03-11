@@ -16,3 +16,6 @@ outputs/
 
 # Ignore uv.lock
 uv.lock
+
+# Ignore hdbscan results
+hdbscan*

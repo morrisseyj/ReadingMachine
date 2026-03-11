@@ -62,7 +62,7 @@ utils.restart_pipeline()
 
 # We need to pass a df of both the questions and the papers to the ingestor. 
 # If our papers are just in a single folder and not associated with specific questions, then we can just pass the same df for both the questions and the papers, as the ingestor will be able to associate the papers with the questions based on the question ids and text that are present in both dfs. This is a bit of a hack, but it allows us to keep the pipeline flexible and adaptable to different use cases. In this case, we are just using the questions df as a placeholder for the papers df, as we don't have specific papers associated with each question at this point in the pipeline. The insights will be added in later steps of the pipeline, and they will be associated with the questions based on the question ids and text that are present in both dfs.
-# First create a questions dict from the ist
+# First create a questions dict from the list
 questions_dict = {f"question_{idx}": question_text for idx, question_text in enumerate(questions)}
 # Then create a df from the questions dict, with columns for question id and question text
 questions_df = pd.DataFrame(list(questions_dict.items()), columns=["question_id", "question_text"])
@@ -158,8 +158,6 @@ cluster.cum_prop_cluster.to_html("cum_prop_cluster.html")
 # For this small corpus i am happy with the way the clusters look so i don't pass any dict.
 cluster.clean_clusters()
 
-reload()
-
 # Now we move to summarizing the clusters and generating the themes. 
 # Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
 latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
@@ -188,7 +186,6 @@ summarize.populate_themes() # Populated themes can be examined via summarize.pop
 # Then we check for any orphans that might have been dropped in the process - this captures insights that might not have been exposed via the cluster summaries that drove the firt mapping process
 summarize.address_orphans() # Orphans can be examined via summarize.orphans_list. Note that the orphans are not necessarily "orphans" in the sense that they have no thematic home, but rather they are insights that were not captured in the initial cluster summaries and therefore were not mapped to themes in the first pass. The orphans are then fed back into the theme schema generation and mapping process to see if they can be allocated to existing themes or if new themes need to be generated to accommodate them. This iterative process helps to ensure that we are capturing as many insights as possible and that we are not losing important information that might have been missed in the initial cluster summarization and theme mapping steps.
 
-
 # Now we iterate the above process to improve the schema - so that orphans are likely accounted for in a more complete manner than was possible with the cluster summaries
 summarize.gen_theme_schema()
 summarize.map_insights_to_themes()
@@ -197,12 +194,6 @@ summarize.address_orphans() # This will be the final pass for orphans before we 
 
 # Finally we handle redundancy
 summarize.address_redundancy()
-
-
-#####
-reload()
-####
-
 
 #THen we pass the output of the redudancy check to the render class
 latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
@@ -233,8 +224,8 @@ render_output.render_output(output_type = "docx",
 render_output.render_output(output_type = "md",
                             use_stylized=False)
 
-render_output.render_output(output_type = "pdf",
+render_output.render_output(output_type = "md",
                             use_stylized=True)
 
-
-
+render_output.render_output(output_type = "pdf",
+                            use_stylized=True)
