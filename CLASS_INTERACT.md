@@ -81,6 +81,7 @@ Instead they mutate state objects sequentially.
 
 Typical usage pattern:
 
+```
 corpus = CorpusState.load(...)
 
 Ingestor(...).ingest_papers()
@@ -100,6 +101,7 @@ summ.address_orphans()
 summ.address_redundancy()
 
 Render(...).render()
+```
 
 ---
 
