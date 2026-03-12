@@ -1,3 +1,82 @@
+"""
+Rendering layer for ReadingMachine outputs.
+
+This module converts synthesized thematic analyses into presentation-
+ready documents. It operates on completed synthesis artifacts stored
+in `SummaryState` and produces formatted outputs such as Markdown,
+DOCX, and PDF reports.
+
+Unlike the analytical pipeline implemented in `core.py`, the rendering
+layer does not modify analytical state. Instead it performs a series of
+optional presentation transformations that improve readability and
+prepare the synthesis for distribution.
+
+The rendering workflow typically proceeds as follows:
+
+    1. Select summaries to render
+       The renderer determines which synthesis artifact should be used
+       (cluster summaries, populated themes, or redundancy-reduced
+       summaries) based on the current stage of the summarization
+       pipeline.
+
+    2. Optional stylistic rewriting
+       Theme summaries may be rewritten in a different stylistic voice
+       (e.g. academic, journalistic, conversational) while attempting to
+       preserve their analytical content.
+
+    3. Question-level summaries
+       A concise narrative overview is generated for each research
+       question by synthesizing the themes associated with that
+       question.
+
+    4. Executive summary and title
+       The entire synthesis is summarized into a high-level executive
+       overview and document title.
+
+    5. Final render assembly
+       All narrative components are integrated into a single ordered
+       render DataFrame representing the final document structure.
+
+    6. Document export
+       The render DataFrame is converted into Markdown, DOCX, or PDF
+       formats for distribution.
+
+Render artifacts are persisted to disk so that expensive LLM operations
+(such as stylistic rewrites or executive summary generation) can be
+reused across sessions without recomputation.
+
+State Interaction
+-----------------
+
+The rendering layer reads from the following state objects:
+
+    SummaryState
+        Provides the synthesized thematic summaries.
+
+    CorpusState
+        Provides source metadata and traceability information.
+
+Rendering artifacts are intentionally not stored in a dedicated state
+object because they represent terminal presentation outputs rather than
+iterative analytical state.
+
+Traceability
+------------
+
+The module also provides utilities for tracing claims appearing in the
+rendered synthesis back to their originating insights and document
+chunks. This preserves the pipeline’s core design principle that all
+synthesized claims remain auditable against the underlying corpus.
+
+Design Principle
+----------------
+
+Rendering separates *analysis* from *presentation*. The analytical
+pipeline produces structured thematic knowledge, while the rendering
+layer focuses on transforming that structure into readable narrative
+outputs without altering the underlying analytical artifacts.
+"""
+
 # Import custom libraries and modules
 from . import config, utils
 from .prompts import Prompts
@@ -19,8 +98,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 import shutil
-from ast import pattern
-
 
 
 class Render:
@@ -37,16 +114,103 @@ class Render:
         output_save_location: str = os.path.join(config.OUTPUT_SAVE_LOCATION)
         ):
         """
-        Wrapper for a DataFrame of summaries and tools for AI-assisted peer review.
-        
-        Args:
-            summary_state: SummaryState object containing the summaries and related metadata.
-            corpus_state: CorpusState object containing the paper metadata and related information.
-            force: If True allows rendering of summaries even if the summarization process has not been completed - either orphan handling or redundancy pass. Use with caution as the summaries may not be fully processed and may contain redundancies or unhandled orphans. 
-            render_object: Optional tuple specifying which object to render and at which stage (articulated as list index) (e.g. "cluster_summary", 0" or "populated_theme", -1"). Must be passed with force=True. If None, the class will automatically determine which summaries to render based on the current stage of the summarization process as indicated by summary_state.status().
-            summary_string: Optional; pre-computed concatenated summary string.
-            ai_peer_review: Optional; stores the AI peer review output as a dictionary.
-            output_save_location: Directory to save documents.
+        Rendering and presentation layer for ReadingMachine outputs.
+
+        The Render class converts synthesized thematic summaries into
+        presentation-ready documents and provides optional LLM-assisted
+        formatting tools for improving narrative readability.
+
+        Unlike the analytical pipeline stages, rendering artifacts are not
+        part of the core analytical state. Instead they represent terminal
+        presentation outputs derived from `SummaryState`. These artifacts are
+        persisted separately so that expensive LLM-assisted formatting steps
+        (such as stylistic rewrites or executive summary generation) can be
+        reused across sessions without recomputation.
+
+        The rendering pipeline supports several optional post-processing
+        operations:
+
+            • stylistic rewriting of theme summaries
+            • question-level narrative summaries
+            • executive summary generation
+            • title generation
+            • final document assembly
+            • export to Markdown, DOCX, or PDF
+
+        Rendering also provides a traceability utility that allows users to
+        locate the original insights and document chunks associated with a
+        claim appearing in the final synthesis.
+
+        Initialization performs three main steps:
+
+            1. Determine which synthesis artifact should be rendered based on
+               the current stage of the summarization pipeline.
+            2. Compute a deterministic hash of the selected summary object to
+               ensure rendering operations correspond to a stable analytical
+               state.
+            3. Recover any previously generated rendering artifacts if the
+               stored render hash matches the current summary content.
+
+        Parameters
+        ----------
+        llm_client : Any
+            Client used to call the LLM for rendering-related operations
+            including stylistic rewriting, question summaries, and
+            executive summary generation.
+
+        ai_model : str
+            Model identifier used for rendering-related LLM calls.
+
+        summary_state : SummaryState
+            Object containing the synthesized thematic summaries and related
+            synthesis artifacts produced by the `Summarize` pipeline stage.
+
+        corpus_state : CorpusState
+            Object containing corpus metadata and insight information used
+            for traceability and claim verification during rendering.
+
+        force : bool, default=False
+            If True, bypass stage validation checks and allow rendering even
+            if the synthesis pipeline has not completed the orphan or
+            redundancy passes. This should be used cautiously because earlier
+            synthesis stages may contain unresolved omissions or redundancy.
+
+        render_object : tuple[str, int], optional
+            Explicitly specify which synthesis artifact to render and which
+            index to use. For example:
+
+                ("cluster_summary", 0)
+                ("populated_theme", -1)
+                ("redundancy", 0)
+
+            This option requires `force=True`.
+
+        render_path : str
+            Directory where persistent rendering artifacts are stored. These
+            include stylistic rewrites, question summaries, executive
+            summaries, and the final render DataFrame.
+
+        render_hash : str
+            Filename used to store a deterministic hash of the summary object
+            being rendered. This hash ensures that previously generated render
+            artifacts are only reused when the underlying summaries have not
+            changed.
+
+        output_save_location : str
+            Directory where exported documents (Markdown, DOCX, or PDF) will
+            be written.
+
+        Notes
+        -----
+        Rendering operations are guarded by a summary hash mechanism that
+        prevents accidental reuse of formatting artifacts generated from a
+        different synthesis state.
+
+        If a previous render hash is detected but does not match the current
+        summary object, the user is prompted to either:
+
+            (1) abort rendering to avoid overwriting prior results
+            (2) clear previous render artifacts and start a new render pass
         """
         # Check that we can instantiate this class - i.e. summaries have been generated
         if summary_state.cluster_summary_list == [] and summary_state.populated_theme_list == []:
@@ -81,7 +245,27 @@ class Render:
 
     def _get_summaries_for_render(self, force) -> pd.DataFrame:
         """
-        Determine which summaries to render based on the current stage of the summarization process, as indicated by summary_state.status(). If force is True, will render the summaries from the current stage even if the summarization process has not been completed. If render_object is specified, will render the specified object at the specified stage regardless of the current stage or force setting.
+        Select the summary object that should be rendered.
+
+        This method determines which synthesis artifact should be used as the
+        source for rendering based on the current stage of the summarization
+        pipeline.
+
+        Rendering normally occurs after either:
+
+            - the orphan integration pass (fidelity-first output), or
+            - the redundancy reduction pass (readability-first output).
+
+        If `force=True`, earlier stages such as cluster summaries or populated
+        themes may be rendered directly.
+
+        If `render_object` is explicitly provided, that object is returned
+        regardless of pipeline stage.
+
+        Returns
+        -------
+        pd.DataFrame
+            The summary DataFrame selected for rendering.
         """
         # First check whether the user has specified a render object, if so make sure they have set flag to true
         if self.render_object is not None and force == False:
@@ -135,8 +319,22 @@ class Render:
     @staticmethod
     def _compute_df_hash(df) -> str:
         """
-        Create a deterministic SHA-256 hash of a DataFrame.
-        Used for state fingerprinting and resume validation.
+        Compute a deterministic SHA-256 hash of a DataFrame.
+
+        The DataFrame is normalized prior to hashing by:
+
+            - filling NaN values
+            - sorting columns alphabetically
+            - sorting rows deterministically
+
+        This ensures the resulting hash is stable across runs and can be used
+        to detect whether the underlying summary content has changed between
+        render passes.
+
+        Returns
+        -------
+        str
+            SHA-256 hash representing the normalized DataFrame.
         """
 
         if df is None or df.empty:
@@ -164,10 +362,30 @@ class Render:
                    
     def _reinitialize_render(self, current_summary_hash) -> None:
         """
-        Checks if there is another render hash file saved. If so, checks the hashes to ensure match
-        If conflict force abort or overwrite
-        If hash match, reload the render df and any attributes created thus far
-        If no previous render files save the current hash  
+        Initialize or recover rendering artifacts.
+
+        This method ensures that rendering operations correspond to a stable
+        summary state by comparing the current summary hash with any previously
+        stored render hash.
+
+        Behavior
+        --------
+
+        If no previous render hash exists:
+            A new hash file is created and rendering proceeds normally.
+
+        If a previous render hash exists and matches:
+            Previously generated rendering artifacts are loaded and attached
+            to the current Render instance.
+
+        If a previous render hash exists but differs:
+            The user is prompted to either:
+
+                1. Abort rendering to prevent overwriting previous outputs.
+                2. Delete previous render artifacts and proceed with a new render.
+
+        This mechanism prevents accidental reuse of rendering artifacts that
+        were generated from a different synthesis state.
 
         """
         # Check if any previous render objects exist:
@@ -235,10 +453,50 @@ class Render:
     
     def stylistic_rewrite(self, style: str = "academic") -> pd.DataFrame:
         """
-        Rewrites the themes in render_df in a specific style. Default is academic, but this can be varied (e.g. journalistic, conversational, engaging,etc) depending on user preference and intended audience. The rewrite will attempt to maintain the original meaning and insights while improving readability and engagement.
-        Also goes about varying the language to make the content more engaging and less monotonous. 
-        While this re-write intends to maintain complete fidelity any re-write risks some insight loss. 
-        This is an optional pass for the user if they want to prioritize readability over fidelity. 
+        Apply a stylistic rewrite to theme summaries.
+
+        This optional rendering step rewrites the thematic summaries in a
+        specified stylistic register (e.g., academic, journalistic,
+        conversational) while attempting to preserve the original meaning
+        and analytical content.
+
+        The rewrite operates sequentially within each research question.
+        Previously rewritten themes are passed to the model as frozen context
+        to maintain stylistic consistency and narrative continuity across
+        themes.
+
+        Parameters
+        ----------
+        style : str, default="academic"
+            Target writing style for the rewritten summaries. The prompt
+            template determines how this style is interpreted by the model.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing rewritten theme summaries with columns:
+
+                - stylized_text
+                - question_id
+                - theme_id
+
+        Behavior
+        --------
+        If a stylistic rewrite already exists, the user is prompted to either:
+
+            (1) regenerate the rewrite
+            (2) reuse the existing rewrite
+
+        If question summaries have already been generated, the user is warned
+        that stylistic rewriting ideally occurs before question-level summaries
+        so that stylistic consistency propagates through later rendering stages.
+
+        Notes
+        -----
+        This step prioritizes readability and narrative flow. Although prompts
+        attempt to preserve analytical fidelity, any rewrite carries some risk
+        of information loss or semantic drift. For maximum fidelity, users may
+        prefer to skip this step. 
         """
         # First check wheter a stylistic rewrite has already been done, if so offer reload or regenerate options
         if hasattr(self, "stylized_rewrite_df"): 
@@ -253,7 +511,7 @@ class Render:
                 
             if rerun == "2":
                 print("Keeping existing stylistic rewrite.")
-                return self.stylized_rewrite
+                return self.stylized_rewrite_df
             else:                
                 print("Regenerating stylistic rewrite.")
         
@@ -343,9 +601,39 @@ class Render:
     
     def _gen_question_payload(self, qid) -> str:
         """
-        Generates a string that can be used as the payload to the llm call.
-        The string is a concat of the themmatic summaries preceeded with the question text and with clear boundaries between the themes
-        It can be used as the payload for the question summries and as part of the exec summaries
+        Construct the thematic payload for a research question.
+
+        This helper method concatenates all theme summaries associated with
+        a specific research question into a single structured text block.
+        Each theme is clearly labeled and separated with boundary markers
+        so that the LLM can distinguish between themes when generating
+        higher-level summaries.
+
+        The resulting string is used as the input payload for:
+
+            - question-level summaries
+            - executive summaries
+
+        Parameters
+        ----------
+        qid : str or int
+            Identifier of the research question whose themes should be
+            aggregated.
+
+        Returns
+        -------
+        str
+            Concatenated thematic content formatted as:
+
+                Theme: <theme_label>
+                <thematic_summary>
+                --- END THEME ---
+
+        Notes
+        -----
+        This structured format improves model comprehension by explicitly
+        separating themes while preserving their ordering within the
+        research question.
         """
         question_df = self.summary_to_render[self.summary_to_render["question_id"] == qid].copy()
         output = ""
@@ -358,6 +646,46 @@ class Render:
     
     
     def gen_question_summaries(self) -> pd.DataFrame:
+
+        """
+        Generate question-level summaries from theme summaries.
+
+        This method synthesizes the theme summaries associated with each
+        research question into a concise overview paragraph. The goal is
+        to provide a high-level narrative summary that captures the
+        thematic structure identified during synthesis.
+
+        Each research question is processed independently. All theme
+        summaries belonging to that question are combined into a structured
+        payload before being sent to the LLM for summarization.
+
+        Behavior
+        --------
+        If question summaries already exist, the user is prompted to either:
+
+            (1) regenerate the summaries
+            (2) keep the existing summaries
+
+        If a stylistic rewrite has not been performed, the user is warned
+        that stylistic rewriting can be applied prior to question summary
+        generation so that stylistic changes propagate through the summary.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the generated summaries with columns:
+
+                - content
+                - doc_attr
+                - question_id
+                - question_text
+
+        Notes
+        -----
+        Question summaries serve as an intermediate narrative layer between
+        individual theme summaries and higher-level outputs such as
+        executive summaries or final report sections.
+        """
         
         # First check whether question summaries already exist, if so offer reload or regenerate options
         if hasattr(self, "question_summary_df"):
@@ -467,6 +795,38 @@ class Render:
     
     
     def _gen_exec_summary_payload(self) -> str:
+        """
+        Construct the payload used to generate the executive summary.
+
+        This method aggregates the thematic summaries for all research
+        questions into a single structured text block. Each research
+        question section contains its associated theme summaries, and
+        questions are clearly separated with boundary markers.
+
+        The resulting payload provides the LLM with the full synthesized
+        thematic structure of the corpus so it can generate a coherent
+        executive overview of the findings.
+
+        Returns
+        -------
+        str
+            Structured text payload containing all theme summaries grouped
+            by research question in the following format:
+
+                Research Question: <question_text>
+                Theme: <theme_label>
+                <thematic_summary>
+                --- END THEME ---
+                ...
+                === END QUESTION ===
+
+        Notes
+        -----
+        This payload structure ensures the model has visibility into the
+        complete synthesis output while preserving the boundaries between
+        themes and research questions.
+        """
+
         temp_summary_df = self.summary_to_render.copy()
         temp_summary_df = temp_summary_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
 
@@ -482,6 +842,51 @@ class Render:
     
 
     def gen_exec_summary(self, word_count: int = 500) -> str:
+        """
+        Generate the executive summary and document title.
+
+        This method produces a high-level narrative overview of the entire
+        synthesis by summarizing the thematic results across all research
+        questions. It also generates a concise title describing the overall
+        synthesis.
+
+        The LLM receives the aggregated theme summaries for all research
+        questions and produces:
+
+            • an executive summary in continuous prose
+            • a concise title for the document
+
+        Parameters
+        ----------
+        word_count : int, default=500
+            Target length for the executive summary in words.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the generated title and executive summary
+            with columns:
+
+                - content
+                - doc_attr
+
+            Where `doc_attr` indicates whether the row represents the
+            document title or the executive summary.
+
+        Behavior
+        --------
+        If an executive summary and title already exist, the user is
+        prompted to either:
+
+            (1) regenerate them
+            (2) keep the existing results
+
+        Notes
+        -----
+        The generated outputs are stored in `self.title_exec_summary_df`
+        and persisted to disk so that expensive LLM calls do not need to
+        be repeated across render sessions.
+        """
 
         if hasattr(self, "title_exec_summary_df"):
             rerun = None
@@ -551,9 +956,36 @@ class Render:
     
     def _add_question_summaries_to_render_df(self, render_df, question_summaries: list) -> pd.DataFrame:
         """
-        Add question summaries to the render dataframe.
-        Outputs a dataframe with questions and summaries
-        This will still have to be integrated title and exec summary from the in render_df - this check happens in gen_question_summaries
+        Insert question-level summaries into the render DataFrame.
+
+        This helper method integrates question summaries into the
+        theme-level render structure. Each question summary is inserted
+        before the themes associated with that research question so that
+        the final rendered output follows a clear narrative hierarchy:
+
+            research question
+            → question summary
+            → theme summaries
+
+        Parameters
+        ----------
+        render_df : pd.DataFrame
+            DataFrame containing theme summaries prepared for rendering.
+
+        question_summaries : list[str]
+            List of generated summaries for each research question.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated render DataFrame containing question summaries inserted
+            ahead of their corresponding themes.
+
+        Notes
+        -----
+        This method only inserts the summaries into the rendering structure.
+        Integration with the title and executive summary occurs later during
+        `integrate_cosmetic_changes()`.
         """
         working_render_df = render_df.copy()
 
@@ -588,6 +1020,52 @@ class Render:
 
 
     def integrate_cosmetic_changes(self) -> pd.DataFrame:
+        """
+        Construct the final render DataFrame by integrating cosmetic artifacts.
+
+        This method combines the synthesized thematic summaries with
+        optional presentation-layer artifacts produced during the rendering
+        stage. These artifacts include:
+
+            - question summaries
+            - stylistic rewrites
+            - title and executive summary
+
+        The resulting DataFrame represents the fully assembled document
+        structure used for final export (Markdown, DOCX, or PDF).
+
+        Returns
+        -------
+        pd.DataFrame
+            Final render DataFrame containing all narrative components and
+            rendering metadata.
+
+        Workflow
+        --------
+        The method performs the following steps:
+
+            1. Validate that the summary hash matches the render hash
+            recorded during initialization.
+            2. Construct the base render DataFrame from theme summaries.
+            3. Insert question summaries if available.
+            4. Merge stylistic rewrites if present.
+            5. Prepend the title and executive summary.
+            6. Assign a deterministic document order.
+            7. Persist the final render DataFrame.
+
+        Raises
+        ------
+        ValueError
+            If the underlying summary data has changed since the Render
+            object was initialized.
+
+        Notes
+        -----
+        The hash validation step ensures that cosmetic artifacts are only
+        applied to the exact synthesis output from which they were
+        generated, preventing inconsistencies if summaries are modified
+        after rendering begins.
+        """
 
         # --- Hash validation ---
         current_summary_hash = self._compute_df_hash(self.summary_to_render)
@@ -656,12 +1134,47 @@ class Render:
         filename: str = "rendered_output"
     ) -> None:
         """
-        Renders the integrated render_df into the selected output format.
+        Export the rendered synthesis to a document format.
 
-        Args:
-            output_type: "md", "docx", or "pdf"
-            use_stylized: If True uses stylized_text when available.
-            filename: Base filename (no extension)
+        This method converts the final render DataFrame into a structured
+        document and writes it to disk in the requested format.
+
+        Supported formats include:
+
+            - Markdown (.md)
+            - Microsoft Word (.docx)
+            - PDF (.pdf)
+
+        Parameters
+        ----------
+        output_type : str, default="md"
+            Output format to generate. Must be one of:
+
+                "md"
+                "docx"
+                "pdf"
+
+        use_stylized : bool, default=False
+            If True, use the stylistically rewritten text (`stylized_text`)
+            when available. If False, the original synthesized summaries
+            (`content`) are used.
+
+        filename : str, default="rendered_output"
+            Base filename for the exported document (without extension).
+
+        Raises
+        ------
+        ValueError
+            If `final_render_df` has not yet been created or if the
+            specified output type is unsupported.
+
+        Notes
+        -----
+        This method dispatches rendering to format-specific helper methods:
+
+            - `_render_to_markdown`
+            - `_render_to_docx`
+            - `_render_to_pdf`
         """
 
         if not hasattr(self, "final_render_df"):
@@ -697,6 +1210,32 @@ class Render:
 
     def _render_to_markdown(self, df, filename):
 
+        """
+        Render the synthesis document as Markdown.
+
+        This method converts the final render DataFrame into a Markdown
+        document with hierarchical headings corresponding to the narrative
+        structure of the synthesis.
+
+        Structure
+        ---------
+        The resulting Markdown document is organized as:
+
+            Title
+            Executive Summary
+            Research Question
+                Question Overview
+                Theme Summaries
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Render DataFrame containing ordered narrative components.
+
+        filename : str
+            Output filename (without extension).
+        """
+
         lines = []
 
         for _, row in df.sort_values("doc_order").iterrows():
@@ -723,6 +1262,31 @@ class Render:
             f.write("\n".join(lines))
 
     def _render_to_docx(self, df, filename):
+        """
+        Render the synthesis document as a Microsoft Word file.
+
+        This method converts the render DataFrame into a structured DOCX
+        document using hierarchical headings to represent the synthesis
+        narrative.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Render DataFrame containing ordered narrative components.
+
+        filename : str
+            Output filename (without extension).
+
+        Notes
+        -----
+        The document structure mirrors the Markdown renderer but uses
+        Word heading levels to create the hierarchy:
+
+            Title → Heading 0
+            Executive Summary → Heading 1
+            Research Questions → Heading 1
+            Themes → Heading 2
+        """
 
         document = Document()
 
@@ -752,6 +1316,28 @@ class Render:
         document.save(output_path)
 
     def _render_to_pdf(self, df, filename):
+        """
+        Render the synthesis document as a PDF.
+
+        This method converts the render DataFrame into a PDF document using
+        the ReportLab library.
+
+        Paragraph formatting is normalized to ensure that line breaks in the
+        synthesized summaries are preserved in the final PDF.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Render DataFrame containing ordered narrative components.
+
+        filename : str
+            Output filename (without extension).
+
+        Notes
+        -----
+        Markdown-style line breaks are converted into HTML-style break tags
+        so that the ReportLab paragraph renderer correctly interprets them.
+        """
 
         def normalize_for_pdf(text):
             # Convert double newlines into paragraph breaks
@@ -802,12 +1388,56 @@ class Render:
                     citation_year: int):
         
         """
-        Function that returns the chunks associated with a particular claim in the render_df and returns all the possible insights and chunks associated with that claim. 
-        Takes question_id, theme_label, and citation info. 
-        Note citation_lastname last name is a list of strings for the authors last names. This is a fuzzy match and will return insights for any of the authors in the list. 
-        This is to account for the fact that a paper might have lots of authors and there might be inconsistencies in how authors are listed. 
-        Returns a datafram with the relevant details that the user can parse
-        Down the line we will look to add a insight id to all claims (rather than author date) which can make direct insight and chunk retrieval faster and more accurate, but for now we are checking that this works.
+        Trace a claim in the rendered synthesis back to its source text.
+
+        This method allows users to retrieve the original insights and
+        document chunks that contributed to a specific claim appearing in
+        the rendered thematic summaries.
+
+        The lookup proceeds through the pipeline traceability chain:
+
+            theme
+            → mapped insights
+            → source insight records
+            → source document chunks
+
+        Parameters
+        ----------
+        question_id : str
+            Identifier of the research question containing the claim.
+
+        theme_label : str
+            Theme label under which the claim appears in the rendered output.
+
+        citation_lastname : list[str]
+            List of author last names used to identify the source paper.
+            Matching is fuzzy and will return results if any of the provided
+            names appear in the author field.
+
+        citation_year : int
+            Publication year used to filter the source paper.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the candidate insights and document chunks
+            associated with the specified claim. Columns include:
+
+                - insight_id
+                - insight
+                - chunk_id
+                - chunk_text
+                - paper_title
+                - paper_author
+                - paper_date
+
+        Notes
+        -----
+        This method provides a lightweight traceability mechanism for
+        verifying synthesized claims against the underlying corpus.
+
+        Future versions of the pipeline may allow direct retrieval via
+        `insight_id` rather than citation metadata.
 
         """
         
@@ -830,7 +1460,7 @@ class Render:
         possible_insights_df = (
             possible_insights_df[
             possible_insights_df["paper_author"].str.contains(
-                pattern = regex_pattern, ase=False, na=False, regex=True
+                pattern = regex_pattern, case=False, na=False, regex=True
                 ) 
                 & (possible_insights_df["paper_date"] == citation_year)
             ].merge(

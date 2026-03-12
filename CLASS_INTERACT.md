@@ -162,7 +162,7 @@ Synthesis history
 This separation is what enables:
 
 - inspectability  
--- reproducibility  
+- reproducibility  
 - iterative refinement of themes
 
 without mutating the underlying corpus representation.
