@@ -81,27 +81,27 @@
 ---
 # Iterative Synthesis Loop
 
-cluster summaries
-        │
-        ▼
-theme schema generation
-        │
-        ▼
-insight → theme mapping
-        │
-        ▼
-theme population
-        │
-        ▼
-orphan detection
-        │
-        ▼
-orphan reintegration
-        │
-        ▼
-(optional) regenerate schema
-        │
-        └─────────────── repeat ────────────────
+cluster summaries  
+        │  
+        ▼  
+theme schema generation  
+        │  
+        ▼  
+insight → theme mapping  
+        │  
+        ▼  
+theme population  
+        │  
+        ▼  
+orphan detection  
+        │  
+        ▼  
+orphan reintegration  
+        │  
+        ▼  
+(optional) regenerate schema  
+        │  
+        └─────────────── repeat ────────────────  
 
 ---
 
