@@ -30,16 +30,77 @@ import math
 
 class Ingestor:
     """
-    Class to ingest PDF or HTML papers into a CorpusState object.
-    Validates papers against known question_ids and populates corpus_state.full_text.
+    Document ingestion and metadata extraction stage of the ReadingMachine pipeline.
 
-    Attributes:
-        corpus_state: CorpusState object containing literature metadata.
-        file_path: Directory containing PDF/HTML files to ingest.
-        llm_client: Client for calling the LLM.
-        ai_model: Model name to use for LLM.
-        confirm_read: Optional; set to "c" to skip ingestion error confirmation.
-        ingestion_errors: List of file paths that failed ingestion.
+    The `Ingestor` class reads source documents from a filesystem directory
+    and converts them into the structured corpus representation used by the
+    rest of the pipeline. This stage transforms raw files into entries in the
+    `CorpusState.full_text` table and ensures that each document is linked to
+    the correct research question and paper identifier.
+
+    Supported file formats
+    ----------------------
+    - PDF
+    - HTML
+
+    HTML files are cleaned using structural parsing and then optionally
+    processed by an LLM to extract the main textual content of the page.
+
+    After ingestion, the class optionally performs **metadata extraction**
+    using an LLM. This step populates the following fields for each paper:
+
+    - paper_title
+    - paper_author
+    - paper_date
+
+    These values are extracted from the beginning of the document text and
+    validated for type consistency before being written back into
+    `corpus_state.insights`.
+
+    Pipeline role
+    -------------
+    The ingestion stage produces two key artifacts:
+
+        corpus_state.full_text
+        corpus_state.insights (cleaned and metadata-complete)
+
+    These artifacts are later used by downstream stages such as:
+
+    - chunking
+    - insight extraction
+    - clustering
+    - thematic synthesis
+
+    Design principles
+    -----------------
+    The ingestion logic is intentionally strict about identifier consistency.
+
+    Document filenames are expected to correspond to the `paper_id` values
+    present in the insights table. Duplicate filenames or mismatches between
+    the corpus metadata and filesystem contents will trigger warnings or
+    user confirmation prompts.
+
+    Attributes
+    ----------
+    corpus_state : CorpusState
+        Working corpus state containing literature metadata and insight
+        records. This object is mutated during ingestion.
+
+    file_path : str
+        Directory containing the source documents to ingest.
+
+    llm_client : Any
+        LLM client used for HTML parsing and metadata extraction.
+
+    ai_model : str
+        Model name used when making LLM calls.
+
+    ingestion_errors : List[str]
+        List of files that failed ingestion due to parsing errors.
+
+    pickle_path : str
+        Directory used to persist intermediate metadata extraction results
+        for resume support.
     """
 
     def __init__(
@@ -93,9 +154,27 @@ class Ingestor:
                      
     def _list_files(self) -> List[str]:
         """
-        Recursively list all PDF and HTML files in the target directory
-        Identify duplicate file names to maintain unique paper_id across the data.
-        Show the user any conflicting paths with absolute path to allow them to resolve before ingestion.
+        Discover ingestible documents in the configured directory.
+
+        This method recursively searches the ingestion directory for files
+        with supported extensions (`.pdf` or `.html`). It also checks for
+        duplicate filenames across subdirectories.
+
+        Because `paper_id` values are derived from filenames, duplicate
+        filenames would produce conflicting identifiers during ingestion.
+        When duplicates are detected, the method raises an error and reports
+        the full paths of the conflicting files so the user can resolve them.
+
+        Returns
+        -------
+        List[str]
+            Absolute paths to all ingestible documents discovered in the
+            directory tree.
+
+        Raises
+        ------
+        ValueError
+            If duplicate filenames are detected in the ingestion directory.
         
         """
         list_of_path_obj: List[str] = []
@@ -130,13 +209,45 @@ class Ingestor:
         return [p.absolute() for p in list_of_path_obj]
 
     def _ingest_pdf(self, path: str) -> List[str]:
-        """Extract text from all pages of a PDF file."""
+        """
+        Extract text from a PDF document.
+
+        Each page of the document is extracted separately using PyMuPDF.
+        The resulting list preserves page boundaries, which can be useful
+        for downstream debugging or metadata extraction.
+
+        Parameters
+        ----------
+        path : str
+            Absolute path to the PDF file.
+
+        Returns
+        -------
+        List[str]
+            List of page-level text strings.
+        """
         with pymupdf.open(path) as doc:
             return [doc[i].get_text() for i in range(doc.page_count)]
 
     @staticmethod
     def _html_cleaner(html_content: str) -> str:
-        """Clean HTML content by removing structural noise and returning plain text."""
+        """
+       Remove structural noise from raw HTML.
+
+        The function removes common layout elements such as navigation,
+        scripts, and style tags before extracting visible text from the
+        `<body>` element.
+
+        Parameters
+        ----------
+        html_content : str
+            Raw HTML content.
+
+        Returns
+        -------
+        str
+            Cleaned plain-text representation of the document.
+        """
         soup = BeautifulSoup(html_content, "html.parser")
         for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
             tag.decompose()
@@ -147,7 +258,26 @@ class Ingestor:
 
     @staticmethod
     def _html_chunker(clean_html: str, token_limit: int = 16000) -> List[str]:
-        """Split HTML text into chunks if it exceeds the token limit."""
+        """
+        Split cleaned HTML text into segments suitable for LLM processing.
+
+        Large HTML documents may exceed the token limits of the model used
+        for HTML parsing. This function divides the cleaned text into chunks
+        that can be safely processed by the LLM.
+
+        Parameters
+        ----------
+        clean_html : str
+            Plain-text HTML content.
+
+        token_limit : int
+            Maximum character length per chunk.
+
+        Returns
+        -------
+        List[str]
+            List of text segments to be processed by the LLM.
+        """
         if len(clean_html) == 0:
             return [""]
         elif len(clean_html) > token_limit:
@@ -163,7 +293,27 @@ class Ingestor:
             return [clean_html]
 
     def _llm_parse_html(self, html_list: List[str], prompt: str) -> List[str]:
-        """Call the LLM to extract meaningful content from HTML chunks."""
+        """
+        Use an LLM to extract meaningful content from HTML segments.
+
+        Some HTML pages contain large amounts of structural noise that cannot
+        be reliably removed with rule-based parsing alone. This method sends
+        HTML segments to the LLM along with a prompt instructing the model to
+        extract the main textual content.
+
+        Parameters
+        ----------
+        html_list : List[str]
+            List of HTML text segments to process.
+
+        prompt : str
+            System prompt used to guide the extraction.
+
+        Returns
+        -------
+        List[str]
+            Cleaned textual segments returned by the model.
+        """
         if html_list[0] == "":
             return [""]
         output: List[str] = []
@@ -182,7 +332,27 @@ class Ingestor:
         return output
 
     def _paper_ingestor(self, file_full_path: str) -> List[str]:
-        """Read PDF or HTML file and return list of page texts or processed chunks."""
+        """
+        Dispatch ingestion based on file type.
+
+        This method determines the file format and routes the document to
+        the appropriate ingestion routine.
+
+        Supported formats:
+
+        - PDF → parsed with PyMuPDF
+        - HTML → cleaned, chunked, and optionally processed by the LLM
+
+        Parameters
+        ----------
+        file_full_path : str
+            Absolute path to the document.
+
+        Returns
+        -------
+        List[str]
+            List of text segments representing the document contents.
+        """
         if Path(file_full_path).suffix.lower() == ".pdf":
             return self._ingest_pdf(file_full_path)
         
@@ -198,10 +368,37 @@ class Ingestor:
 
     def ingest_papers(self) -> pd.DataFrame:
         """
-        Ingest all papers and populate corpus_state.full_text.
-        Returns a DataFrame with columns ['paper_path', 'pages', 'paper_id', 'question_id', 'full_text'].
-        """
+        Ingest all documents in the configured directory.
 
+        This method performs the primary ingestion workflow:
+
+        1. Discover files in the ingestion directory
+        2. Parse each document into text
+        3. Track ingestion success or failure
+        4. Match ingested documents with expected `paper_id` values
+        5. Construct the `full_text` corpus table
+        6. Clean the insights table of unmatched or unused records
+
+        The resulting full text representation is stored in
+        `corpus_state.full_text`.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights table with only successfully ingested papers.
+
+        Notes
+        -----
+        The method performs several integrity checks:
+
+        - documents without matching IDs are flagged
+        - expected documents without files are reported
+        - ingestion failures are tracked in `.ingestion_errors`
+
+        User confirmation prompts are used when mismatches occur to
+        prevent accidental loss of records.
+        
+        """
         
         working_insights = (
             self.corpus_state.insights.copy()
@@ -315,7 +512,34 @@ class Ingestor:
         print("\nPaper ingestion complete")
 
     def _get_metadata_from_llm(self, paper_id: str, text: str) -> dict[str, Any]:
-        """Call the LLM to extract metadata from the first three pages of a paper."""
+        """
+        Extract publication metadata from a document using an LLM.
+
+        The model is provided with the beginning of the document text
+        (typically the first few pages) and asked to identify:
+
+        - paper_title
+        - paper_author
+        - paper_date
+
+        Parameters
+        ----------
+        paper_id : str
+            Identifier of the paper being processed.
+
+        text : str
+            Portion of the document text used for metadata extraction.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing extracted metadata fields.
+
+        Raises
+        ------
+        KeyError
+            If the LLM response is missing required metadata keys.
+        """
         
         # Set variables for the call_chat_completion function from utils
         sys_prompt = Prompts().get_metadata()
@@ -355,6 +579,49 @@ class Ingestor:
     
     @staticmethod
     def _metadata_type_check(x, desired_type):
+            """
+            Normalize and validate metadata values returned by the LLM.
+
+            LLM responses can contain inconsistent or unexpected data types
+            (e.g., strings, lists, dictionaries, or malformed values). This
+            helper function coerces metadata values into the expected type
+            while safely handling missing or invalid entries.
+
+            The function applies the following rules:
+
+            - Explicit missing values (`NA`, empty strings, or pandas NA)
+            are converted to `pd.NA`.
+            - If a string is provided and the desired type is `int`,
+            the function attempts to parse the string as an integer
+            (used primarily for publication year).
+            - If the value already matches the desired type, it is
+            returned unchanged.
+            - Unexpected structures (lists, dictionaries, etc.) are
+            treated as missing values and converted to `pd.NA`.
+
+            Parameters
+            ----------
+            x : Any
+                Metadata value returned by the LLM.
+
+            desired_type : type
+                Expected Python type for the metadata field. Currently
+                used with `str` (title, author) and `int` (publication year).
+
+            Returns
+            -------
+            Any
+                A cleaned value matching the desired type, or `pd.NA`
+                if the input cannot be safely converted.
+
+            Notes
+            -----
+            This function exists to protect the integrity of the corpus
+            metadata tables. LLM outputs are inherently probabilistic and
+            may occasionally return unexpected formats; treating such values
+            as missing prevents downstream type errors and preserves the
+            stability of joins and aggregations later in the pipeline.
+            """
             # Missing or explicit NA
             if pd.isna(x):
                 return pd.NA
@@ -381,6 +648,31 @@ class Ingestor:
                            metadata_check_df: pd.DataFrame, # The dataframe containing the columns neccesary for the metadata check which is paper_id, paper_title, paper_author, paper_date, and full_text.
                            recovered_metadata_check: Optional[List[pd.DataFrame]] = None # The recoevered metadata from a previous run if the metadata check was interrupted and needs to be resumed. 
                            ) -> List[pd.DataFrame]:
+        
+        """
+        Populate document metadata using LLM extraction.
+
+        This method iterates through papers in the corpus and extracts
+        metadata fields using `_get_metadata_from_llm`.
+
+        Intermediate results are written to a pickle file so the process
+        can be resumed if interrupted.
+
+        Parameters
+        ----------
+        metadata_check_df : pd.DataFrame
+            DataFrame containing paper identifiers and text used for
+            metadata extraction.
+
+        recovered_metadata_check : List[pd.DataFrame], optional
+            Previously completed metadata extraction results used when
+            resuming a partially completed run.
+
+        Returns
+        -------
+        List[pd.DataFrame]
+            List of metadata records, one per processed paper.
+        """
         # If there is no recovered metadata passed to the function then start with an empty list, otherwise start with the recovered metadata
         if recovered_metadata_check is None:
             output = []
@@ -419,7 +711,29 @@ class Ingestor:
         return(output)
 
     def update_metadata(self) -> pd.DataFrame:
-        """Get the metadata for every paper from the first 5000 chrs of the full text using the LLM and update corpus_state.insights with the metadata."""
+        """
+        Update paper metadata using LLM extraction.
+
+        This method identifies papers with missing or incomplete metadata
+        and attempts to populate the following fields:
+
+        - paper_title
+        - paper_author
+        - paper_date
+
+        The metadata is extracted from the beginning of each document's
+        full text and then merged back into `corpus_state.insights`.
+
+        Resume support
+        --------------
+        If a previous metadata extraction run was interrupted, the method
+        can resume from a stored pickle file containing partial results.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights DataFrame containing the completed metadata.
+        """
         #Create the metadata check which is the dataframe containing the columns i need for the check
         metadata_check_df = (
             self.corpus_state.insights.copy()[["paper_id", "paper_title", "paper_author", "paper_date"]]
@@ -758,6 +1072,22 @@ class Insights:
     
     
     def _recover_chunk_insights_generation(self):
+        """
+        Resume chunk insight generation from a previously saved pickle file.
+
+        The pickle file contains a list of partial insight DataFrames
+        produced during earlier execution. These are passed back into
+        `_generate_chunk_insights`, which skips already processed chunks
+        and continues extraction.
+
+        Notes
+        -----
+        This mechanism enables safe recovery from interruptions such as:
+
+        - API errors
+        - process termination
+        - user aborts
+        """
         print("Opening pickle file to recover chunk insights generation...")
         with open(os.path.join(self.pickle_path, self.chunk_insights_pickle_file), "rb") as f:
             recover_chunk_insights = pickle.load(f)
@@ -766,6 +1096,31 @@ class Insights:
 
 
     def get_chunk_insights(self) -> pd.DataFrame:
+        """
+        Generate or recover chunk-level insights.
+
+        This method is the public entry point for the chunk-level insight
+        extraction stage. It checks whether a pickle file containing
+        previously generated insights exists and prompts the user to either:
+
+        - recover/resume the previous run, or
+        - regenerate insights from scratch.
+
+        The underlying extraction logic is implemented in
+        `_generate_chunk_insights`.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated `corpus_state.insights` DataFrame containing chunk-level
+            insights extracted from the corpus.
+
+        Notes
+        -----
+        Resume functionality allows long-running LLM extraction processes
+        to continue from partial results stored in a pickle file.
+        """
+
         if os.path.exists(os.path.join(self.pickle_path, self.chunk_insights_pickle_file)):
             recover = None
             while recover not in ['r', 'n']:
@@ -1026,6 +1381,29 @@ class Insights:
       
     @staticmethod
     def ensure_list(x):
+        """
+        Normalize values into list form.
+
+        This helper ensures that values returned from LLM outputs or
+        DataFrame columns are consistently represented as lists.
+
+        Conversion rules
+        ----------------
+        - list → returned unchanged
+        - numpy array → converted to list
+        - NA value → empty list
+        - any other value → wrapped in a single-element list
+
+        Parameters
+        ----------
+        x : Any
+            Value to normalize.
+
+        Returns
+        -------
+        list
+            List representation of the input.
+        """
         if isinstance(x, list):
             return x
         if isinstance(x, np.ndarray):
@@ -1036,13 +1414,54 @@ class Insights:
     
     @staticmethod
     def estimate_tokens(text, model):
-        """Estimate token count for a given text and model using tiktoken."""
+        """
+        Estimate token count for a string using the model tokenizer.
+
+        This method uses the `tiktoken` tokenizer associated with the
+        specified model to estimate how many tokens a string will consume
+        when sent to the LLM.
+
+        Parameters
+        ----------
+        text : str
+            Input text to estimate.
+
+        model : str
+            Model name used to select the appropriate tokenizer.
+
+        Returns
+        -------
+        int
+            Estimated token count.
+        """
         encoding = tiktoken.encoding_for_model(model)
         return len(encoding.encode(text))
     
     @staticmethod
     def string_breaker(text, max_token_length):
-        """Break a long string into a list of strings each less than max length."""
+        """
+        Split long text into smaller segments.
+
+        When documents exceed the model context window, this function
+        breaks the text into multiple segments to allow sequential
+        processing by the LLM.
+
+        The function uses a conservative chunk size (~75% of the maximum
+        token length) to avoid exceeding model limits.
+
+        Parameters
+        ----------
+        text : str
+            Text to split.
+
+        max_token_length : int
+            Maximum token length allowed by the model.
+
+        Returns
+        -------
+        List[str]
+            List of text segments.
+        """
         max_length = max_token_length * 0.75
         words = text.split()
         current_chunk = ""
@@ -1068,8 +1487,61 @@ class Insights:
     
 class Clustering:
     """
-    Manage embedding, dimensionality reduction, clustering, and cluster evaluation
-    for insights associated with research questions, while safely handling empty insights.
+    Embedding and clustering stage for extracted insights.
+
+    This class performs three computational steps on the insight corpus:
+
+        1. Insight embedding
+        2. Dimensionality reduction
+        3. Density-based clustering
+
+    These operations organize insights into provisional groups that
+    provide **computational scaffolding** for downstream synthesis.
+
+    Importantly, clusters are **not treated as analytical conclusions**.
+    They serve only as an initial structural aid for theme generation,
+    which later operates directly on the underlying insights and is
+    refined iteratively through orphan detection and theme revision.
+
+    Pipeline role
+    -------------
+    The clustering stage converts insights into a structured embedding
+    representation and assigns cluster labels that allow the pipeline to:
+
+    - summarize related insights together
+    - generate initial theme schemas without scanning the full corpus
+    - provide ordering heuristics for cluster summaries
+
+    The final thematic structure is **not determined by clustering**.
+    Clusters function only as a starting point for the iterative
+    synthesis process.
+
+    Attributes
+    ----------
+    corpus_state : CorpusState
+        Working corpus state containing the insights table.
+
+    llm_client : Any
+        Client used for generating embeddings.
+
+    embedding_model : str
+        Model name used for embedding generation.
+
+    embedding_dims : int
+        Number of dimensions in the embedding vector.
+
+    valid_embeddings_df : pd.DataFrame
+        Subset of insights that contain non-empty text suitable for
+        embedding generation.
+
+    insight_embeddings_array : np.ndarray
+        Full embedding vectors for valid insights.
+
+    reduced_insight_embeddings_array : np.ndarray
+        Dimensionally reduced embedding vectors produced by UMAP.
+
+    cum_prop_cluster : pd.DataFrame
+        Summary statistics describing cluster size distribution.
     """
 
     def __init__(
@@ -1080,6 +1552,42 @@ class Clustering:
         embedding_dims: int = 1024,
         embeddings_pickle_path: str = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
     ):
+        """
+        Initialize the clustering stage of the ReadingMachine pipeline.
+
+        This constructor prepares the insight corpus for embedding and
+        clustering operations. It validates the incoming `CorpusState`,
+        removes citation parentheticals from insights to reduce embedding
+        bias, and constructs the working DataFrame of valid insights that
+        will be embedded.
+
+        Parameters
+        ----------
+        corpus_state : CorpusState
+            The current corpus state containing extracted insights and
+            associated metadata.
+
+        llm_client : Any
+            Client used to generate embeddings through the embedding API.
+
+        embedding_model : str
+            Name of the embedding model used to convert insights into
+            vector representations.
+
+        embedding_dims : int, default=1024
+            Dimensionality of the embedding vectors returned by the
+            embedding model.
+
+        embeddings_pickle_path : str
+            Path where generated embeddings will be stored for recovery
+            and reuse across runs.
+
+        Notes
+        -----
+        The constructor also creates the internal working DataFrame
+        `valid_embeddings_df`, which contains only insights suitable
+        for embedding after citation stripping and empty-text filtering.
+        """
         self.corpus_state = deepcopy(
             utils.validate_format(
             corpus_state=corpus_state,
@@ -1107,7 +1615,26 @@ class Clustering:
     @staticmethod
     def _strip_citation_parentheticals(text: str) -> str:
         """
-        Remove citation-style parentheticals to reduce embedding bias.
+        Remove citation-style parentheticals from insight text.
+
+        Academic writing frequently embeds author-year citations
+        (e.g., "(Smith 2018)" or "(Smith and Jones 2020)") that can bias
+        embedding models by introducing surface-level similarities
+        unrelated to semantic content.
+
+        This function removes common citation patterns before generating
+        embeddings so that clustering reflects the meaning of insights
+        rather than citation artifacts.
+
+        Parameters
+        ----------
+        text : str
+            Raw insight text.
+
+        Returns
+        -------
+        str
+            Cleaned insight string with citation parentheticals removed.
         """
 
         if not isinstance(text, str):
@@ -1126,10 +1653,23 @@ class Clustering:
 
     def _gen_valid_embeddings_df(self):
         """
-        Get the DataFrame of insights that are non-empty after stripping
-        citation parentheticals.
-        Updates self.corpus_state.insights with a new column 'no_author_insight_string'.
-        Returns: pd.DataFrame
+        Prepare the subset of insights suitable for embedding.
+
+        Insights that become empty after citation removal are excluded
+        from embedding generation to prevent noise in the embedding space.
+
+        The function also creates a normalized version of the insight text
+        (`no_author_insight_string`) that is used as the embedding input.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing only valid insights that will be embedded.
+
+        Side Effects
+        ------------
+        Adds the column `no_author_insight_string` to
+        `corpus_state.insights`.
         """
 
         # Strip citation-style parentheticals from the insight text
@@ -1148,9 +1688,19 @@ class Clustering:
     
     def embed_insights(self) -> np.ndarray:
         """
-        Generate embeddings for non-empty insights only.
-        Returns:
-            np.ndarray: 2D array of embeddings for valid insights.
+        Generate vector embeddings for insights.
+
+        Each valid insight string is sent to the embedding model and the
+        resulting vector is stored both as a NumPy array and within the
+        `valid_embeddings_df`.
+
+        Resume support is provided through a pickle file containing
+        previously generated embeddings.
+
+        Returns
+        -------
+        np.ndarray
+            Matrix of embedding vectors for all valid insights.
         """
         # Check if embeddings pickle exists
         if os.path.exists(self.embeddings_pickle_path):
@@ -1186,14 +1736,18 @@ class Clustering:
         return self.insight_embeddings_array
 
     def _save_embeddings(self):
-        """Save embeddings safely, creating folder if it does not exist."""
+        """
+        Save embeddings safely, creating folder if it does not exist.
+        """
         os.makedirs(os.path.dirname(self.embeddings_pickle_path), exist_ok=True)
         with open(self.embeddings_pickle_path, "wb") as f:
             pickle.dump(self.insight_embeddings_array, f)
         print(f"Embeddings safely saved to '{self.embeddings_pickle_path}'.")
 
     def _load_embeddings(self):
-        """Load embeddings safely if the pickle exists."""
+        """
+        Load embeddings safely if the pickle exists.
+        """
         if not os.path.exists(self.embeddings_pickle_path):
             raise FileNotFoundError(f"No embeddings pickle found at {self.embeddings_pickle_path}")
         with open(self.embeddings_pickle_path, "rb") as f:
@@ -1208,6 +1762,43 @@ class Clustering:
         self, full_embeddings: np.array = None, n_neighbors: int = 15, min_dist: float = 0.25, n_components: int = 10,
         metric: str = "cosine", random_state: int = 42, update_attributes: bool = True
     ) -> np.ndarray:
+        
+        """
+        Reduce embedding dimensionality using UMAP.
+
+        Dimensionality reduction improves the effectiveness of density-based
+        clustering algorithms by projecting high-dimensional embeddings
+        into a lower-dimensional space.
+
+        Parameters
+        ----------
+        full_embeddings : np.ndarray
+            Embedding matrix to reduce. Defaults to stored insight embeddings.
+
+        n_neighbors : int
+            Size of the local neighborhood used for manifold estimation.
+
+        min_dist : float
+            Minimum distance between points in the reduced space.
+
+        n_components : int
+            Number of output dimensions.
+
+        metric : str
+            Distance metric used by UMAP.
+
+        random_state : int
+            Random seed for reproducibility.
+
+        update_attributes : bool
+            Whether to update internal attributes used by downstream
+            clustering methods.
+
+        Returns
+        -------
+        np.ndarray
+            Reduced embedding matrix.
+        """
         
         # See if full_embeddings were provided, otherwise use the class's insight embeddings (this is done to make other methods in the class more explicit)
         if full_embeddings is None:
@@ -1326,6 +1917,32 @@ class Clustering:
 
     @staticmethod
     def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom"):
+        """
+        Perform density-based clustering using HDBSCAN.
+
+        Parameters
+        ----------
+        embedding_matrix : np.ndarray
+            Matrix of reduced embedding vectors.
+
+        min_cluster_size : int
+            Minimum cluster size parameter for HDBSCAN.
+
+        metric : str
+            Distance metric used for clustering.
+
+        cluster_selection_method : str
+            Strategy used by HDBSCAN to select clusters.
+
+        Returns
+        -------
+        tuple
+            cluster_labels : np.ndarray
+                Cluster assignment for each insight.
+
+            cluster_probs : np.ndarray
+                Probability estimate for cluster membership.
+        """
         clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
             metric=metric,
@@ -1339,6 +1956,41 @@ class Clustering:
     
     @staticmethod
     def calc_davies_bouldain_score(embeddings_matrix, cluster_labels):
+        """
+        Compute the Davies–Bouldin score for a clustering configuration.
+
+        The Davies–Bouldin index measures cluster compactness and
+        separation. Lower scores indicate better clustering structure.
+
+        Outlier points assigned cluster label `-1` are excluded from the
+        calculation because they do not belong to any cluster.
+
+        Parameters
+        ----------
+        embeddings_matrix : np.ndarray
+            Matrix of embedding vectors used for clustering.
+
+        cluster_labels : np.ndarray
+            Cluster assignments produced by the clustering algorithm.
+
+        Returns
+        -------
+        tuple
+            db_score : float or pd.NA
+                Davies–Bouldin score for the clustering configuration.
+                Returns NA if fewer than two clusters exist.
+
+            num_outliers : int
+                Number of points assigned to the outlier cluster (-1).
+
+        Notes
+        -----
+        The Davies–Bouldin score is used here as a diagnostic measure
+        during parameter tuning rather than as a definitive evaluation
+        of clustering quality.
+        """
+
+
         mask = cluster_labels != -1
         num_outliers = np.sum(~mask)
         filtered_embeddings = embeddings_matrix[mask]
@@ -1348,12 +2000,53 @@ class Clustering:
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
         return db_score, num_outliers
 
-    def tune_hdbscan_params(self,
-                            min_cluster_sizes: list[int] = [5, 10, 15, 20],
-                            metrics: list[str] = ["euclidean", "manhattan"],
-                            cluster_selection_methods: list[str] = ["eom", "leaf"]
-                            ) -> None:
-      
+    def tune_hdbscan_params(
+        self,
+        min_cluster_sizes: list[int] = [5, 10, 15, 20],
+        metrics: list[str] = ["euclidean", "manhattan"],
+        cluster_selection_methods: list[str] = ["eom", "leaf"]
+        ) -> None:
+
+        """
+        Perform grid search over HDBSCAN clustering parameters.
+
+        This method evaluates combinations of HDBSCAN parameters across
+        each research question separately. For each configuration, the
+        clustering is performed and evaluated using the Davies–Bouldin
+        index and the number of outlier points.
+
+        Parameters
+        ----------
+        min_cluster_sizes : list[int]
+            Candidate values for the HDBSCAN `min_cluster_size` parameter.
+
+        metrics : list[str]
+            Distance metrics to evaluate during clustering.
+
+        cluster_selection_methods : list[str]
+            Cluster selection strategies supported by HDBSCAN.
+
+        Returns
+        -------
+        None
+
+        Side Effects
+        ------------
+        Results are stored in the attribute `self.hdbscan_tuning_results`
+        as a DataFrame containing the tested parameter combinations and
+        their associated evaluation scores.
+
+        Notes
+        -----
+        Clustering is evaluated independently for each research question
+        so that insights associated with different questions do not
+        influence each other's cluster structure.
+
+        The tuning process is intended as a diagnostic tool for selecting
+        reasonable clustering parameters rather than as a strict
+        optimization step.
+        
+        """
         param_grid = list(itertools.product(min_cluster_sizes, metrics, cluster_selection_methods))
         rqs = self.valid_embeddings_df["question_id"].unique()
         total_runs = len(param_grid) * len(rqs)
@@ -1381,13 +2074,30 @@ class Clustering:
 
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
-        Generate clusters for each research question using HDBSCAN.
-        Updates self.corpus_state.insights with cluster labels and probabilities.
+        Assign clusters to insights.
 
-        Args:
-            min_cluster_size (int): Minimum cluster size for HDBSCAN.
-            metric (str): Distance metric for HDBSCAN.
-            cluster_selection_method (str): Cluster selection method for HDBSCAN.
+        Clustering is performed separately for each research question
+        so that insights addressing different questions do not influence
+        each other's cluster formation.
+
+        Cluster labels are normalized so that:
+
+            cluster 1 = largest cluster
+            cluster 2 = second largest
+            ...
+
+        Outliers are assigned label -1.
+
+        Parameters
+        ----------
+        clustering_param_dict : dict
+            Dictionary mapping research questions to HDBSCAN parameters.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights table containing cluster labels,
+            cluster probabilities, and embedding vectors.
         """
         
         rqs = self.valid_embeddings_df["question_id"].unique()
@@ -1479,6 +2189,67 @@ class Clustering:
         summary = pd.concat([main_clusters, outliers], ignore_index=True)
 
         return summary
+    
+    def clean_clusters(self, final_cluster_count: dict = None) -> pd.DataFrame:
+        """
+        Select the most informative clusters for each research question.
+
+        This method retains only the largest N clusters for each research
+        question and marks all remaining clusters as outliers.
+
+        This step provides a lightweight filtering mechanism before cluster
+        summarization while preserving all insights in the underlying corpus.
+
+        Parameters
+        ----------
+        final_cluster_count : dict
+            Mapping from `question_id` to the number of clusters to retain.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights table containing a `selected_cluster` column.
+        """
+        if final_cluster_count is None:
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            return(self.corpus_state.insights)
+
+        else:
+            rqs = self.corpus_state.insights["question_id"].unique()
+            if len(rqs) != len(final_cluster_count):
+                raise ValueError(
+                    "final_cluster_count must specify the number of clusters to keep for each research question."
+                )
+
+            selected_clusters_list = []
+
+            # Loop over each research question
+            for rq in self.corpus_state.insights["question_id"].unique():
+                # Filter insights for the current research question
+                current_rq_df = self.corpus_state.insights[self.corpus_state.insights["question_id"] == rq].copy()
+                # Count the size of each cluster (excluding outliers)
+                cluster_sizes = current_rq_df.dropna(subset=["cluster"]).groupby("cluster").size().sort_values(ascending=False)
+
+                # Get the number of clusters to keep for this question
+                n_keep = final_cluster_count.get(rq, 0)
+                # Get the cluster labels of the top N clusters (excluding outlier cluster -1)
+                top_clusters = cluster_sizes[cluster_sizes.index != -1].head(n_keep).index.tolist()
+
+                # Mark clusters to keep, others (and outliers) set to -1
+                current_rq_df["selected_cluster"] = np.where(
+                    current_rq_df["cluster"].isin(top_clusters),
+                    current_rq_df["cluster"],
+                    -1
+                )
+
+                selected_clusters_list.append(current_rq_df)
+
+            # Concatenate all research questions back together
+            self.corpus_state.insights = pd.concat(selected_clusters_list)
+            # Save the updated DataFrame to disk
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            return self.corpus_state.insights
+        
 
 
     # def generate_clusters(
@@ -1547,60 +2318,8 @@ class Clustering:
 
     #     return self.cum_prop_cluster
 
-    def clean_clusters(self, final_cluster_count: dict = None) -> pd.DataFrame:
-        """
-        Selects the top N clusters (by size) for each research question, marking all other clusters as outliers (-1).
-        Updates self.corpus_state.insights with a new column 'selected_cluster' and saves the result.
-
-        Args:
-            final_cluster_count (dict): Dictionary mapping question_id to the number of clusters to keep for that question.
-                                        Example: {'question_0': 3, 'question_1': 2, ...}
-
-        Returns:
-            pd.DataFrame: Updated insights DataFrame with 'selected_cluster' column.
-        """
-        if final_cluster_count is None:
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
-            return(self.corpus_state.insights)
-
-        else:
-            rqs = self.corpus_state.insights["question_id"].unique()
-            if len(rqs) != len(final_cluster_count):
-                raise ValueError(
-                    "final_cluster_count must specify the number of clusters to keep for each research question."
-                )
-
-            selected_clusters_list = []
-
-            # Loop over each research question
-            for rq in self.corpus_state.insights["question_id"].unique():
-                # Filter insights for the current research question
-                current_rq_df = self.corpus_state.insights[self.corpus_state.insights["question_id"] == rq].copy()
-                # Count the size of each cluster (excluding outliers)
-                cluster_sizes = current_rq_df.dropna(subset=["cluster"]).groupby("cluster").size().sort_values(ascending=False)
-
-                # Get the number of clusters to keep for this question
-                n_keep = final_cluster_count.get(rq, 0)
-                # Get the cluster labels of the top N clusters (excluding outlier cluster -1)
-                top_clusters = cluster_sizes[cluster_sizes.index != -1].head(n_keep).index.tolist()
-
-                # Mark clusters to keep, others (and outliers) set to -1
-                current_rq_df["selected_cluster"] = np.where(
-                    current_rq_df["cluster"].isin(top_clusters),
-                    current_rq_df["cluster"],
-                    -1
-                )
-
-                selected_clusters_list.append(current_rq_df)
-
-            # Concatenate all research questions back together
-            self.corpus_state.insights = pd.concat(selected_clusters_list)
-            # Save the updated DataFrame to disk
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
-            return self.corpus_state.insights
-        
+    
             
-
 class Summarize:
     def __init__(self,
                  corpus_state: Any,
@@ -1611,14 +2330,69 @@ class Summarize:
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")):
         """
-        Class to handle summarization of clustered insights.
+        Initialize the thematic synthesis stage of the ReadingMachine pipeline.
 
-        Args:
-            corpus_state: Object holding insights (expects DataFrame `corpus_state.insights`).
-            llm_client: Client to interact with LLM API.
-            ai_model: Model name or identifier for LLM.
-            paper_output_length: Total word length for paper; used to proportion cluster summaries.
-            summaries_pickle_path: Optional path to pickle the resulting summaries DataFrame.
+        This class coordinates the iterative summarization process that
+        transforms clustered insights into thematic structures and narrative
+        synthesis outputs.
+
+        The class operates on two state objects:
+
+            CorpusState
+            SummaryState
+
+        `CorpusState` provides the structured insight corpus generated during
+        earlier pipeline stages (chunking, insight extraction, embedding,
+        clustering). `SummaryState` records the artifacts generated during the
+        synthesis process, including cluster summaries, theme schemas,
+        theme mappings, populated themes, and orphan handling passes.
+
+        Initialization performs three setup steps:
+
+            1. Verify that insight embeddings exist (produced during clustering)
+            2. Load or initialize the SummaryState used to track synthesis artifacts
+            3. Configure the LLM client and synthesis parameters
+
+        Parameters
+        ----------
+        corpus_state : CorpusState
+            Corpus state containing the extracted insights and associated
+            metadata produced during earlier pipeline stages.
+
+        llm_client : Any
+            Client used to call the LLM for summarization and synthesis tasks.
+
+        ai_model : str
+            Model identifier used for LLM completions.
+
+        paper_output_length : int
+            Approximate total word length for the final synthesized output.
+            This value is used to proportionally allocate target lengths for
+            theme summaries based on the number of insights assigned to each
+            theme.
+
+        summary_save_location : str
+            Directory where summarization artifacts managed by SummaryState
+            will be stored as Parquet files.
+
+        pickle_save_location : str
+            Directory used to persist intermediate artifacts during long
+            summarization operations to support resumable execution.
+
+        insight_embedding_path : str
+            Path to the serialized insight embeddings generated during the
+            clustering stage.
+
+        Notes
+        -----
+        If existing summary artifacts are detected in `summary_save_location`,
+        the user is prompted to either:
+
+            (1) reload the existing SummaryState and resume synthesis
+            (2) regenerate summaries from scratch (overwriting existing files)
+
+        This behavior supports resumable workflows for large corpora where
+        summarization may be executed across multiple sessions.
         """
         
         # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
@@ -1640,19 +2414,23 @@ class Summarize:
                 load = input(
                     f"Previous summarization files found in '{summary_save_location}'. Do you want to:\n"
                     "(1) reload existing summaries\n"
-                    "(2) regenerate summaries (NOTE:this will overwrite all existing summary attributres\n"
+                    "(2) regenerate summaries (NOTE: this will overwrite all existing summary attributes)\n"
                     "Enter 1 or 2:\n"
                 ).strip()
 
-        if load == "1":
-            self.summary_state = SummaryState.load(summary_save_location=summary_save_location)
-            print("Summaries loaded. To see where you are in the summarization process run var.summary_state.status())")
+            if load == "1":
+                self.summary_state = SummaryState.load(summary_save_location=summary_save_location)
+                print("Summaries loaded. To see where you are in the summarization process run var.summary_state.status())")
 
+            else:
+                # Clear out existing summaries if we are regenerating
+                for file in Path(summary_save_location).glob("*.parquet"):
+                    file.unlink()  
+                # And load the empty summary_state
+                self.summary_state = SummaryState(summary_save_location=summary_save_location)
+        
+        # If no summary files found, just load the empty summary state
         else:
-            # Clear out existing summaries if we are regenerating
-            for file in Path(summary_save_location).glob("*.parquet"):
-                file.unlink()  
-            # And load the empty summary_state
             self.summary_state = SummaryState(summary_save_location=summary_save_location)
 
         self.llm_client: Any = llm_client
@@ -1662,6 +2440,42 @@ class Summarize:
         pickle_save_location = pickle_save_location
 
     def _calculate_centroid(self, col="full_insight_embedding"):
+        """
+        Compute cluster centroids for each research question.
+
+        For each `(question_id, cluster)` pair, this method aggregates the
+        embedding vectors associated with the cluster and computes their
+        mean vector (centroid). These centroids are later used to estimate
+        an ordering of clusters based on semantic proximity.
+
+        Parameters
+        ----------
+        col : str, default="full_insight_embedding"
+            Column in `corpus_state.insights` containing the embedding
+            vectors used to compute centroids.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing centroid vectors for each cluster with
+            columns:
+
+                - question_id
+                - cluster
+                - centroid
+
+        Notes
+        -----
+        Several safeguards are applied during centroid calculation:
+
+        - Insights without valid embeddings are skipped.
+        - Ragged embedding vectors (inconsistent lengths) are filtered
+        using the modal vector length.
+        - Embeddings containing NaN values are excluded.
+
+        These checks ensure centroid computation remains stable even if
+        some embeddings are malformed or missing.
+        """
         rows = []
         for rq, d in self.corpus_state.insights.groupby("question_id", sort=False):
             # get clusters with at least one non-null embedding
@@ -1686,6 +2500,50 @@ class Summarize:
         return pd.DataFrame(rows, columns=["question_id", "cluster", "centroid"])
 
     def _estimate_shortest_path(self):
+        """
+        Estimate an ordering of clusters based on centroid similarity.
+
+        This method computes centroids for each cluster and then determines
+        an approximate shortest path through those clusters using pairwise
+        cosine distances between centroid embeddings.
+
+        The resulting ordering places semantically similar clusters next
+        to one another. This ordering is later used when generating cluster
+        summaries so that related clusters appear in adjacent positions,
+        providing the model with coherent contextual scaffolding during
+        theme generation.
+
+        Procedure
+        ---------
+        1. Compute cluster centroids from insight embeddings.
+        2. Compute pairwise cosine distances between centroids.
+        3. Estimate a shortest path through the clusters:
+
+        - For small cluster counts (<10), all permutations are evaluated
+            to find the optimal path.
+        - For larger cluster sets, an approximate Traveling Salesman
+            solution from NetworkX is used.
+
+        4. Append the outlier cluster (-1) at the end of the ordering.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping each research question to an ordered list
+            of clusters:
+
+                {
+                    question_id: {
+                        "order": [cluster_1, cluster_2, ..., -1]
+                    }
+                }
+
+        Notes
+        -----
+        This ordering step does not influence the final thematic structure.
+        It is used only to provide a coherent sequence of cluster summaries
+        during the initial theme generation stage.
+        """
         print("Calculating centroids for each cluster...")
         centroids = self._calculate_centroid(col="full_insight_embedding")
 
@@ -1710,6 +2568,7 @@ class Summarize:
             n = len(clusters)
             if n <= 1:
                 order = clusters
+                final_order = order + [-1]
             elif n < 10:
                 best_len = np.inf
                 best_perm = None
@@ -1734,10 +2593,58 @@ class Summarize:
 
     def summarize_clusters(self):
         """
-        Generate summaries for all clusters across all research questions.
+        Generate summaries for each cluster of insights across all research questions.
 
-        Returns:
-            Summaries object containing a DataFrame of cluster summaries.
+        This method performs the first stage of the thematic synthesis process by
+        summarizing the insights contained within each cluster. Cluster summaries
+        provide an initial structural overview of the corpus and act as scaffolding
+        for the subsequent theme generation stage.
+
+        The clusters are processed in the order determined by the centroid shortest
+        path algorithm (`_estimate_shortest_path`). This ordering places semantically
+        similar clusters adjacent to each other so that the model receives coherent
+        contextual information when generating summaries.
+
+        During summarization, previously generated cluster summaries are passed to
+        the model as frozen context. This allows the model to maintain consistency
+        across summaries while preventing earlier summaries from being modified.
+
+        If cluster summaries already exist on disk, the user is prompted to either:
+
+            (1) reload existing summaries
+            (2) regenerate summaries
+
+        Regenerating summaries will reset the entire summarization pipeline because
+        all downstream artifacts depend on cluster summaries. Specifically, the
+        following artifacts are cleared if regeneration is selected:
+
+            - theme schemas
+            - insight-to-theme mappings
+            - populated theme summaries
+            - orphan detection results
+            - redundancy pass outputs
+
+        Returns
+        -------
+        List[pd.DataFrame]
+            A list containing a single DataFrame with the generated cluster
+            summaries. The DataFrame includes the following columns:
+
+                - question_id
+                - question_text
+                - cluster
+                - summary
+
+        Notes
+        -----
+        Cluster summaries are not treated as analytical conclusions. They serve
+        only as a structural aid for theme generation, which subsequently operates
+        directly on the underlying insights and is refined iteratively through
+        orphan detection and schema updates.
+
+        The generated summaries are stored in `self.summary_state.cluster_summary_list`
+        and persisted to disk via `SummaryState.save()` to support resumable
+        workflows.
         """
         
         if self.summary_state.cluster_summary_list is not None and len(self.summary_state.cluster_summary_list) > 0:
@@ -1860,10 +2767,54 @@ class Summarize:
 
         return self.summary_state.cluster_summary_list
     
-    def _run_llm_schema_gen(self, source: pd.DataFrame) -> pd.DataFrame:
+    def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
         """
-        Run the llm call to generate the theme schema based on the provided source data (either cluster summaries or populated themes).
-        Function first gets the correct data via the source param then loops through the data to gen the schema
+        Generate a theme schema using the LLM.
+
+        This internal helper constructs the input data for schema generation
+        and performs the LLM call that produces a set of candidate themes
+        for each research question.
+
+        The method supports two input sources:
+
+            - "cluster summaries": used for the first schema pass
+            - "populated themes": used during iterative refinement passes
+
+        In the first pass, cluster summaries act as scaffolding for theme
+        generation. In later passes, the model receives the current thematic
+        summaries (including orphan reinsertion effects) to refine the
+        schema structure.
+
+        Parameters
+        ----------
+        source : str
+            Input data source used for schema generation. Must be one of:
+
+                "cluster summaries"
+                "populated themes"
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the generated theme schema. Columns include:
+
+                - theme_id
+                - theme_label
+                - theme_description
+                - instructions
+                - question_id
+                - question_text
+
+        Notes
+        -----
+        The LLM returns theme definitions consisting of:
+
+            - theme_label: short name for the theme
+            - theme_description: description of the thematic category
+            - instructions: rules for assigning insights to the theme
+
+        A numeric `theme_id` is assigned after generation to preserve a
+        stable ordering of themes during later synthesis stages.
         
         """
         if source not in ["cluster summaries", "populated themes"]:
@@ -1953,14 +2904,54 @@ class Summarize:
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
         
         """
-        Generate or regenerate a theme schema pass.
+        Generate or update the theme schema for the synthesis process.
 
-        Modes:
-        1. First pass (no existing schema) → use cluster summaries.
-        2. Iterative pass → requires orphan incorporation.
-        3. Regenerate last pass → overwrite most recent schema.
+        This method manages the iterative theme schema generation stage
+        of the pipeline. The schema defines the thematic categories that
+        will be used to organize insights during synthesis.
 
-        force flag: if true sequencing enforcement steps will be ignored and schema will be generated regardless. This may leave the state out of sync but can be useful for testing and development. 
+        Schema generation operates in three modes:
+
+            1. Initial pass
+            If no schema exists, themes are generated from cluster
+            summaries.
+
+            2. Iterative pass
+            After insights have been mapped, themes populated, and
+            orphans handled, a new schema can be generated from the
+            updated thematic summaries.
+
+            3. Regeneration
+            The most recent schema pass can be overwritten and
+            regenerated.
+
+        Parameters
+        ----------
+        force : bool, default=False
+            If True, bypass sequencing validation and generate a new
+            schema directly from cluster summaries.
+
+            This mode is intended for development or testing and may
+            leave the pipeline state inconsistent.
+
+        Returns
+        -------
+        pd.DataFrame
+            The newly generated theme schema.
+
+        Raises
+        ------
+        ValueError
+            If required upstream stages have not been completed or if
+            schema sequencing rules are violated.
+
+        Notes
+        -----
+        Theme schemas are stored as sequential passes in
+        `self.summary_state.theme_schema_list`.
+
+        Each new schema pass reflects the evolving thematic structure
+        after incorporating orphan insights and updated theme summaries.
         """
         
         if force not in [True, False]:
@@ -2057,6 +3048,34 @@ class Summarize:
             return new_schema
 
     def _validate_and_cast_theme_ids(self, df, allowed_ids):
+        """
+        Validate theme identifiers returned by the LLM.
+
+        During insight-to-theme mapping, the LLM returns theme IDs that
+        correspond to themes defined in the schema. This method verifies
+        that all returned IDs are valid and converts them to integer type.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame containing theme assignments returned by the LLM.
+            Must include a `theme_id` column.
+
+        allowed_ids : Iterable
+            Collection of valid theme identifiers defined by the current
+            theme schema.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with validated and type-cast `theme_id` values.
+
+        Raises
+        ------
+        ValueError
+            If the LLM returns any theme identifiers not present in the
+            allowed set.
+        """
         allowed_set = set(str(i) for i in allowed_ids)
         returned_set = set(df["theme_id"].astype(str))
 
@@ -2071,12 +3090,65 @@ class Summarize:
         return df
     
 
-    def _map_insights_via_llm(self, 
-                              batch_size,
-                              already_mapped_insight_ids,
-                              mapped_insights_df_list, 
-                              in_progress_path, 
-                              mode):
+    def _map_insights_via_llm(
+        self, 
+        batch_size,
+        already_mapped_insight_ids,
+        mapped_insights_df_list, 
+        in_progress_path, 
+        mode
+        ):
+        """
+        Map insights to themes using the LLM.
+
+        This internal method performs the core insight-to-theme classification
+        stage of the pipeline. Insights are processed in batches and assigned
+        to one or more themes defined in the current theme schema.
+
+        Each batch of mappings is saved to disk during execution to support
+        resumable operation and prevent loss of progress during long runs.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of insights to process per LLM call.
+
+        already_mapped_insight_ids : list
+            List of insight IDs that have already been mapped. Used during
+            resume operations to avoid reprocessing previously completed
+            batches.
+
+        mapped_insights_df_list : list
+            List of DataFrames containing previously generated mapping
+            results. New batches are appended to this list.
+
+        in_progress_path : str
+            File path where intermediate mapping progress is serialized
+            during execution.
+
+        mode : str
+            Execution mode controlling validation behavior. Must be one of:
+
+                "normal" — standard execution with state validation
+                "force"  — bypasses state integrity safeguards
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the complete set of mapped insights with
+            the following columns:
+
+                - insight_id
+                - theme_id
+                - question_id
+
+        Notes
+        -----
+        A state fingerprint is stored alongside intermediate results to
+        ensure that the corpus and summary states have not changed between
+        resume attempts. If a mismatch is detected, resume is aborted to
+        prevent corruption of the synthesis pipeline.
+        """
         
         if mode not in ["force", "normal"]:
             raise ValueError("Invalid mode. Mode must be either 'force' or 'normal'.")
