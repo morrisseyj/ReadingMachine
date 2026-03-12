@@ -12,6 +12,22 @@ ReadingMachine should therefore be understood primarily as a **semantic research
 
 ---
 
+## Quick Start
+
+1. Install dependencies
+
+    uv sync
+
+2. Add your OpenAI API key to `.env`
+
+3. Place documents in `data/docs`
+
+4. Run the example pipeline
+
+    uv run python examples/run_pipeline.py
+
+---
+
 ## Motivation
 
 Many domains now generate far more text than individuals can realistically read. In many of these contexts, the primary risk is not insufficient access to information, but silent omission, compression drift, and the loss of minority or dissenting claims during synthesis.
@@ -408,7 +424,8 @@ In practice, these constraints are expected to appear **later than the scale lim
 
 **Corpus heterogeneity**
 
-The effects of extreme corpus heterogeneity on clustering stability and theme convergence remain an open empirical question. The current architecture is designed to expose instability (for example, through persistent orphan churn or shifting theme schemas across iterations) rather than conceal it. Future benchmarking will examine how heterogeneity interacts with clustering and synthesis behavior.
+The effects of extreme corpus heterogeneity on clustering stability and theme convergence remain an open empirical question. The current architecture is designed to expose instability (for example, through persistent orphan churn or shifting theme schemas across iterations) rather than conceal it. Future benchmarking will examine how heterogeneity interacts with clustering and synthesis behavior.  
+
 ---
 
 ### Interpretive Limits
@@ -418,6 +435,7 @@ ReadingMachine does not eliminate interpretation.
 Decisions about corpus selection, research questions, clustering parameters, and theme structures all shape the resulting synthesis. The goal of the pipeline is not to produce neutral or definitive interpretations, but to make the analytical process **transparent and inspectable**.
 
 By preserving intermediate artifacts—from chunks to insights to themes—the system allows researchers to examine how particular conclusions emerge from the corpus and how different analytical choices affect the results.
+
 ---
 
 ## Potential Applications
