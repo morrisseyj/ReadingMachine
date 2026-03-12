@@ -4,11 +4,11 @@
 
 The system coordinates large language models in a **highly constrained reading workflow** that extracts structured insights from documents and recombines them into an inspectable synthesis.
 
-Rather than retrieving fragments of text or repeatedly summarizing documents, ReadingMachine performs a **structured analytical pass over the entire defined corpus**, rather than sampling subsets through retrieval.
+Rather than retrieving fragments of text or repeatedly summarizing documents, ReadingMachine performs a **structured analytical pass over the entire defined corpus**.
 
 The result is a structured map of the arguments and insights contained in a document collection.
 
-ReadingMachine should therefore be understood primarily as a **semantic research methodology implemented through machine reading**, rather than as a conventional AI application.
+ReadingMachine should therefore be understood primarily as a **semantic research methodology implemented through machine reading**, instead of a conventional AI application.
 
 ---
 
@@ -77,7 +77,6 @@ Human researchers remain responsible for:
 - selecting specific parameters
 - determining the stopping conditions
 - interpreting results  
-- evaluating conclusions  
 
 This division preserves human analytical judgment while removing the practical bottleneck imposed by large-scale reading.
 
@@ -136,7 +135,7 @@ Insights are extracted from individual chunks of text.
 
 **Whole-document pass**
 
-The model reads the full document (or the largest portion that fits within the context window) to capture insights that span multiple sections.
+The model reads the full document (or the largest portion that fits within the context window) to capture insights that span multiple sections and were not captured in the chunk-level pass.
 
 This dual approach helps capture both local arguments and cross-document reasoning.
 
@@ -174,7 +173,9 @@ Parameter sweeps allow clustering behavior to be tuned and evaluated.
 
 Each cluster is summarized sequentially.
 
-Clusters are processed in **shortest-path order within the embedding space** (using the full dimensions of the embedding), with previously summarized clusters provided as frozen context. This ordering improves semantic continuity across summaries.
+Clusters are **processed in shortest-path order between cluster centroids** (using the full dimensions of the embedding), with previously summarized clusters provided as frozen context. This produces a sequence of cluster summaries in which semantically similar clusters appear adjacent to one another, while more distant clusters appear later in the sequence.
+
+This ordering provides a proxy for conceptual density, which helps the model construct more coherent thematic structures during theme generation.
 
 Outliers are preserved and included.
 
@@ -231,7 +232,9 @@ This process reduces silent omission, a common problem in automated summarizatio
 
 ### Iteration
 
-The steps from theme schema generation to orphan handling are then repeated until the user chooses to stop. Thus the themes with orphans inserted are handed back to the theme schema generator which updates the themes. Mapping, population, summarization and orphan handling are reapplied. In future tools for assessing stopping conditions will be added (focussed on assessing theme, orphan and "other" stabilization), but for the current architecture it is suggested the user run this pass twice. 
+The steps from theme schema generation through orphan handling are repeated until the user chooses to stop. Themes with reinserted orphans are passed back to the theme schema generator, which updates the theme structure. Mapping, population, summarization, and orphan handling are then reapplied.
+
+Future versions will include tools for assessing stopping conditions (for example stabilization of themes, orphan counts, and the Other category). In the current architecture it is recommended that users run this pass twice.
 
 ### Redundancy pass
 

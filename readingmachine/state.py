@@ -1,3 +1,130 @@
+"""
+State management for the ReadingMachine analytical pipeline.
+
+This module defines the two persistent state objects that track the
+transformation of a document corpus through the ReadingMachine workflow:
+
+    CorpusState
+    SummaryState
+
+The objects correspond to two distinct phases of the methodology.
+
+Corpus processing
+-----------------
+Handled by `CorpusState`.
+
+This stage represents the structured reading of the corpus and records
+how raw documents are transformed into analytical units.
+
+The transformation sequence is:
+
+    documents
+    → full text
+    → chunks
+    → insights
+
+The `insights` table acts as the central semantic index of the corpus.
+All downstream analysis operates on these extracted claims rather than
+directly on the document text.
+
+`CorpusState` therefore preserves the lineage required for traceability:
+
+    theme
+    → insight
+    → chunk
+    → document
+
+Each insight retains identifiers linking it to the originating text
+segment, enabling citation-anchored synthesis and auditability.
+
+The corpus representation is intended to be **append-only**. Once
+documents are ingested and insights are generated, the corpus state
+should be treated as immutable for the duration of an analysis run.
+Changes to the corpus (for example adding documents or modifying
+extraction prompts) should result in the creation of a new
+`CorpusState`.
+
+Thematic synthesis
+------------------
+Handled by `SummaryState`.
+
+This stage represents the interpretive organization of extracted
+insights into thematic structures.
+
+Unlike `CorpusState`, which stores tidy analytical tables,
+`SummaryState` records **pipeline passes**. Each stage of the
+summarization workflow produces a DataFrame that is appended to a list,
+preserving the full history of synthesis iterations.
+
+The synthesis workflow proceeds through the following stages:
+
+    cluster summaries
+    → theme schema generation
+    → insight-to-theme mapping
+    → theme population
+    → orphan detection
+    → iteration
+    → redundancy handling
+
+Each iteration of this process produces a new entry in the relevant
+artifact lists. This design allows researchers to inspect how the
+thematic structure evolves across synthesis passes.
+
+Persistence
+-----------
+Both state objects are designed to be persisted to disk using Parquet
+serialization.
+
+CorpusState:
+    Each analytical table is stored as a separate Parquet file
+    (questions, full_text, chunks, insights).
+
+SummaryState:
+    Each synthesis pass is stored as an individual Parquet file
+    within the summary output directory.
+
+This approach enables:
+
+- resumable pipelines
+- inspection of intermediate artifacts
+- reproducible analytical runs
+
+Fingerprinting
+--------------
+Both state objects implement deterministic fingerprint functions.
+
+These hashes are computed from normalized DataFrame representations and
+are used to detect changes in the analytical state when resuming a
+pipeline. If the fingerprint differs from the expected value, the
+pipeline can warn the user that the analytical lineage has changed.
+
+Design principles
+-----------------
+The state architecture is designed around several core principles:
+
+Traceability
+    Every synthesized claim can be traced back to the text segment from
+    which it originated.
+
+Inspectability
+    Intermediate artifacts are preserved rather than overwritten,
+    allowing researchers to examine how analytical structures emerge.
+
+Reproducibility
+    Analytical configurations and intermediate states can be persisted
+    and restored without altering results.
+
+Separation of phases
+    Corpus reading and thematic synthesis are represented by separate
+    state objects to preserve conceptual clarity and avoid accidental
+    coupling of extraction and interpretation stages.
+
+Together, these state objects provide the backbone of the ReadingMachine
+pipeline, allowing large-scale machine reading to be organized into a
+structured and inspectable analytical workflow.
+"""
+
+
 # Import custom libraries
 from . import config
 
@@ -18,27 +145,97 @@ import pprint
 
 class CorpusState:
     """
-    Container for managing research pipeline state.
+    Persistent representation of the corpus layer of the ReadingMachine pipeline.
 
-    This class keeps track of:
-      1. Questions dictionary - key values of question id and question text.
-      2. Insights dataframe - traces insights back to the `paper_id`.
-      3. Chunk dataframe - links text chunks to a `paper_id` and `chunk_id`.
-      4. Full-text dataframe - links full text to a `paper_id`.
+    `CorpusState` stores the structured analytical representation of a document
+    corpus after ingestion and insight extraction. It acts as the central data
+    container for all corpus-level artifacts produced during the reading stage
+    of the pipeline.
 
-    It provides methods to save and load the entire state object as a pickle,
-    and to initialize a state from a CSV containing literature data.
+    The object maintains four primary tables:
+
+    - **questions**: research questions guiding insight extraction
+    - **full_text**: full document text indexed by `paper_id`
+    - **chunks**: segmented text units derived from documents
+    - **insights**: atomic claims extracted from the corpus
+
+    These tables represent successive transformations of the corpus:
+
+        documents
+        → full_text
+        → chunks
+        → insights
+
+    Downstream analytical stages (embedding, clustering, theme synthesis)
+    operate primarily on the `insights` table.
+
+    The class provides utilities for:
+
+    - validating required schema elements
+    - persisting state to disk
+    - restoring state from multiple serialization formats
+    - enforcing canonical question text across insights
+    - computing deterministic fingerprints for resume validation
+
+    Notes
+    -----
+    `CorpusState` is designed to be **append-only**. Once insights are generated,
+    the corpus representation should be treated as immutable for the remainder
+    of an analysis run. Modifying the corpus (for example by adding documents or
+    regenerating insights) should instead produce a new `CorpusState`.
+
+    The `insight_id` column in the `insights` table acts as the primary key
+    linking corpus extraction to all downstream analytical structures.
     """
 
     def __init__(
         self,
         questions: pd.DataFrame,
         insights: pd.DataFrame,
-        full_text: Optional[pd.DataFrame] = None, 
-        chunks: Optional[pd.DataFrame] = None
+        full_text: Optional[pd.DataFrame] = None,
+        chunks: Optional[pd.DataFrame] = None,
     ) -> None:
         
+        """
+        Initialize a new CorpusState.
+
+        Parameters
+        ----------
+        questions : pd.DataFrame
+            DataFrame containing the research questions guiding the analysis.
+            Must include `question_id` and `question_text`.
+
+        insights : pd.DataFrame
+            Core analytical dataset containing extracted insights.
+            Must include at minimum:
+                - `question_id`
+                - `question_text`
+
+        full_text : pd.DataFrame, optional
+            DataFrame containing full document text indexed by `paper_id`.
+            If omitted, an empty DataFrame with the expected schema is created.
+
+        chunks : pd.DataFrame, optional
+            DataFrame containing chunked text segments derived from the corpus.
+            Must include:
+                - `paper_id`
+                - `chunk_id`
+                - `chunk_text`
+            If omitted, an empty DataFrame with the expected schema is created.
+
+        Raises
+        ------
+        ValueError
+            If required columns are missing from the provided DataFrames.
+        """
+        
+        required_question_cols = ["question_id", "question_text"]
+        if not all(col in questions.columns for col in required_question_cols):
+            raise ValueError(
+                "questions dataframe requires the following variables to initialize: 'question_id' and 'question_text'."
+            )
         self.questions = questions
+
         
         required_insights_cols = ["question_id", "question_text"]
         if not all(col in insights.columns for col in required_insights_cols):
@@ -70,7 +267,25 @@ class CorpusState:
 
     def enforce_canonical_question_text(self) -> None:
         """
-        Ensures that state.insights always uses the canonical question_text for each question_id.
+        Enforce a single canonical `question_text` for each `question_id`.
+
+        Insight extraction stages may occasionally introduce duplicated or
+        inconsistent representations of the research question text. This
+        method reconstructs a canonical mapping between `question_id` and
+        `question_text` based on unique values present in the insights table.
+
+        The procedure:
+
+        1. Extract unique `(question_id, question_text)` pairs.
+        2. Drop any existing `question_text` column in the insights table.
+        3. Re-merge the canonical mapping back into the table.
+
+        This ensures downstream synthesis stages operate on a stable
+        representation of the research questions.
+
+        Modifies
+        --------
+        self.insights
         """
         # Build canonical mapping
         canonical = (
@@ -89,9 +304,32 @@ class CorpusState:
 
     
     def save(self, save_location: str) -> None:
+       
         """
-        Save the entire CorpusState object as Parquet files (one per DataFrame attribute).
-        Handles list-like columns (`paper_author`, embeddings) using PyArrow array types.
+        Persist the CorpusState to a directory of Parquet files.
+
+        Each DataFrame attribute of the object is serialized to an individual
+        Parquet file. The filenames correspond to the attribute names:
+
+        - questions.parquet
+        - insights.parquet
+        - full_text.parquet
+        - chunks.parquet
+
+        List-like columns and embedding arrays are converted to Arrow list
+        types to ensure correct serialization and restoration.
+
+        Parameters
+        ----------
+        save_location : str
+            Directory where the Parquet files should be written.
+
+        Notes
+        -----
+        A marker file named `_done` is written after all tables have been
+        successfully saved. This file can be used by resume logic to detect
+        completed state persistence.
+
         """
 
         os.makedirs(save_location, exist_ok=True)
@@ -135,8 +373,7 @@ class CorpusState:
             # save parquet
             print(f"Saving {key} to Parquet...")
             pq.write_table(table, os.path.join(save_location, f"{key}.parquet"), compression="zstd")
-
-        # marker file
+            
         with open(os.path.join(save_location, "_done"), "w") as f:
             pass
 
@@ -148,6 +385,33 @@ class CorpusState:
         write_full_text=True, 
         write_chunks=True
     ) -> None:
+        """
+        Export corpus state tables to CSV files.
+
+        Parameters
+        ----------
+        save_location : str
+            Output directory for the CSV files.
+
+        write_questions : bool
+            Whether to export the questions table.
+
+        write_insights : bool
+            Whether to export the insights table.
+
+        write_full_text : bool
+            Whether to export the full text table.
+
+        write_chunks : bool
+            Whether to export the chunk table.
+
+        Notes
+        -----
+        This export format is primarily intended for manual inspection
+        and debugging. Parquet persistence should be used for reliable
+        pipeline resumes.
+        """
+
         os.makedirs(save_location, exist_ok=True)
         self._drop_unnamed_columns()
         if write_questions:
@@ -163,89 +427,89 @@ class CorpusState:
     #                             LOAD METHODS                              #
     # ---------------------------------------------------------------------- #
     
-    @classmethod
-    def from_json(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), join_str="-||-|||-||-") -> "CorpusState":
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"No folder found at {filepath}")
+    # @classmethod
+    # def from_json(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), join_str="-||-|||-||-") -> "CorpusState":
+    #     if not os.path.exists(filepath):
+    #         raise FileNotFoundError(f"No folder found at {filepath}")
 
-        files = os.listdir(filepath)
-        files = [file for file in files if Path(file).suffix.lower() == ".json"]
-        if "insights.json" not in files:
-            raise FileNotFoundError(f"'insights.json' file not found in {filepath}, cannot load CorpusState.")
-        state_df_dict = {}
-        for file in files:
-            full_path = os.path.join(filepath, file)
-            df = pd.read_json(full_path, orient="records", lines=True)
-            df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
+    #     files = os.listdir(filepath)
+    #     files = [file for file in files if Path(file).suffix.lower() == ".json"]
+    #     if "insights.json" not in files:
+    #         raise FileNotFoundError(f"'insights.json' file not found in {filepath}, cannot load CorpusState.")
+    #     state_df_dict = {}
+    #     for file in files:
+    #         full_path = os.path.join(filepath, file)
+    #         df = pd.read_json(full_path, orient="records", lines=True)
+    #         df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
 
-            for col in ["paper_author", "insight", "chunks", "pages"]:
-                if col in df.columns:
-                    df[col] = df[col].apply(
-                        lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
-                    )
+    #         for col in ["paper_author", "insight", "chunks", "pages"]:
+    #             if col in df.columns:
+    #                 df[col] = df[col].apply(
+    #                     lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
+    #                 )
 
-            state_df_dict[Path(file).stem] = df
+    #         state_df_dict[Path(file).stem] = df
 
-        question_state = cls(
-            questions=state_df_dict.get("questions"),
-            insights=state_df_dict["insights"],
-            full_text=state_df_dict.get("full_text", None),
-            chunks=state_df_dict.get("chunks", None)
-        )
+    #     question_state = cls(
+    #         questions=state_df_dict.get("questions"),
+    #         insights=state_df_dict["insights"],
+    #         full_text=state_df_dict.get("full_text", None),
+    #         chunks=state_df_dict.get("chunks", None)
+    #     )
 
-        return question_state
+    #     return question_state
 
-    @classmethod
-    def from_parquet(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), new = True, join_str="-||-|||-||-") -> "CorpusState":
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"No folder found at {filepath}")
+    # @classmethod
+    # def from_parquet(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), new = True, join_str="-||-|||-||-") -> "CorpusState":
+    #     if not os.path.exists(filepath):
+    #         raise FileNotFoundError(f"No folder found at {filepath}")
          
-        files = [file for file in os.listdir(filepath) if Path(file).suffix.lower() == ".parquet"]
-        state_df_dict = {}
-        if new:
-            if "insights.parquet" not in files:
-                raise FileNotFoundError(f"'insights.parquet' file not found in {filepath}, cannot load CorpusState.")
+    #     files = [file for file in os.listdir(filepath) if Path(file).suffix.lower() == ".parquet"]
+    #     state_df_dict = {}
+    #     if new:
+    #         if "insights.parquet" not in files:
+    #             raise FileNotFoundError(f"'insights.parquet' file not found in {filepath}, cannot load CorpusState.")
 
-            for file in files:
-                full_path = os.path.join(filepath, file)
-                df = pd.read_parquet(full_path)
-                df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
-                state_df_dict[Path(file).stem] = df
-                for col in ["paper_author", "insight", "chunks", "pages"]:
-                    if col in df.columns:
-                        df[col] = df[col].apply(
-                            lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
-                        )
+    #         for file in files:
+    #             full_path = os.path.join(filepath, file)
+    #             df = pd.read_parquet(full_path)
+    #             df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
+    #             state_df_dict[Path(file).stem] = df
+    #             for col in ["paper_author", "insight", "chunks", "pages"]:
+    #                 if col in df.columns:
+    #                     df[col] = df[col].apply(
+    #                         lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
+    #                     )
 
-            corpus_state = cls(
-                questions=state_df_dict.get("questions"),
-                insights=state_df_dict["insights"],
-                full_text=state_df_dict.get("full_text", None),
-                chunks=state_df_dict.get("chunks", None)
-            )
+    #         corpus_state = cls(
+    #             questions=state_df_dict.get("questions"),
+    #             insights=state_df_dict["insights"],
+    #             full_text=state_df_dict.get("full_text", None),
+    #             chunks=state_df_dict.get("chunks", None)
+    #         )
 
-            return corpus_state
+    #         return corpus_state
        
-        else:
-            files = os.listdir(filepath)
-            state_df_dict = {}
-            for file in files:
-                full_path = os.path.join(filepath, file)
-                df = pd.read_parquet(full_path)
-                df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
-                state_df_dict[Path(file).stem] = df
+    #     else:
+    #         files = os.listdir(filepath)
+    #         state_df_dict = {}
+    #         for file in files:
+    #             full_path = os.path.join(filepath, file)
+    #             df = pd.read_parquet(full_path)
+    #             df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
+    #             state_df_dict[Path(file).stem] = df
 
-            corpus_state = cls(
-                questions=state_df_dict.get("questions"),
-                insights=state_df_dict.get("insights", None),
-                full_text=state_df_dict.get("full_text", None),
-                chunks=state_df_dict.get("chunks", None)
-            )
+    #         corpus_state = cls(
+    #             questions=state_df_dict.get("questions"),
+    #             insights=state_df_dict.get("insights", None),
+    #             full_text=state_df_dict.get("full_text", None),
+    #             chunks=state_df_dict.get("chunks", None)
+    #         )
             
-            # Normalize the columns - first get arrays to lists then get 
-            corpus_state.arrays_to_lists(["paper_author", "insight", "chunks", "pages"])
-            corpus_state.normalize_list_columns(["paper_author", "insight", "chunks", "pages"])
-            return corpus_state
+    #         # Normalize the columns - first get arrays to lists then get 
+    #         corpus_state.arrays_to_lists(["paper_author", "insight", "chunks", "pages"])
+    #         corpus_state.normalize_list_columns(["paper_author", "insight", "chunks", "pages"])
+    #         return corpus_state
     
     @classmethod
     def load(cls, filepath: str) -> "CorpusState":
@@ -312,9 +576,23 @@ class CorpusState:
 
     def fingerprint(self) -> str:
         """
-        Deterministic fingerprint of the corpus state.
-        Used for resume validation.
-        Only includes fields relevant to downstream summarization.
+        Generate a deterministic fingerprint of the corpus state.
+
+        The fingerprint is computed from a normalized representation
+        of the `insights` table using the following fields:
+
+        - `insight_id`
+        - `insight`
+        - `cluster`
+
+        This hash is used for pipeline resume validation to ensure
+        that downstream synthesis stages are operating on the same
+        corpus representation.
+
+        Returns
+        -------
+        str
+            SHA-256 hash representing the normalized insight dataset.
         """
 
         relevant_columns = ["insight_id", "insight", "cluster"]
@@ -367,25 +645,79 @@ class CorpusState:
 
 class SummaryState:
     """
-    Holds all interpretive artifacts generated during the summarization stage.
+    Persistent state container for the thematic synthesis stage of ReadingMachine.
+
+    `SummaryState` stores all interpretive artifacts produced after the corpus
+    reading phase. While `CorpusState` represents the structured semantic index
+    of the corpus (documents → chunks → insights), `SummaryState` represents the
+    **iterative analytical synthesis** of those insights.
+
+    The summarization pipeline operates as a sequence of iterative passes:
+
+        cluster summaries
+        → theme schema generation
+        → insight-to-theme mapping
+        → theme population
+        → orphan detection
+        → iteration
+
+    Each stage produces a DataFrame artifact that is appended to a list.
+    These lists preserve the full history of synthesis passes, allowing
+    inspection of how themes evolve across iterations.
 
     Attributes
     ----------
     cluster_summary_list : List[pd.DataFrame]
+        Sequential cluster summaries derived from clustered insights.
+        Typically length 1.
+
     theme_schema_list : List[pd.DataFrame]
+        Theme schemas generated during each iteration of thematic synthesis.
+
     mapped_theme_list : List[pd.DataFrame]
+        Insight-to-theme mapping tables for each synthesis pass.
+
     populated_theme_list : List[pd.DataFrame]
+        The synthesized textual summaries for each theme.
+
     orphan_list : List[pd.DataFrame]
+        Insights that were not incorporated into theme summaries and
+        require reinsertion.
+
     redundancy_list : List[pd.DataFrame]
+        Final redundancy-corrected theme summaries produced after the
+        synthesis process is complete.
 
-    This object represents the full state of the thematic summarization pipeline.
+    Notes
+    -----
+    The object functions as a **pipeline history log**. Rather than
+    overwriting earlier synthesis artifacts, each stage appends new
+    results to the relevant list.
 
-    The SummaryState is distinguished from CorpusState as the latter is focused on tracking the way insights are developed, SummaryState tracks the evolution of the summary artefacts
+    This design supports:
+
+    - reproducibility
+    - inspectability
+    - rewind and resume workflows
+    - debugging of theme evolution
+
+    Unlike `CorpusState`, which stores tidy analytical datasets,
+    `SummaryState` stores **pipeline passes**.
     """
     def __init__(
         self,
         summary_save_location: str = config.SUMMARY_SAVE_LOCATION,
     ) -> None:
+        """
+        Initialize an empty SummaryState.
+
+        Parameters
+        ----------
+        summary_save_location : str
+            Directory where summary artifacts will be persisted as
+            Parquet files. Defaults to the location specified in
+            the project configuration.
+        """
         self.summary_save_location = summary_save_location
 
         # Ensure summary save location exists
@@ -402,7 +734,25 @@ class SummaryState:
     @classmethod
     def load(cls, summary_save_location:str = config.SUMMARY_SAVE_LOCATION) -> "SummaryState":
         """
-        Class method that allows us to load summary state from file, which otherwise would initalize with an empty list
+        Load an existing SummaryState from disk.
+
+        This method reconstructs the SummaryState by locating Parquet files
+        corresponding to each synthesis artifact and loading them into the
+        appropriate lists.
+
+        Files are loaded in chronological order to preserve the historical
+        sequence of synthesis passes.
+
+        Parameters
+        ----------
+        summary_save_location : str
+            Directory containing previously saved summary artifacts.
+
+        Returns
+        -------
+        SummaryState
+            Reconstructed summary state containing all previously saved
+            synthesis artifacts.
         """
 
         state = cls(summary_save_location=summary_save_location)
@@ -419,18 +769,21 @@ class SummaryState:
 
     def _load_attribute_from_file(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
         """
-        Finds and loads all parquet versions of a specific file, sorted by creation time.
+        Load a list of DataFrames corresponding to a synthesis artifact.
 
-        This method searches the summary save location for files matching the 
-        pattern '{file_prefix}*.parquet' and returns them as a list of DataFrames 
-        ordered from oldest to newest.
+        This method searches the summary save directory for Parquet files
+        matching the given prefix and loads them into a list ordered by
+        file creation time.
 
-        Args:
-            file_prefix: The base filename prefix to search for (e.g., 'cluster_summary').
+        Parameters
+        ----------
+        file_prefix : str
+            Filename prefix used to identify the artifact group.
 
-        Returns:
-            A list of pandas DataFrames if matching files exist, otherwise None.
-            The list is sorted by file creation time (st_birthtime/st_mtime).
+        Returns
+        -------
+        List[pd.DataFrame] or []
+            List of loaded DataFrames ordered from oldest to newest.
         """
         base_dir = Path(self.summary_save_location)
         
@@ -455,16 +808,29 @@ class SummaryState:
     
     def _assert_state_integrity(self, df_list: list, context: str = ""):
         """
-        Developer-facing integrity check for summarize pipeline corpus_state.
+        Developer-facing integrity checks for summary artifacts.
 
-        - Ensures structural keys like `theme_id` maintain expected dtype.
-        - Prints loud warnings but does NOT raise errors.
-        - Intended as a guardrail during development and refactoring.
+        The method verifies that loaded or generated synthesis artifacts
+        maintain expected structural properties.
 
-        Args:
-            df_list: A list of pandas DataFrames to validate.
-            context: Optional string indicating where this check is being run
-                    (e.g., 'reload', 'save', 'post-populate').
+        Checks include:
+
+        - confirming objects are DataFrames
+        - verifying that `theme_id` columns retain integer dtype
+        - warning if unexpected structures are encountered
+
+        The function intentionally **prints warnings instead of raising
+        exceptions** so that developers can continue execution while
+        diagnosing state inconsistencies.
+
+        Parameters
+        ----------
+        df_list : list
+            List of DataFrames to validate.
+
+        context : str
+            Optional label indicating where the check is occurring
+            (e.g., "Load", "Save", "Post-populate").
         """
 
         if not isinstance(df_list, list):
@@ -503,34 +869,56 @@ class SummaryState:
                         f"Correct dtype drift before proceeding.\n"
                 )
 
-    def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
-        """
-        Deletes summary output files matching the given prefixes.
+    # def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
+    #     """
+    #     Delete persisted summary artifacts matching specific prefixes.
 
-        Args:
-            file_prefixes: List of file prefixes to delete (e.g., ['cluster_summary']).
-        """
-        if not self.summary_save_location:
-            return
+    #     This utility removes Parquet files associated with selected
+    #     synthesis stages. It is primarily used when rewinding or
+    #     restarting the summarization pipeline.
 
-        base_dir = Path(self.summary_save_location)
+    #     Parameters
+    #     ----------
+    #     file_prefixes : List[str]
+    #         Filename prefixes identifying artifact groups to remove.
+    #     """
+    #     if not self.summary_save_location:
+    #         return
+
+    #     base_dir = Path(self.summary_save_location)
         
-        # Ensure we don't try to glob an empty path or a non-existent directory
-        if not base_dir.is_dir():
-            return
+    #     # Ensure we don't try to glob an empty path or a non-existent directory
+    #     if not base_dir.is_dir():
+    #         return
 
-        for prefix in file_prefixes:
-            # glob finds every file starting with prefix and ending in .parquet
-            for file_path in base_dir.glob(f"{prefix}*.parquet"):
-                # missing_ok=True prevents crashes if another process 
-                # deletes the file between globbing and unlinking
-                file_path.unlink(missing_ok=True)
+    #     for prefix in file_prefixes:
+    #         # glob finds every file starting with prefix and ending in .parquet
+    #         for file_path in base_dir.glob(f"{prefix}*.parquet"):
+    #             # missing_ok=True prevents crashes if another process 
+    #             # deletes the file between globbing and unlinking
+    #             file_path.unlink(missing_ok=True)
 
     
     def save(self) -> None:
         """
-        Atomically saves the current SummaryState to disk.
-        Writes to a temporary directory first, then replaces the live directory.
+        Persist the current SummaryState to disk.
+
+        All synthesis artifacts are written as Parquet files inside the
+        configured summary directory.
+
+        The save procedure is atomic:
+
+        1. Write all files to a temporary directory
+        2. Delete the previous directory
+        3. Rename the temporary directory to the target location
+
+        This prevents partially written state from corrupting the pipeline
+        if execution is interrupted.
+
+        Notes
+        -----
+        Each synthesis pass is stored as a separate file, allowing
+        full reconstruction of the pipeline history.
         """
 
         save_path = Path(self.summary_save_location)
@@ -569,6 +957,31 @@ class SummaryState:
         
 
     def rewind_to(self, stage: str, index: int):
+        """
+        Rewind the synthesis pipeline to a previous stage.
+
+        This method truncates summary artifact lists so that the pipeline
+        appears as though it had only progressed to a specified stage and
+        iteration.
+
+        Parameters
+        ----------
+        stage : str
+            Target stage to rewind to. Must be one of:
+
+            - "schema"
+            - "mapping"
+            - "populate"
+            - "orphan"
+
+        index : int
+            Iteration index to retain.
+
+        Notes
+        -----
+        Rewinding automatically clears the redundancy stage and saves
+        the updated state to disk.
+        """
 
         stage_order = {
             "schema": 0,
@@ -628,6 +1041,46 @@ class SummaryState:
         self.save()
 
     def restart(self, confirm = None):
+        """
+        Reset the entire SummaryState and remove all persisted synthesis artifacts.
+
+        This method clears both the in-memory state and the corresponding files
+        stored on disk in the summary save directory. It is intended for situations
+        where a user wishes to completely restart the thematic synthesis stage
+        from the beginning.
+
+        The method prompts the user for confirmation before proceeding in order
+        to prevent accidental deletion of summary artifacts.
+
+        Parameters
+        ----------
+        confirm : str, optional
+            Confirmation flag used to bypass the interactive prompt. If set to
+            `"yes"` or `"no"`, the method will use that value directly instead
+            of prompting the user.
+
+        Behavior
+        --------
+        If confirmation is `"yes"`:
+
+        - All in-memory summary artifact lists are cleared.
+        - The summary output directory is deleted.
+        - A new empty directory is created at the same location.
+
+        If confirmation is `"no"`:
+
+        - No changes are made.
+
+        Notes
+        -----
+        This operation affects only the summarization stage (`SummaryState`).
+        It does not modify the underlying `CorpusState` or any corpus-level
+        artifacts such as documents, chunks, or insights.
+
+        This method is primarily intended for interactive CLI workflows where
+        users may wish to discard previous synthesis passes and rerun the
+        summarization pipeline.
+        """
         while confirm not in ["yes", "no"]:
             confirm = input(
                 "Are you sure you want to restart? This will clear all summary state. Enter 'yes' or 'no':\n"
@@ -654,6 +1107,65 @@ class SummaryState:
             print("Restart cancelled.")
 
     def status(self, diagnostic = False):
+        """
+        Report the current progress of the summarization pipeline.
+
+        This method inspects the lengths of each synthesis artifact list to
+        determine which stage of the summarization workflow has most recently
+        completed.
+
+        The pipeline stages are inferred from the following artifact lists:
+
+        - cluster_summary_list
+        - theme_schema_list
+        - mapped_theme_list
+        - populated_theme_list
+        - orphan_list
+        - redundancy_list
+
+        Parameters
+        ----------
+        diagnostic : bool, default False
+            If False (default), the method prints a human-readable status
+            message describing the current pipeline stage and recommended
+            next step.
+
+            If True, the method returns a structured dictionary describing
+            the current stage and iteration depth instead of printing output.
+
+        Returns
+        -------
+        dict or None
+            If `diagnostic=True`, returns a dictionary containing:
+
+            - `stage` : the inferred pipeline stage
+            - `max_stage` : the highest iteration index across artifact lists
+
+            If `diagnostic=False`, the function prints status information
+            and returns None.
+
+        Notes
+        -----
+        The stage inference logic assumes that synthesis artifacts are
+        generated sequentially according to the pipeline order:
+
+            cluster summaries
+            → theme schema
+            → insight mapping
+            → theme population
+            → orphan detection
+            → redundancy handling
+
+        Because synthesis is iterative, multiple entries may exist in
+        each artifact list. The function determines the current stage
+        by identifying which artifact list contains the most recent
+        completed pass.
+
+        This method is primarily intended as a user-facing diagnostic
+        tool for interactive workflows.
+        """
+
+
         # Get the status of the current summary state by checking the lengths of each list of artifacts.            
         status = {
             "cluster_summary_list": len(self.cluster_summary_list),
@@ -715,9 +1227,20 @@ class SummaryState:
 
     def fingerprint(self):
         """
-        Deterministic fingerprint of the summary state.
-        Uses the latest DataFrame from each summary artifact list.
-        If anything changes, resume becomes invalid.
+         Generate a deterministic fingerprint of the summarization state.
+
+        The fingerprint is computed using the most recent DataFrame
+        from each synthesis artifact list.
+
+        Returns
+        -------
+        str
+            SHA-256 hash representing the current summarization state.
+
+        Notes
+        -----
+        This hash is used to validate resume operations and detect
+        changes to synthesis artifacts between runs.
         """
 
         parts = []
