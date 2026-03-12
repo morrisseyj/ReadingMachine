@@ -1,8 +1,8 @@
 # Import custom libraries and modules
-from lit_review_machine.state import CorpusState
-from lit_review_machine.prompts import Prompts
-import lit_review_machine.config
-import lit_review_machine.utils
+from readingmachine.state import CorpusState
+from readingmachine.prompts import Prompts
+import readingmachine.config
+import readingmachine.utils
 
 # Import standard libraries
 from typing import Any, Dict, List, Optional, Tuple, Union
