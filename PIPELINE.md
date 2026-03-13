@@ -1,4 +1,8 @@
 # ReadingMachine Pipeline Architecture
+
+This diagram illustrates the sequential transformation of documents
+into structured thematic synthesis outputs.
+
                          ┌───────────────────────────┐
                          │        DOCUMENTS          │
                          │        (PDF / HTML)       │

@@ -1,4 +1,4 @@
-# ReadingMachine
+# ReadingMachine: Structured Corpus Reading with LLMs
 
 **ReadingMachine implements a structured methodology for large-scale thematic synthesis across natural-language corpora.**
 
@@ -9,6 +9,18 @@ Rather than retrieving fragments of text or repeatedly summarizing documents, Re
 The result is a structured map of the arguments and insights contained in a document collection.
 
 ReadingMachine should therefore be understood primarily as a **semantic research methodology implemented through machine reading**, instead of a conventional AI application.
+
+---
+
+## Documentation
+
+Additional technical documentation describing the internal architecture of the system is available in:
+
+- `docs/ARCHITECTURE.md` — conceptual and state architecture
+- `docs/PIPELINE.md` — pipeline flow diagram
+- `docs/CODE_ARCHITECTURE.md` — class interaction and state mutation model
+
+These documents explain how the analytical workflow described below is implemented in code.
 
 ---
 

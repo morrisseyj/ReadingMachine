@@ -1,3 +1,17 @@
+import importlib
+
+def reload():
+    from readingmachine import core, utils, state, render, config
+
+    importlib.reload(config)
+    importlib.reload(utils)
+    importlib.reload(state)
+    importlib.reload(core)
+
+    return(None)
+
+
+
 """
 ReadingMachine Example Pipeline
 --------------------------------

@@ -1,18 +1,132 @@
-# ReadingMachine State Architecture
+# ReadingMachine ARCHITECTURE
+
+# Code Architecture
+
+ReadingMachine is organized into a small set of modules that implement the
+structured reading methodology described in the README.
+
+The system separates **corpus discovery**, **corpus processing**, and
+**thematic synthesis** into distinct layers.
+
+---
+
+## Repository Structure
+
+readingmachine/  
+│  
+├── core.py  
+│ Implements the primary analytical pipeline:  
+│ ingestion → insight extraction → clustering → synthesis  
+│  
+├── state.py  
+│ Defines the two persistent state objects used throughout the system:  
+│ CorpusState and SummaryState.  
+│  
+├── render.py  
+│ Generates presentation outputs (Markdown, DOCX, PDF) from the  
+│ synthesized thematic structure.  
+│  
+├── prompts.py  
+│ Central registry for all prompts used across the pipeline.  
+│  
+├── utils.py  
+│ Shared utility functions including LLM call wrappers and state validation.  
+│  
+├── config.py  
+│ Centralized configuration for filesystem paths and naming conventions.  
+│  
+└── getlit/  
+
+Optional corpus discovery tools:  
+- search string generation  
+- academic literature retrieval  
+- grey literature discovery  
+- deduplication and corpus assembly  
+
+---
+
+## Pipeline Layers
+
+The system operates in three conceptual layers:
+
+### 1. Corpus Discovery (optional)
+
+Implemented in `getlit/`.
+
+research questions
+→ search strings
+→ literature retrieval
+→ deduplication
+→ download preparation
+
+This stage builds the document corpus but is not required if the user
+already has a set of documents.
+
+---
+
+### 2. Corpus Processing
+
+Implemented primarily in `core.py`.
+
+documents
+→ full text ingestion
+→ chunking
+→ insight extraction
+→ embedding
+→ clustering
+
+This stage converts raw documents into the structured **insight corpus**
+stored in `CorpusState`.
+
+---
+
+### 3. Thematic Synthesis
+
+Also implemented in `core.py`.
+
+cluster summaries
+→ theme schema generation
+→ insight-to-theme mapping
+→ theme population
+→ orphan detection
+→ iterative refinement
+→ redundancy reduction
+
+Artifacts from this stage are stored in `SummaryState`.
+
+---
+
+### 4. Rendering
+
+Implemented in `render.py`.
+
+thematic synthesis
+→ narrative summaries
+→ stylistic rewrite (optional)
+→ question summaries
+→ executive summary
+→ final report generation
+
+Render artifacts are presentation outputs and are intentionally not
+treated as analytical state.
+
+---
+
+# State Architecture
 
 ## Overview
 
 ReadingMachine maintains two persistent state objects that track the transformation of a corpus through the pipeline:
 
-CorpusState   → represents the corpus and extracted insights
+1. CorpusState   → represents the corpus and extracted insights
 
-SummaryState  → represents the interpretive synthesis of those insights
+2. SummaryState  → represents the interpretive synthesis of those insights
 
 The two objects correspond to two different phases of the method:
 
-Corpus processing → extraction and organization of insights
+1. Corpus processing → extraction and organization of insights
 
-Thematic synthesis → clustering, thematic structure, and narrative summaries
+2. Thematic synthesis → clustering, thematic structure, and narrative summaries
 
 Separating these layers preserves both **traceability** and **reproducibility**.
 
