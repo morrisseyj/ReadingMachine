@@ -1,0 +1,113 @@
+# Examples
+
+This directory contains example workflows demonstrating how to use
+ReadingMachine.
+
+ReadingMachine supports two primary workflows:
+
+1. **Corpus discovery** – building a literature corpus from search engines (useful for literature review type workflows)
+2. **Corpus analysis** – performing structured thematic synthesis on a set of documents (supports literature reviews, but can process any type of corpus)
+
+Not all users need both steps.
+
+---
+
+# Example Workflows
+
+## 1. Corpus Discovery (optional)
+
+File:
+
+examples/run_getlit_pipeline.py
+
+Purpose:
+
+Build a literature corpus using the **getlit** tools.
+
+Steps demonstrated:
+
+research questions
+→ search strings
+→ academic literature retrieval
+→ grey literature retrieval
+→ duplicate detection
+→ AI literature completeness check
+→ download architecture
+
+Output:
+
+CorpusState containing candidate papers
+
+After downloading the papers you can proceed to the core pipeline.
+
+---
+
+## 2. Corpus Reading and Synthesis (core workflow)
+
+File:
+
+examples/run_core_pipeline.py
+
+Purpose:
+
+Run the full ReadingMachine analysis on a document corpus.
+
+Pipeline:
+
+documents
+→ chunking
+→ insight extraction
+→ clustering
+→ theme generation
+→ thematic synthesis
+→ report rendering
+
+Input:
+
+PDF / HTML documents placed in:
+
+data/docs/
+
+---
+
+# Toy Corpus for Testing
+
+File:
+
+examples/toy_corpus.md
+
+This file provides a small open-access corpus that can be used to test the
+pipeline without assembling your own dataset.
+
+Download the listed papers and place them in:
+
+data/docs/
+
+---
+
+# Typical Usage
+
+### If you already have a corpus
+
+Consult only the core pipeline:
+
+examples/run_core_pipeline.py
+
+### If you want help assembling a literature corpus
+
+Consult the discovery workflow first:
+
+examples/run_getlit_pipeline.py
+
+Then proceed to:
+
+examples/run_core_pipeline.py
+
+---
+
+# Notes
+
+The example scripts are **annotated workflows**, not CLI commands.
+
+They are intended to be read and executed interactively to understand how
+the pipeline operates.
