@@ -158,7 +158,6 @@ to be inspected or reused across runs.
 
 from . import config, utils
 from .state import CorpusState, SummaryState
-from .render import Render
 from .prompts import Prompts
 
 # import standard libraries
@@ -265,7 +264,7 @@ class Ingestor:
         corpus_state: Optional[CorpusState] = None,
         questions: Optional[List[str]] = None,
         papers: Optional[pd.DataFrame] = None,
-        file_path: str = os.path.join(os.getcwd(), "data", "docs"),
+        file_path: str = os.path.join(os.getcwd(), config.CORPUS_LOCATION),
         pickle_path: str = config.PICKLE_SAVE_LOCATION # For storing the pickles of LLM metadata retreival for resume
     ) -> None:
         """Initialize Ingestor and validate corpus_state/papers format."""

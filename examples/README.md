@@ -66,7 +66,7 @@ Input:
 
 PDF / HTML documents placed in:
 
-data/docs/
+data/corpus/
 
 ---
 
@@ -81,7 +81,7 @@ pipeline without assembling your own dataset.
 
 Download the listed papers and place them in:
 
-data/docs/
+data/corpus/
 
 ---
 

@@ -217,7 +217,7 @@ downloads = getlit.DownloadManager(
 #
 # The DownloadManager creates a folder structure under:
 #
-#     data/docs/
+#     data/corpus/
 #
 # Each research question receives its own folder.
 #

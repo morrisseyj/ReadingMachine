@@ -17,12 +17,12 @@ These papers (see below) are **not required for the library**. They simply provi
 
 Download the five papers listed below and place them in:
 
-data/docs/
+data/corpus/
 
 Example directory structure:
 
 data/  
-└─ docs/  
+└─ corpus/  
 ├─ paper_1.pdf  
 ├─ paper_2.pdf  
 ├─ paper_3.pdf  

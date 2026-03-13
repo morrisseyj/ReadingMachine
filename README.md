@@ -32,7 +32,7 @@ These documents explain how the analytical workflow described below is implement
 
 2. Add your OpenAI API key to `.env`
 
-3. Place documents in `data/docs`
+3. Place documents in `data/corpus`
 
 4. Run the example pipeline
 

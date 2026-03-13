@@ -28,7 +28,7 @@ Before running this script:
 1. Download the toy corpus listed in `examples/toy_corpus.md`
 2. Place the PDFs in:
 
-        data/docs/
+        data/corpus/
 
 3. Add your OpenAI API key to `.env`
 
@@ -127,7 +127,7 @@ ingestor = core.Ingestor(
     papers=insights_df,
     llm_client=llm_client,
     ai_model="gpt-4o",
-    file_path=os.path.join(os.getcwd(), "data", "docs")
+    file_path=os.path.join(os.getcwd(), config.CORPUS_LOCATION)
 )
 
 # Read PDF/HTML files and extract text

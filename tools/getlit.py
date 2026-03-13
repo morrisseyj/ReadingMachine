@@ -1751,7 +1751,7 @@ class DownloadManager:
         self,
         corpus_state: "CorpusState" = None,
         papers: Optional[pd.DataFrame] = None,
-        DOWNLOAD_LOCATION: str = os.path.join(os.getcwd(), "data", "docs")
+        DOWNLOAD_LOCATION: str = os.path.join(os.getcwd(), config.CORPUS_LOCATION)
     ) -> None:
         """
         Initialize the DownloadManager.
@@ -1838,7 +1838,7 @@ class DownloadManager:
 
         The resulting directory structure resembles:
 
-            data/docs/
+            data/corpus/
                 question_0/
                 question_1/
                 question_2/
@@ -1959,264 +1959,264 @@ class DownloadManager:
 #         self.corpus_state.save(STATE_SAVE_LOCATION)
 #         return self.corpus_state.insights[["paper_id", "download_status"]]
 
-class PaperAttainmentTriage:
-    """
-    Class to triage papers that failed to download (hard-to-get) and prioritize
-    manual retrieval based on semantic similarity between research questions and paper titles.
-    """
+# class PaperAttainmentTriage:
+#     """
+#     Class to triage papers that failed to download (hard-to-get) and prioritize
+#     manual retrieval based on semantic similarity between research questions and paper titles.
+#     """
 
-    def __init__(
-        self,
-        corpus_state: "CorpusState",
-        client: Any,
-        embedding_model: str = "text-embedding-3-small",
-        save_location: str = os.path.join(os.getcwd(), "data", "hard_to_get_papers.csv"),
-        hard_to_get_papers: Optional[pd.DataFrame] = None
-    ) -> None:
-        """
-        Initialize PaperAttainmentTriage.
+#     def __init__(
+#         self,
+#         corpus_state: "CorpusState",
+#         client: Any,
+#         embedding_model: str = "text-embedding-3-small",
+#         save_location: str = os.path.join(os.getcwd(), "data", "hard_to_get_papers.csv"),
+#         hard_to_get_papers: Optional[pd.DataFrame] = None
+#     ) -> None:
+#         """
+#         Initialize PaperAttainmentTriage.
 
-        Args:
-            corpus_state: CorpusState object containing literature data.
-            client: OpenAI or similar embedding client.
-            embedding_model: Name of the embedding model.
-            save_location: CSV path to save the hard-to-get papers.
-            hard_to_get_papers: Optional pre-filtered DataFrame of failed downloads.
-        """
-        # Validate the corpus_state structure
-        self.corpus_state: "CorpusState" = deepcopy(
-            utils.validate_format(
-            corpus_state=corpus_state,
-            state_required_cols=[
-                "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi",
-                 "download_status", "messy_question_id", "messy_paper_id"
-            ],
-            injected_value=None,
-            injected_required_cols=[]
-            )
-        )
+#         Args:
+#             corpus_state: CorpusState object containing literature data.
+#             client: OpenAI or similar embedding client.
+#             embedding_model: Name of the embedding model.
+#             save_location: CSV path to save the hard-to-get papers.
+#             hard_to_get_papers: Optional pre-filtered DataFrame of failed downloads.
+#         """
+#         # Validate the corpus_state structure
+#         self.corpus_state: "CorpusState" = deepcopy(
+#             utils.validate_format(
+#             corpus_state=corpus_state,
+#             state_required_cols=[
+#                 "question_id", "question_text", "search_string_id", "search_string",
+#                 "paper_id", "paper_title", "paper_author", "paper_date", "doi",
+#                  "download_status", "messy_question_id", "messy_paper_id"
+#             ],
+#             injected_value=None,
+#             injected_required_cols=[]
+#             )
+#         )
 
-        self.client: Any = client
-        self.embedding_model: str = embedding_model
-        self.save_location: str = save_location
+#         self.client: Any = client
+#         self.embedding_model: str = embedding_model
+#         self.save_location: str = save_location
 
-        # Filter hard-to-get papers (failed downloads)
-        self.hard_to_get_papers: pd.DataFrame = (
-            hard_to_get_papers if hard_to_get_papers is not None 
-            else self.corpus_state.insights[self.corpus_state.insights["download_status"] == 0].copy()
-        )
+#         # Filter hard-to-get papers (failed downloads)
+#         self.hard_to_get_papers: pd.DataFrame = (
+#             hard_to_get_papers if hard_to_get_papers is not None 
+#             else self.corpus_state.insights[self.corpus_state.insights["download_status"] == 0].copy()
+#         )
 
-    def _generate_question_embeddings(self) -> pd.DataFrame:
-        """
-        Generate embeddings for unique research questions.
+#     def _generate_question_embeddings(self) -> pd.DataFrame:
+#         """
+#         Generate embeddings for unique research questions.
 
-        Returns:
-            DataFrame with columns ['question_text', 'question_embedding'].
-        """
-        questions = self.hard_to_get_papers["question_text"].drop_duplicates()
-        embeddings = []
+#         Returns:
+#             DataFrame with columns ['question_text', 'question_embedding'].
+#         """
+#         questions = self.hard_to_get_papers["question_text"].drop_duplicates()
+#         embeddings = []
 
-        for question in questions:
-            response = self.client.embeddings.create(
-                input=question,
-                model=self.embedding_model
-            )
-            embeddings.append(response.data[0].embedding)
+#         for question in questions:
+#             response = self.client.embeddings.create(
+#                 input=question,
+#                 model=self.embedding_model
+#             )
+#             embeddings.append(response.data[0].embedding)
 
-        df = pd.DataFrame({
-            "question_text": questions,
-            "question_embedding": embeddings
-        })
+#         df = pd.DataFrame({
+#             "question_text": questions,
+#             "question_embedding": embeddings
+#         })
 
-        self.question_embeddings: pd.DataFrame = df
-        return df
+#         self.question_embeddings: pd.DataFrame = df
+#         return df
 
-    def _generate_title_embeddings(self) -> pd.DataFrame:
-        """
-        Generate embeddings for all hard-to-get paper titles.
+#     def _generate_title_embeddings(self) -> pd.DataFrame:
+#         """
+#         Generate embeddings for all hard-to-get paper titles.
 
-        Returns:
-            DataFrame with columns ['paper_title', 'title_embedding'].
-        """
-        titles = self.hard_to_get_papers["paper_title"]
-        embeddings: List[Any] = []
+#         Returns:
+#             DataFrame with columns ['paper_title', 'title_embedding'].
+#         """
+#         titles = self.hard_to_get_papers["paper_title"]
+#         embeddings: List[Any] = []
 
-        for idx, title in enumerate(titles):
-            print(f"Generating embedding for title {idx + 1} of {len(titles)}")
-            response = self.client.embeddings.create(
-                input=title,
-                model=self.embedding_model
-            )
-            embeddings.append(response.data[0].embedding)
+#         for idx, title in enumerate(titles):
+#             print(f"Generating embedding for title {idx + 1} of {len(titles)}")
+#             response = self.client.embeddings.create(
+#                 input=title,
+#                 model=self.embedding_model
+#             )
+#             embeddings.append(response.data[0].embedding)
 
-        df = pd.DataFrame({
-            "paper_title": titles,
-            "title_embedding": embeddings
-        })
+#         df = pd.DataFrame({
+#             "paper_title": titles,
+#             "title_embedding": embeddings
+#         })
 
-        self.title_embeddings: pd.DataFrame = df
-        return df
+#         self.title_embeddings: pd.DataFrame = df
+#         return df
 
-    def generate_embeddings(self) -> pd.DataFrame:
-        """
-        Generate embeddings for both questions and titles and merge them into one DataFrame.
+#     def generate_embeddings(self) -> pd.DataFrame:
+#         """
+#         Generate embeddings for both questions and titles and merge them into one DataFrame.
 
-        Returns:
-            DataFrame of hard-to-get papers with question and title embeddings.
-        """
-        print("Generating question embeddings...")
-        q_df = self._generate_question_embeddings()
-        print("Generating title embeddings...")
-        t_df = self._generate_title_embeddings()
+#         Returns:
+#             DataFrame of hard-to-get papers with question and title embeddings.
+#         """
+#         print("Generating question embeddings...")
+#         q_df = self._generate_question_embeddings()
+#         print("Generating title embeddings...")
+#         t_df = self._generate_title_embeddings()
 
-        merged_df = self.hard_to_get_papers.merge(
-            q_df, how="left", on="question_text"
-        ).merge(
-            t_df, how="left", on="paper_title"
-        )
+#         merged_df = self.hard_to_get_papers.merge(
+#             q_df, how="left", on="question_text"
+#         ).merge(
+#             t_df, how="left", on="paper_title"
+#         )
 
-        self.embeddings_df: pd.DataFrame = merged_df
-        return merged_df
+#         self.embeddings_df: pd.DataFrame = merged_df
+#         return merged_df
 
-    @staticmethod
-    def calc_cosine_sim(embedding1: pd.Series, embedding2: pd.Series) -> List[float]:
-        """
-        Calculate cosine similarity between two series of embeddings.
+#     @staticmethod
+#     def calc_cosine_sim(embedding1: pd.Series, embedding2: pd.Series) -> List[float]:
+#         """
+#         Calculate cosine similarity between two series of embeddings.
 
-        Args:
-            embedding1: Series of embeddings (one per row).
-            embedding2: Series of embeddings.
+#         Args:
+#             embedding1: Series of embeddings (one per row).
+#             embedding2: Series of embeddings.
 
-        Returns:
-            List of cosine similarity values.
-        """
-        emb1 = np.vstack(embedding1.to_numpy())
-        emb2 = np.vstack(embedding2.to_numpy())
-        dot_product = np.sum(emb1 * emb2, axis=1)
-        norms = np.linalg.norm(emb1, axis=1) * np.linalg.norm(emb2, axis=1)
-        return (dot_product / norms).tolist()
+#         Returns:
+#             List of cosine similarity values.
+#         """
+#         emb1 = np.vstack(embedding1.to_numpy())
+#         emb2 = np.vstack(embedding2.to_numpy())
+#         dot_product = np.sum(emb1 * emb2, axis=1)
+#         norms = np.linalg.norm(emb1, axis=1) * np.linalg.norm(emb2, axis=1)
+#         return (dot_product / norms).tolist()
 
-    @staticmethod
-    def moving_average_filter(x: Union[pd.Series, list], window: int = 5) -> List[float]:
-        """
-        Apply a moving average smoothing to a series or list.
+#     @staticmethod
+#     def moving_average_filter(x: Union[pd.Series, list], window: int = 5) -> List[float]:
+#         """
+#         Apply a moving average smoothing to a series or list.
 
-        Args:
-            x: Data to smooth.
-            window: Rolling window size.
+#         Args:
+#             x: Data to smooth.
+#             window: Rolling window size.
 
-        Returns:
-            Smoothed data as a list.
-        """
-        if isinstance(x, list):
-            x = pd.Series(x)
-        return x.rolling(window=window, center=False).mean().tolist()
+#         Returns:
+#             Smoothed data as a list.
+#         """
+#         if isinstance(x, list):
+#             x = pd.Series(x)
+#         return x.rolling(window=window, center=False).mean().tolist()
 
-    @staticmethod
-    def locate_knee(y: pd.Series) -> List[float]:
-        """
-        Locate the knee/elbow point in a descending series using KneeLocator.
+#     @staticmethod
+#     def locate_knee(y: pd.Series) -> List[float]:
+#         """
+#         Locate the knee/elbow point in a descending series using KneeLocator.
 
-        Args:
-            y: Series of values (e.g., smoothed cosine similarities).
+#         Args:
+#             y: Series of values (e.g., smoothed cosine similarities).
 
-        Returns:
-            List of knee_y values repeated for each item in y.
-        """
-        y_sorted = y.sort_values(ascending=False)
-        x = list(range(len(y_sorted)))
+#         Returns:
+#             List of knee_y values repeated for each item in y.
+#         """
+#         y_sorted = y.sort_values(ascending=False)
+#         x = list(range(len(y_sorted)))
 
-        # Handle degenerate or empty input
-        if len(y_sorted) == 0 or y_sorted.isna().all():
-            return [np.nan for _ in y_sorted]
+#         # Handle degenerate or empty input
+#         if len(y_sorted) == 0 or y_sorted.isna().all():
+#             return [np.nan for _ in y_sorted]
 
-        kl = KneeLocator(x=x, y=y_sorted, direction="decreasing", curve="concave")
+#         kl = KneeLocator(x=x, y=y_sorted, direction="decreasing", curve="concave")
 
-        # If no knee detected, replace None with np.nan
-        knee_y = kl.knee_y if kl.knee_y is not None else np.nan
+#         # If no knee detected, replace None with np.nan
+#         knee_y = kl.knee_y if kl.knee_y is not None else np.nan
 
-        return [knee_y for _ in y_sorted]
+#         return [knee_y for _ in y_sorted]
 
-    def triage_papers(
-        self,
-        low_threshold: float = 0.35,
-        medium_threshold: float = 0.5
-    ) -> pd.DataFrame:
-        """
-        Classify hard-to-get papers into 'low', 'medium', or 'high' priority for manual retrieval.
+#     def triage_papers(
+#         self,
+#         low_threshold: float = 0.35,
+#         medium_threshold: float = 0.5
+#     ) -> pd.DataFrame:
+#         """
+#         Classify hard-to-get papers into 'low', 'medium', or 'high' priority for manual retrieval.
 
-        Args:
-            low_threshold: Cosine similarity threshold for low priority.
-            medium_threshold: Cosine similarity threshold for medium priority.
+#         Args:
+#             low_threshold: Cosine similarity threshold for low priority.
+#             medium_threshold: Cosine similarity threshold for medium priority.
 
-        Returns:
-            DataFrame of hard-to-get papers with rankings and cosine similarity.
-        """
-        # Cosine similarity between question and title embeddings
-        self.hard_to_get_papers["cosine_sim"] = self.calc_cosine_sim(
-            self.embeddings_df["question_embedding"],
-            self.embeddings_df["title_embedding"]
-        )
+#         Returns:
+#             DataFrame of hard-to-get papers with rankings and cosine similarity.
+#         """
+#         # Cosine similarity between question and title embeddings
+#         self.hard_to_get_papers["cosine_sim"] = self.calc_cosine_sim(
+#             self.embeddings_df["question_embedding"],
+#             self.embeddings_df["title_embedding"]
+#         )
 
-        # Smooth the cosine similarity
-        self.hard_to_get_papers["cosine_sim_smooth"] = self.moving_average_filter(
-            self.hard_to_get_papers["cosine_sim"]
-        )
+#         # Smooth the cosine similarity
+#         self.hard_to_get_papers["cosine_sim_smooth"] = self.moving_average_filter(
+#             self.hard_to_get_papers["cosine_sim"]
+#         )
 
-        # Count papers per research question
-        self.hard_to_get_papers["count"] = self.hard_to_get_papers.groupby("question_id")["paper_id"].transform("count")
+#         # Count papers per research question
+#         self.hard_to_get_papers["count"] = self.hard_to_get_papers.groupby("question_id")["paper_id"].transform("count")
 
-        # Compute knee/elbow for each research question
-        self.hard_to_get_papers["knee"] = self.hard_to_get_papers.groupby("question_id")["cosine_sim_smooth"].transform(self.locate_knee)
+#         # Compute knee/elbow for each research question
+#         self.hard_to_get_papers["knee"] = self.hard_to_get_papers.groupby("question_id")["cosine_sim_smooth"].transform(self.locate_knee)
 
-        # Initial ranking based on low threshold
-        self.hard_to_get_papers["paper_ranking"] = np.where(
-            self.hard_to_get_papers["cosine_sim"] <= low_threshold, "low", pd.NA
-        )
+#         # Initial ranking based on low threshold
+#         self.hard_to_get_papers["paper_ranking"] = np.where(
+#             self.hard_to_get_papers["cosine_sim"] <= low_threshold, "low", pd.NA
+#         )
 
-        # Count-based ranking overrides
-        self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
-            (self.hard_to_get_papers["count"] <= 10) & (self.hard_to_get_papers["cosine_sim"] > medium_threshold),
-            "high"
-        )
-        self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
-            (self.hard_to_get_papers["count"] <= 10) &
-            (self.hard_to_get_papers["cosine_sim"] > low_threshold) &
-            (self.hard_to_get_papers["cosine_sim"] <= medium_threshold),
-            "medium"
-        )
+#         # Count-based ranking overrides
+#         self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
+#             (self.hard_to_get_papers["count"] <= 10) & (self.hard_to_get_papers["cosine_sim"] > medium_threshold),
+#             "high"
+#         )
+#         self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
+#             (self.hard_to_get_papers["count"] <= 10) &
+#             (self.hard_to_get_papers["cosine_sim"] > low_threshold) &
+#             (self.hard_to_get_papers["cosine_sim"] <= medium_threshold),
+#             "medium"
+#         )
 
-        # Knee-based ranking
-        self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
-            self.hard_to_get_papers["paper_ranking"].isna() &
-            (self.hard_to_get_papers["cosine_sim"] > self.hard_to_get_papers["knee"]),
-            "high"
-        )
+#         # Knee-based ranking
+#         self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
+#             self.hard_to_get_papers["paper_ranking"].isna() &
+#             (self.hard_to_get_papers["cosine_sim"] > self.hard_to_get_papers["knee"]),
+#             "high"
+#         )
 
-        # Remaining papers get medium ranking
-        self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
-            self.hard_to_get_papers["paper_ranking"].isna(),
-            "medium"
-        )
+#         # Remaining papers get medium ranking
+#         self.hard_to_get_papers["paper_ranking"] = self.hard_to_get_papers["paper_ranking"].mask(
+#             self.hard_to_get_papers["paper_ranking"].isna(),
+#             "medium"
+#         )
 
-        # Merge rankings back into main corpus_state
-        self.corpus_state.insights = self.corpus_state.insights.merge(
-            self.hard_to_get_papers[["paper_id", "cosine_sim", "paper_ranking"]],
-            how="left",
-            on="paper_id"
-        )
+#         # Merge rankings back into main corpus_state
+#         self.corpus_state.insights = self.corpus_state.insights.merge(
+#             self.hard_to_get_papers[["paper_id", "cosine_sim", "paper_ranking"]],
+#             how="left",
+#             on="paper_id"
+#         )
 
-        # Save to CSV for manual review
-        self.corpus_state.insights.to_csv(self.save_location, index=False)
-        print(
-            f"The list of hard-to-get papers can be viewed here: {self.save_location}.\n"
-            f"Manually attain the papers that you can and save them in the relevant question folder: {os.path.join(os.getcwd(), 'data', 'docs')}.\n"
-            f"Update this file so that download status reflects papers that you manually downloaded.\n"
-            f"Ensure manually downloaded papers follow the naming convention 'paper_id.pdf' matching this file.\n"
-            "Once you have updated the file, you should reload with .update_state() - assuming you have not moved the file from where it was saved."
-        )
+#         # Save to CSV for manual review
+#         self.corpus_state.insights.to_csv(self.save_location, index=False)
+#         print(
+#             f"The list of hard-to-get papers can be viewed here: {self.save_location}.\n"
+#             f"Manually attain the papers that you can and save them in the relevant question folder: {os.path.join(os.getcwd(), config.CORPUS_LOCATION)}.\n"
+#             f"Update this file so that download status reflects papers that you manually downloaded.\n"
+#             f"Ensure manually downloaded papers follow the naming convention 'paper_id.pdf' matching this file.\n"
+#             "Once you have updated the file, you should reload with .update_state() - assuming you have not moved the file from where it was saved."
+#         )
 
-    def update_state(self):
-        # This is simply a wrapper for corpus_state.from_csv() which makes it intutive to update the corpus_state of the class after manually editing the csv
-        self.corpus_state = self.corpus_state.from_csv(filepath=self.save_location)
+#     def update_state(self):
+#         # This is simply a wrapper for corpus_state.from_csv() which makes it intutive to update the corpus_state of the class after manually editing the csv
+#         self.corpus_state = self.corpus_state.from_csv(filepath=self.save_location)
