@@ -1,13 +1,14 @@
 
 # Import custom libraries
-from . import core, utils, state, render
+from readingmachine import core, utils, state, render, config
 
-from typing import List
+
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
 import os
 import pandas as pd
+import random
 
 
 #---------
@@ -105,6 +106,10 @@ insights_generator.get_meta_insights()
 latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\07_insights')
 # Initialize the cluster class
 cluster = core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')
+
+# Set the seed as clustering algorithms invoke pseudo randomess and we want to ensure reproducibility in our runs
+random.seed(config.seed)
+
 # Embed the insights
 cluster.embed_insights()
 
@@ -160,7 +165,7 @@ cluster.clean_clusters()
 
 # Now we move to summarizing the clusters and generating the themes. 
 # Initialze the Summarize class using eithe the Clustering class or by loading the state from the latest step of the pipeline.
-latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\lit_review_machine\data\runs\08_clusters')
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\ReadingMachine\data\runs\08_clusters')
 summarize = core.Summarize(corpus_state=latest_corpus_state, 
                            llm_client=llm_client,
                            ai_model="gpt-4o",

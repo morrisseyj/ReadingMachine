@@ -20,7 +20,7 @@ class Prompts:
 
             'Your output must be a valid JSON object, parsable with `json.loads()`. Use the following structure:\n'
             '{\n'
-            '   "question1": ["prompt1", "prompt2", ..., "promptN"]\n'
+            '   "search_prompts": ["prompt1", "prompt2", ..., "promptN"]\n'
             '}\n'
             f'Where N = {num_prompts}.\n'
             'Do not include any explanatory text, headers, or formatting outside of the JSON.\n\n'

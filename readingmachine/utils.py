@@ -1,3 +1,32 @@
+"""
+Utility functions used across the ReadingMachine codebase.
+
+This module provides shared helpers that support the core pipeline,
+rendering layer, and corpus discovery tools. The utilities include:
+
+    - pipeline state validation
+    - standardized LLM API calls
+    - reasoning-model orchestration
+    - pipeline restart assistance
+
+These functions centralize repeated logic so that the rest of the
+codebase can remain focused on the analytical workflow rather than
+infrastructure details.
+
+Design principles
+-----------------
+
+The utilities are designed to:
+
+    • enforce consistent input validation across modules
+    • standardize LLM interactions
+    • support resumable execution of long-running operations
+    • assist users in recovering pipeline progress
+
+None of the utilities modify the analytical logic of ReadingMachine;
+they exist solely to support reliable execution of the pipeline.
+"""
+
 from .state import CorpusState
 
 import ast
@@ -42,23 +71,48 @@ def validate_format(
     injected_required_cols: List[str]
 ) -> "CorpusState":
     """
-    Validates input state or injected DataFrame for required columns.
-    Returns a properly initialized CorpusState.
+   Validate and normalize pipeline input state.
 
-    Args:
-        corpus_state: An existing CorpusState object (if available).
-        questions: A list of questions to initialize a new CorpusState if corpus_state is None.
-        injected_value: A DataFrame to inject into a new CorpusState if corpus_state is None.
-        state_required_cols: List of columns required in corpus_state.insights.
-        injected_required_cols: List of columns required in the injected DataFrame.
+    This helper ensures that downstream classes receive a properly
+    structured `CorpusState` object regardless of how the input
+    was provided.
 
-    Returns:
-        CorpusState: A valid state object with all required columns.
+    The function supports two initialization paths:
 
-    Raises:
-        ValueError: If neither corpus_state nor injected_value is provided,
-                    or if required columns are missing,
-                    or if 'paper_id' contains any NA values.
+        Path A — Existing CorpusState
+            Validate the structure of the provided state object.
+
+        Path B — Injected DataFrame
+            Construct a new `CorpusState` from a questions DataFrame
+            and an injected dataset.
+
+    Parameters
+    ----------
+    corpus_state : Optional[CorpusState]
+        Existing state object to validate.
+
+    questions : Optional[pd.DataFrame]
+        Question metadata used to initialize a new state.
+
+    injected_value : Optional[pd.DataFrame]
+        DataFrame containing records to insert into the new state.
+
+    state_required_cols : List[str]
+        Columns required to exist in `corpus_state.insights`.
+
+    injected_required_cols : List[str]
+        Columns required to exist in the injected DataFrame.
+
+    Returns
+    -------
+    CorpusState
+        Validated or newly constructed state object.
+
+    Raises
+    ------
+    ValueError
+        If the input arguments do not satisfy one of the valid
+        initialization paths or if required columns are missing.
     """
     
     # --- PATH A: Existing State Provided ---
@@ -96,18 +150,50 @@ def validate_format(
         )
     
 
-def call_chat_completion(llm_client, ai_model, sys_prompt, user_prompt, fall_back: Dict[str, Any], return_json: bool, json_schema = None):
+def call_chat_completion(llm_client, 
+                         ai_model, 
+                         sys_prompt, 
+                         user_prompt, 
+                         fall_back: Dict[str, Any], 
+                         return_json: bool, 
+                         json_schema = None):
     """
-    Call the chat completion API.
+    Standardized wrapper for chat completion calls.
 
-    If return_json=True:
-        - call with response_format=json_object
-        - on error: return fall_back (empty dict)
-        - on success: json.loads(...) and return the parsed dict
-    If return_json=False:
-        - call without response_format
-        - on error: return fall_back (empty string)
-        - on success: return raw text
+    This function provides a consistent interface for interacting with
+    chat completion models throughout the codebase. It handles both
+    structured JSON responses and plain text outputs.
+
+    Parameters
+    ----------
+    llm_client : Any
+        LLM API client instance.
+
+    ai_model : str
+        Model identifier used for the completion request.
+
+    sys_prompt : str
+        System prompt defining the model's role and instructions.
+
+    user_prompt : str
+        User prompt containing task-specific input.
+
+    fall_back : Dict[str, Any]
+        Default value returned if the LLM call fails or returns
+        invalid output.
+
+    return_json : bool
+        If True, the function attempts to parse the model response
+        as JSON.
+
+    json_schema : Optional[dict]
+        Optional JSON schema used to enforce structured responses.
+
+    Returns
+    -------
+    Union[str, Dict[str, Any]]
+        Parsed JSON object if `return_json=True`, otherwise the raw
+        text response.
     """
 
     messages = [
@@ -168,6 +254,41 @@ def call_reasoning_model(
     resp_timeout: float = 1500,
     max_retry: int = 2,
 ):
+    """
+    Execute a reasoning-model job with asynchronous polling.
+
+    This function manages long-running LLM reasoning tasks that may
+    require extended processing time. The request is submitted in
+    background mode and polled until completion.
+
+    Parameters
+    ----------
+    prompt : str
+        Prompt sent to the reasoning model.
+
+    llm_client : OpenAI
+        OpenAI client instance.
+
+    ai_model : str
+        Reasoning model identifier.
+
+    id_timeout : float
+        Timeout (seconds) for obtaining the job identifier.
+
+    resp_timeout : float
+        Maximum allowed wait time for job completion.
+
+    max_retry : int
+        Maximum number of retries when creating the job.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+            status : "success" or "failed"
+            response : model output text or response object
+    """
     # Get a response id with background=True
     def get_resp_id():
         attempt = 1
@@ -233,6 +354,87 @@ def call_reasoning_model(
 
         print("Still processing; sleeping 60s...")
         time.sleep(60)
+
+
+def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs")):
+
+    """
+     Identify the latest completed pipeline stage and provide recovery instructions.
+
+    This helper scans the pipeline run directory for `_done` marker files
+    indicating completed stages. It identifies the most recent stage and
+    prints instructions for resuming the pipeline from that point.
+
+    Parameters
+    ----------
+    saves_location : str
+        Directory containing saved pipeline state folders.
+
+    Notes
+    -----
+    This utility is intended to help users recover progress in long
+    pipelines without manually inspecting state directories.
+    """
+    
+    def gen_pipeline_step(latest_file_path):
+
+        #Get the latest path - i.e. excluding _done - to give the path to the state files
+        latest_path = os.path.dirname(latest_file_path)
+        # Get the latest step name to pass to the pipeline steps dictionary to get the correct text for the user
+        latest_step = os.path.basename(latest_path)
+        
+        pipeline_steps = {
+        "01_search_strings": ("You have generated search strings and saved them in your corpus_state. "
+                              "You should continue with retreieving academic literature. Initialize AcademicLit as follows:\n"
+                              f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                              "getlit.AcademicLit(corpus_state = latest_corpus_state)"),
+        "02_academic_lit": ("You have retrieved academic literature and added it to your corpus_state. "
+                           "You should continue with processing the literature. Initialize AcademicLit as follows:\n"
+                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                           "getlit.GreyLiterature(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+        "03_grey_lit": ("You have acquired the relevant grey literature and added it to your corpus_state. "
+                        "You should continue with the next step. Initialize the next class as follows:\n"
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "getlit.Literature(corpus_state = latest_corpus_state)"),
+        "04_literature_deduped": ("You have deduplicated the literature and updated your corpus_state. "
+                                  "You should continue by condutcing an ai assisted check of your literature. Initialize the next class as follows:\n"
+                                  f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                                  "getlit.AiLiteratureCheck(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+        "05_ai_lit_check": ("You have completed the AI literature check and updated your corpus_state. "
+                           "You should proceed to set up your download architecture for your papers. Initialize the next class as follows:\n"
+                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                           "getlit.DownloadManager(corpus_state = latest_corpus_state)"),
+        "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
+                                    f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                                    "core.InsightsGenerator(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+        "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
+        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
+                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000).\n\n"
+                        "NOTE: If you are working in Summrize you can determine your position in the Summarize pipeline via: Summarize.status()")
+        }
+        
+        # Call the dict to return the text
+        return(pipeline_steps[latest_step])
+    
+
+    done_files = []
+    # List all the files 
+    for root, dirs, files in os.walk(saves_location):
+        done_files.extend([os.path.join(root, file) for file in files if file == "_done"])
+    
+    if len(done_files) == 0:
+        return("No steps of the pipeline have been completed. You should start from the beginning.")
+    done_timestamps = [os.path.getmtime(os.path.join(root, file)) for file in done_files]
+    latest_idx = np.argmax(done_timestamps)
+    latest_file = done_files[latest_idx]
+    
+    # Generate the pipeline dictionary with the correct file location
+    latest_step = gen_pipeline_step(latest_file)
+    # Print the text containing instructions for the latest step
+    print(latest_step)
 
     
     # now = datetime.datetime.now()
@@ -322,67 +524,5 @@ def call_reasoning_model(
 #     return True, None, response_df
 
 
-def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs")):
-    # This function is a placeholder for restarting the pipeline environment.
-    # It identifies the latest completed step and provides instructions to continue.
-    
-    def gen_pipeline_step(latest_file_path):
 
-        #Get the latest path - i.e. excluding _done - to give the path to the state files
-        latest_path = os.path.dirname(latest_file_path)
-        # Get the latest step name to pass to the pipeline steps dictionary to get the correct text for the user
-        latest_step = os.path.basename(latest_path)
-        
-        pipeline_steps = {
-        "01_search_strings": ("You have generated search strings and saved them in your corpus_state. "
-                              "You should continue with retreieving academic literature. Initialize AcademicLit as follows:\n"
-                              f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                              "getlit.AcademicLit(corpus_state = latest_corpus_state)"),
-        "02_academic_lit": ("You have retrieved academic literature and added it to your corpus_state. "
-                           "You should continue with processing the literature. Initialize AcademicLit as follows:\n"
-                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                           "getlit.GreyLiterature(corpus_state = latest_corpus_state, llm_client=llm_client)"),
-        "03_grey_lit": ("You have acquired the relevant grey literature and added it to your corpus_state. "
-                        "You should continue with the next step. Initialize the next class as follows:\n"
-                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                        "getlit.Literature(corpus_state = latest_corpus_state)"),
-        "04_literature_deduped": ("You have deduplicated the literature and updated your corpus_state. "
-                                  "You should continue by condutcing an ai assisted check of your literature. Initialize the next class as follows:\n"
-                                  f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                                  "getlit.AiLiteratureCheck(corpus_state = latest_corpus_state, llm_client=llm_client)"),
-        "05_ai_lit_check": ("You have completed the AI literature check and updated your corpus_state. "
-                           "You should proceed to set up your download architecture for your papers. Initialize the next class as follows:\n"
-                           f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                           "getlit.DownloadManager(corpus_state = latest_corpus_state)"),
-        "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
-                                    f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                                    "core.InsightsGenerator(corpus_state = latest_corpus_state, llm_client=llm_client)"),
-        "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
-                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                        "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
-        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
-                        f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000).\n\n"
-                        "NOTE: If you are working in Summrize you can determine your position in the Summarize pipeline via: Summarize.status()")
-        }
-        
-        # Call the dict to return the text
-        return(pipeline_steps[latest_step])
-    
-
-    done_files = []
-    # List all the files 
-    for root, dirs, files in os.walk(saves_location):
-        done_files.extend([os.path.join(root, file) for file in files if file == "_done"])
-    
-    if len(done_files) == 0:
-        return("No steps of the pipeline have been completed. You should start from the beginning.")
-    done_timestamps = [os.path.getmtime(os.path.join(root, file)) for file in done_files]
-    latest_idx = np.argmax(done_timestamps)
-    latest_file = done_files[latest_idx]
-    
-    # Generate the pipeline dictionary with the correct file location
-    latest_step = gen_pipeline_step(latest_file)
-    # Print the text containing instructions for the latest step
-    print(latest_step)
 

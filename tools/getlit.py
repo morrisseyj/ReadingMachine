@@ -1,8 +1,91 @@
+"""
+Corpus discovery tools for ReadingMachine.
+
+This module provides utilities for identifying and assembling document
+corpora prior to running the ReadingMachine analysis pipeline. The
+classes defined here assist with literature discovery, deduplication,
+coverage checking, and document organization.
+
+Unlike the main ReadingMachine pipeline, which focuses on structured
+reading and synthesis of an existing corpus, the tools in this module
+are designed to help users *find* and *prepare* candidate documents.
+
+Typical workflow
+----------------
+
+A common workflow using this module may look like:
+
+    research questions
+        ↓
+    ScholarSearchString
+        ↓
+    AcademicLit / GreyLiterature
+        ↓
+    Literature (deduplication)
+        ↓
+    AiLiteratureCheck (coverage check)
+        ↓
+    DownloadManager
+        ↓
+    document corpus ready for ingestion
+
+The resulting corpus can then be processed by the main ReadingMachine
+pipeline:
+
+    documents
+        ↓
+    ingestion
+        ↓
+    insight extraction
+        ↓
+    clustering
+        ↓
+    thematic synthesis
+
+Classes
+-------
+
+ScholarSearchString
+    Generate structured literature search queries from research
+    questions using an LLM.
+
+AcademicLit
+    Retrieve academic publications using scholarly APIs such as
+    Crossref and OpenAlex.
+
+GreyLiterature
+    Identify relevant grey literature using LLM-assisted web search.
+
+Literature
+    Deduplicate and organize retrieved literature records using exact
+    and fuzzy matching techniques.
+
+AiLiteratureCheck
+    Use an LLM to identify potentially missing papers for each research
+    question based on the current literature corpus.
+
+DownloadManager
+    Create a filesystem structure for managing manual document
+    downloads while preserving traceability between literature records
+    and document files.
+
+Design principles
+-----------------
+
+The discovery tools are intentionally separated from the core
+ReadingMachine pipeline so that the system can be used with any
+pre-existing document corpus.
+
+This separation ensures that ReadingMachine is fundamentally a
+**corpus reading and synthesis framework**, rather than a literature
+search tool.
+"""
+
 # Import custom libraries and modules
 from readingmachine.state import CorpusState
 from readingmachine.prompts import Prompts
-import readingmachine.config
-import readingmachine.utils
+from readingmachine import config
+from readingmachine import utils
 
 # Import standard libraries
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -26,13 +109,30 @@ from kneed import KneeLocator
 
 class ScholarSearchString:
     """
-    Generate search prompts and search strings for research questions using an LLM.
+    Generate literature search strings from research questions.
 
-    Workflow:
-      1. Initialize with a list of questions and an LLM client.
-      2. Build a corpus_state object (CorpusState) that tracks questions and insights.
-      3. Generate structured messages for each question (`message_maker`).
-      4. Query the LLM for search strings and update the corpus_state (`searchstring_maker`).
+    This class provides an optional corpus discovery stage that converts
+    research questions into structured search strings suitable for
+    academic search engines (e.g., Semantic Scholar).
+
+    The resulting search strings are stored in `CorpusState` so that the
+    document retrieval process can be integrated into the ReadingMachine
+    pipeline.
+
+    Workflow
+    --------
+    1. Initialize with research questions and an LLM client.
+    2. Construct an initial `CorpusState` containing question identifiers.
+    3. Generate structured prompts for each question.
+    4. Use the LLM to produce search strings.
+    5. Store generated search strings in the corpus state.
+
+    Notes
+    -----
+    This component is part of the `getlit` toolset rather than the core
+    ReadingMachine pipeline. It supports literature discovery but is not
+    required when analyzing a pre-existing document corpus.
+
     """
 
     def __init__(
@@ -46,17 +146,33 @@ class ScholarSearchString:
         messages: Optional[List[List[Dict[str, str]]]] = None,
     ) -> None:
         """
-        Initialize the ScholarSearchString object.
+         Initialize the ScholarSearchString generator.
 
-        Args:
-            questions (List[str]): List of research questions.
-            llm_client (Any): LLM API client instance (e.g., OpenAI client).
-            num_prompts (int, optional): Number of search prompts per question. Defaults to 10.
-            search_engine (str, optional): Search engine context. Defaults to "Semantic Scholar".
-            llm_model (str, optional): LLM model name. Defaults to "gpt-4.1".
-            corpus_state (Optional[CorpusState], optional): Existing CorpusState object.
-            messages (Optional[List[List[Dict[str, str]]]], optional):
-                Pre-generated messages. Usually left None.
+        Parameters
+        ----------
+        questions : List[str]
+            List of research questions for which search queries will be
+            generated.
+
+        llm_client : Any
+            LLM client instance used to send prompt requests.
+
+        num_prompts : int, default=10
+            Number of search queries to generate per research question.
+
+        search_engine : str, default="Semantic Scholar"
+            Search engine context used to guide query generation.
+
+        llm_model : str, default="gpt-4.1"
+            Name of the LLM model used for generating search strings.
+
+        corpus_state : Optional[CorpusState]
+            Existing `CorpusState` object to populate. If not provided,
+            a new state object will be created.
+
+        messages : Optional[List[List[Dict[str, str]]]]
+            Pre-generated message objects. Typically left as `None` and
+            generated internally.
         """
         self.questions: List[str] = questions
         self.llm_client: Any = llm_client
@@ -68,17 +184,30 @@ class ScholarSearchString:
         if corpus_state:
             self.corpus_state = corpus_state
         else:
-            self.corpus_state = CorpusState(insights = self._make_state())
+            self.corpus_state = CorpusState(questions = self._make_state(), 
+                                            insights = self._make_state())
+                                            
 
         # Messages are generated later by `message_maker`
         self.messages: Optional[List[List[Dict[str, str]]]] = messages
 
     def _make_state(self) -> pd.DataFrame:
         """
-        Build the initial insights dataframe with question IDs and text.
+        Construct the initial question state DataFrame.
 
-        Returns:
-            pd.DataFrame: DataFrame with `question_id` and `question_text`.
+        This method creates a minimal DataFrame representing the research
+        questions used to generate search strings.
+
+        Each question is assigned a unique identifier that is used
+        throughout the search-string generation process.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing:
+
+            - question_id
+            - question_text
         """
         corpus_state = pd.DataFrame()
         question_ids: List[str] = [f"question_{i}" for i in range(len(self.questions))]
@@ -86,103 +215,143 @@ class ScholarSearchString:
         corpus_state["question_text"] = self.questions
         return corpus_state
 
-    def message_maker(self) -> List[List[Dict[str, str]]]:
+    def searchstring_maker(self) -> List[str]:
         """
-        Generate LLM messages for each research question.
+        Generate literature search queries for each research question.
 
-        Returns:
-            List[List[Dict[str, str]]]: List of messages per question.
+        This method uses the LLM to create a set of candidate search
+        strings for each research question. The generated queries are
+        intended for use with academic search engines.
+
+        For each question:
+
+            1. A prompt is constructed containing the question text.
+            2. The LLM generates multiple search queries.
+            3. The queries are stored in a tidy DataFrame structure.
+            4. The resulting DataFrame is written to `CorpusState.insights`.
+
+        Returns
+        -------
+        List[str]
+            List of generated search strings across all research questions.
+
+        Notes
+        -----
+        The resulting DataFrame stored in `CorpusState.insights` contains:
+
+            - question_id
+            - question_text
+            - search_term
+            - search_string_id
+
+        Each search string receives a unique identifier to maintain
+        traceability within the pipeline.
+
+        The updated `CorpusState` is saved to disk so that subsequent
+        stages of the document identification workflow can resume safely.
         """
         sys_prompt: str = Prompts().question_make_sys_prompt(
             search_engine=self.search_engine,
             num_prompts=self.num_prompts,
         )
+        
+        # List of prompts to get back from the LLM to be populated by the for loop
+        output_search_prompts = []
 
         # Build user prompts from question IDs and texts
-        user_prompts: List[str] = []
-        for question_id, question_text in zip(
-            self.corpus_state.insights["question_id"], self.corpus_state.insights["question_text"]
-        ):
+        for idx, row in self.corpus_state.questions.iterrows():
+            print(f"Generating search prompts for question {idx + 1} of {self.corpus_state.questions.shape[0]}")
+            question_id = row["question_id"]
+            question_text = row["question_text"]
             user_prompt: str = f"**QUESTION**\n{question_id}: {question_text}"
-            user_prompts.append(user_prompt)
-
-        # Wrap prompts into the LLM message format
-        messages: List[List[Dict[str, str]]] = []
-        for prompt in user_prompts:
-            message = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": prompt},
-            ]
-            messages.append(message)
-
-        # Store internally (not in corpus_state to save space/memory)
-        self.messages = messages
-
-        return self.messages
-
-    def searchstring_maker(self) -> List[str]:
-        """
-        Query the LLM to generate search strings for each question,
-        update the corpus_state, and persist it to pickle.
-
-        Returns:
-            List[str]: Generated search strings across all questions.
-        """
-        # Ensure messages exist
-        if self.messages is None:
-            self.message_maker()
-
-        # Initialize empty results dataframe
-        search_strings_df = pd.DataFrame(columns=["question_id", "search_string"])
-
-        # Iterate over all questions in corpus_state
-        for index, question_id in enumerate(self.corpus_state.insights["question_id"]):
-            message = self.messages[index]
-            print(f"Generating prompts for question {index + 1} of {self.corpus_state.insights.shape[0]}")
-
-            # Call LLM
-            response = self.llm_client.chat.completions.create(
-                model=self.llm_model,
-                messages=message,
-                response_format={"type": "json_object"},
-            )
-
-            # Parse JSON response
-            response_data: Dict[str, List[str]] = json.loads(response.choices[0].message.content)
-            # Use internal question_id instead of LLM key
-            llm_prompts = list(response_data.values())[0]
-
-            # Append results to dataframe
-            search_strings_df = pd.concat(
-                [
-                    search_strings_df,
-                    pd.DataFrame(
-                        {
-                            "question_id": [question_id] * len(llm_prompts),
-                            "search_string": llm_prompts,
+            # Generate json schema - this is small so i can do it in the loop
+            json_schema = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "search_generation",
+                    "strict": True,
+                    "schema": {
+                    "type": "object",
+                    "properties": {
+                        "search_prompts": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "A list of search queries generated based on the user input."
                         }
-                    ),
-                ],
-                ignore_index=True,
+                    },
+                    "required": ["search_prompts"],
+                    "additionalProperties": False
+                    }
+                }
+                }
+            # Fall back for failed response
+            fall_back = {"search_prompts": []}
+            # Call llm 
+            response = utils.call_chat_completion(
+                ai_model=self.llm_model,
+                llm_client=self.llm_client,
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                return_json=True,
+                response_format=json_schema,
+                fall_back = fall_back
             )
+            # procees respnse and append to output list
+            prompts = response["search_prompts"]
+            output_search_prompts.append(prompts)
+        
+        # Convert to df so that we can explode on search terms which are a list - to get insights as a tidy df
+        output_search_prompts_df = pd.DataFrame({
+            "question_id": self.corpus_state.questions["question_id"],
+            "question_text": self.corpus_state.questions["question_text"],
+            "search_term": output_search_prompts
+            })
 
-        # Add unique IDs for each search string
-        search_strings_df["search_string_id"] = [
-            f"search_string_{i}" for i in range(search_strings_df.shape[0])
-        ]
+        # Explode
+        output_search_prompts_df = output_search_prompts_df.explode("search_term").reset_index(drop=True)
+        # Add search string id
+        output_search_prompts_df["search_string_id"] = [f"search_string_{i}" for i in range(output_search_prompts_df.shape[0])]
 
-        # Merge back into the insights dataframe
-        self.corpus_state.insights = search_strings_df.merge(
-            self.corpus_state.insights, how="left", on="question_id"
-        )
+        # update the insights in corpus_state
+        self.corpus_state.insights = output_search_prompts_df
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "01_search_strings"))
+        
+        # Return the search strings for inspection
+        return self.corpus_state.insights["search_term"].to_list()
 
-        # Save updated corpus_state object
-        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATIONSTATE_SAVE_LOCATION, "01_search_strings"))
-
-        # Return search strings for testing/debugging
-        return self.corpus_state.insights["search_string"].to_list()
 
 class AcademicLit:
+    """
+    Retrieve academic literature using search strings stored in CorpusState.
+
+    This class queries external scholarly APIs to identify candidate
+    publications relevant to research questions. It currently supports
+    multiple search providers, including:
+
+        - Crossref
+        - OpenAlex
+
+    Search results are merged into `CorpusState.insights` so they can be
+    used downstream in the ReadingMachine pipeline.
+
+    Workflow
+    --------
+    1. Initialize with an existing `CorpusState` or a DataFrame of
+    search strings.
+    2. Query academic APIs using the stored search strings.
+    3. Normalize returned metadata (title, authors, year, DOI).
+    4. Merge results into the existing corpus state.
+    5. Deduplicate records across search engines.
+
+    Notes
+    -----
+    The purpose of this class is **corpus discovery**, not analysis.
+    Retrieved publications are stored in `CorpusState` so that users
+    can inspect them, filter them, and later ingest full-text documents
+    into the ReadingMachine analytical pipeline.
+    """
 
     OPENALEX_BASE = "https://api.openalex.org/works"
     OPENALEX_TIMEOUT = 30
@@ -191,11 +360,31 @@ class AcademicLit:
                  corpus_state: Optional["CorpusState"] = None, 
                  search_strings: Optional[pd.DataFrame] = None) -> None:
         """
-        Initialize the AcademicLit class with a validated corpus_state or search_strings.
+        Initialize the AcademicLit search interface.
 
-        Args:
-            corpus_state (Optional[CorpusState]): Existing CorpusState object.
-            search_strings (Optional[pd.DataFrame]): DataFrame with search strings.
+        The class requires either an existing `CorpusState` object
+        containing search strings or a DataFrame of search strings that
+        will be converted into a valid corpus state.
+
+        Parameters
+        ----------
+        corpus_state : Optional[CorpusState]
+            Existing pipeline state containing the search strings used for
+            literature retrieval.
+
+        search_strings : Optional[pd.DataFrame]
+            DataFrame containing search strings and associated question
+            metadata.
+
+        Notes
+        -----
+        The constructor validates the input format and ensures that the
+        resulting state contains the required columns:
+
+            - question_id
+            - question_text
+            - search_string
+            - search_string_id
         """
         # Deepcopy ensures this class has its own copy of corpus_state
         self.corpus_state = deepcopy(
@@ -210,11 +399,36 @@ class AcademicLit:
     # CLASS UTILS ------------
     def _merge_search_results_with_state(self, search_results: pd.DataFrame) -> pd.DataFrame:
         """
-        Merge search results with the existing corpus_state.insights DataFrame.
+        Merge newly retrieved literature records into the corpus state.
 
-        - Adds question metadata (question_id, question_text, search_string_id, search_string).
-        - Deduplicates across engines.
-        - Returns the merged DataFrame (not written to disk).
+        This helper method combines search results from external academic
+        APIs with the existing `CorpusState.insights` DataFrame.
+
+        The method:
+
+            1. Adds question metadata associated with each search string.
+            2. Appends results to the existing corpus state.
+            3. Deduplicates results across search engines.
+
+        Parameters
+        ----------
+        search_results : pd.DataFrame
+            DataFrame containing results returned by an academic API.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights DataFrame containing both existing and newly
+            retrieved literature records.
+
+        Notes
+        -----
+        Deduplication is performed using the following fields:
+
+            - paper_title
+            - paper_date
+            - search_engine
+            - search_string
         """
         if "search_engine" in getattr(self.corpus_state, "insights", pd.DataFrame()).columns:
             # Merge to bring in question info and concatenate with existing results
@@ -242,8 +456,39 @@ class AcademicLit:
 
     def search_crossref(self, num_results: int = 10) -> pd.DataFrame:
         """
-        Search Crossref for each search string in corpus_state and update the corpus_state.
-        Returns self.corpus_state.insights (DataFrame).
+        Search Crossref for publications matching the stored search strings.
+
+        Each search string is submitted to the Crossref API, and the
+        returned publication metadata is extracted and normalized before
+        being merged into the corpus state.
+
+        Parameters
+        ----------
+        num_results : int, default=10
+            Maximum number of results returned per search string.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated `CorpusState.insights` DataFrame containing retrieved
+            Crossref records.
+
+        Retrieved Fields
+        ----------------
+        For each publication the following metadata is extracted:
+
+            - paper_title
+            - paper_author
+            - paper_date
+            - doi
+            - search_string
+            - search_engine
+            - paper_id
+
+        Notes
+        -----
+        Crossref requests are retried once if the API returns a rate-limit
+        or service-unavailable response (HTTP 429 or 503).
         """
         # Must be a full email address
         mailto = os.getenv("EMAIL_DOMAIN")
@@ -320,6 +565,24 @@ class AcademicLit:
     
     @staticmethod
     def _openalex_authors(authorships) -> List[str]:
+        """
+        Extract author names from OpenAlex authorship records.
+
+        Parameters
+        ----------
+        authorships : list
+            List of authorship dictionaries returned by the OpenAlex API.
+
+        Returns
+        -------
+        List[str]
+            List of author display names.
+
+        Notes
+        -----
+        If no valid author information is present, a placeholder author
+        value is returned.
+        """
         if not authorships:
             return ["No author found"]
         names = []
@@ -332,8 +595,42 @@ class AcademicLit:
 
     def search_openalex(self, num_results: int = 10) -> pd.DataFrame:
         """
-        Search OpenAlex for each search string in corpus_state and merge with existing corpus_state.
-        Each query returns up to 200 results (one page).
+        Search OpenAlex for publications matching stored search strings.
+
+        Each search string is submitted to the OpenAlex API and the returned
+        records are normalized and merged into the corpus state.
+
+        Parameters
+        ----------
+        num_results : int, default=10
+            Maximum number of results returned per search string. OpenAlex
+            supports up to 200 results per query.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated `CorpusState.insights` DataFrame containing retrieved
+            OpenAlex records.
+
+        Retrieved Fields
+        ----------------
+        The following metadata fields are extracted:
+
+            - paper_title
+            - paper_author
+            - paper_date
+            - doi
+            - search_string
+            - search_engine
+            - paper_id
+
+        Notes
+        -----
+        Requests are retried once when rate limiting (HTTP 429) or service
+        errors (HTTP 503) occur.
+
+        Results from OpenAlex are merged with any existing literature
+        records retrieved from other sources such as Crossref.
         """
         if num_results > 200:
             raise ValueError("num_results cannot exceed 200")
@@ -577,15 +874,37 @@ class AcademicLit:
 
 class GreyLiterature:
     """
-    A class for retrieving and managing grey literature using an LLM and live web search.
+    Retrieve and manage grey literature using LLM-assisted web search.
 
-    Grey literature is defined here as reports, policy briefs, working papers, and case
-    studies published by think tanks, INGOs, multilateral organizations, and other 
-    research institutions.
+    This class identifies grey literature relevant to research questions
+    by using an LLM with web search capability. Grey literature is defined
+    broadly as non–peer-reviewed research outputs such as:
 
-    The class integrates with a CorpusState object that tracks research questions
-    and insights, ensuring that retrieved grey literature is associated with the 
-    correct research question IDs.
+        - policy reports
+        - working papers
+        - think-tank publications
+        - NGO or multilateral reports
+        - institutional case studies
+
+    Retrieved records are normalized and merged into `CorpusState.insights`
+    so they can be used alongside academic literature in the ReadingMachine
+    pipeline.
+
+    Workflow
+    --------
+    1. Initialize with a CorpusState or a list of research questions.
+    2. Construct a prompt containing the research questions.
+    3. Call a reasoning-capable LLM with web search enabled.
+    4. Clean the returned JSON using a secondary chat-completion model.
+    5. Convert results to a structured DataFrame.
+    6. Merge results into `CorpusState.insights`.
+    7. Persist results to disk.
+
+    Notes
+    -----
+    This class is part of the `getlit` discovery toolkit rather than the
+    core ReadingMachine analytical pipeline. It is intended to assist
+    users in identifying candidate documents to include in their corpus.
     """
 
     # Default path for caching grey literature results
@@ -602,13 +921,34 @@ class GreyLiterature:
         #GREY_LIT_RAW_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit_raw.pkl") # If the LLM fails to return a valid json the raw output gets saved here - as this is an expensive call
     ) -> None:
         """
-        Initialize the GreyLiterature object.
+        Initialize the GreyLiterature retrieval tool.
 
-        Args:
-            llm_client (Any): Client for interacting with the language model.
-            corpus_state (Optional[CorpusState]): CorpusState object holding research corpus_state.
-            questions (Optional[List[str]]): User-defined research questions.
-            ai_model (str): Name of the LLM model to use.
+        Parameters
+        ----------
+        llm_client : Any
+            Client used to communicate with LLM APIs.
+
+        corpus_state : Optional[CorpusState]
+            Existing corpus state containing search strings and literature
+            records. If provided, grey literature results will be merged into
+            this state.
+
+        questions : Optional[List[str]]
+            List of research questions used to generate grey literature
+            search prompts. If provided, they will be converted into the
+            minimal format required for a `CorpusState`.
+
+        ai_reasoning_model : str, default="o3-deep-research"
+            Reasoning-capable LLM model used for web-based grey literature
+            discovery.
+
+        ai_chat_completion_model : str, default="gpt-4o"
+            Chat completion model used to clean and validate the JSON output
+            returned by the reasoning model.
+
+        grey_lit_pickle_folder : str
+            Directory used to cache grey literature retrieval results so
+            expensive web-search calls do not need to be repeated.
         """
 
         # If questions are provided directly, format them into a DataFrame
@@ -642,18 +982,51 @@ class GreyLiterature:
 
     def get_grey_lit(self, example_grey_literature_sources, resp_timeout=1500) -> Optional[pd.DataFrame]:
         """
-        Retrieve grey literature relevant to the research questions using the LLM.
+        Retrieve grey literature relevant to the research questions.
 
-        Steps:
-        1. Build a prompt from research questions.
-        2. Call the LLM with web search capability.
-        3. Parse the JSON output from the LLM.
-        4. Merge results with existing CorpusState using `question_id`.
-        5. Save updated corpus_state to disk.
+        This method uses an LLM with web search capability to identify
+        grey literature sources relevant to the research questions stored
+        in the current `CorpusState`.
 
-        Returns:
-            Optional[pd.DataFrame]: Subset of corpus_state with grey literature results
-            (where `paper_id` starts with "grey_lit_"), or None if parsing fails.
+        The retrieval process proceeds through several stages:
+
+            1. Build a prompt containing the research questions.
+            2. Call a reasoning-capable LLM with web search enabled.
+            3. Parse and clean the returned JSON using a chat completion model.
+            4. Normalize the results into a structured DataFrame.
+            5. Merge results with the existing corpus state.
+            6. Persist the updated corpus state and cache the results.
+
+        Parameters
+        ----------
+        example_grey_literature_sources : list
+            Example institutions or sources that publish relevant grey
+            literature. These are used to guide the LLM's search.
+
+        resp_timeout : int, default=1500
+            Maximum allowed time (seconds) for the reasoning model call.
+
+        Returns
+        -------
+        Optional[pd.DataFrame]
+            DataFrame containing retrieved grey literature records or
+            None if retrieval fails.
+
+        Returned Data Columns
+        ---------------------
+        - question_id
+        - question_text
+        - paper_id
+        - paper_title
+        - paper_author
+        - paper_date
+        - doi
+
+        Notes
+        -----
+        Results are cached to disk to avoid repeating expensive web-search
+        LLM calls. If cached results exist, the user can choose to recover
+        them instead of running the search again.
         """
 
         if os.path.exists(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl")):
@@ -756,22 +1129,63 @@ class GreyLiterature:
 
 class Literature:
     """
-    A class to manage literature (including grey literature) for research questions,
-    detect exact and fuzzy duplicates, and export files for manual checking.
+    Manage and deduplicate retrieved literature records.
 
-    Workflow:
-    1. Split literature by question_id.
-    2. Generate a string for duplicate detection.
-    3. Drop exact duplicates.
+    This class provides utilities for identifying and resolving
+    duplicate literature records retrieved from multiple sources
+    (e.g., Crossref, OpenAlex, grey literature retrieval).
+
+    The deduplication process occurs in two stages:
+
+        1. Exact duplicate removal
+           Records with identical author–title–year combinations are
+           automatically removed.
+
+        2. Fuzzy duplicate detection
+           Records with highly similar author–title–year strings are
+           flagged as potential duplicates for manual inspection.
+
+    The workflow supports human-in-the-loop validation by exporting
+    candidate duplicates to CSV files for manual review before updating
+    the pipeline state.
+
+    Workflow
+    --------
+    1. Split literature records by research question.
+    2. Construct a string used for duplicate detection.
+    3. Remove exact duplicates.
     4. Detect fuzzy duplicates using pairwise string similarity.
-    5. Export potential matches for manual verification.
-    6. Update CorpusState with cleaned results.
+    5. Export potential duplicates for manual review.
+    6. Import manually reviewed files and update `CorpusState`.
+
+    Notes
+    -----
+    Deduplication occurs per research question to prevent unrelated
+    questions from influencing duplicate detection.
     """
 
     FUZZY_CHECK_PATH: str = os.path.join(os.getcwd(), "data", "fuzzy_check")
     os.makedirs(FUZZY_CHECK_PATH, exist_ok=True)
 
     def __init__(self, corpus_state: "CorpusState", literature: Optional[pd.DataFrame] = None) -> None:
+        """
+        Initialize the Literature deduplication tool.
+
+        Parameters
+        ----------
+        corpus_state : CorpusState
+            Pipeline state containing literature records retrieved from
+            academic and grey literature search tools.
+
+        literature : Optional[pd.DataFrame]
+            Optional DataFrame containing literature records to be injected
+            into the corpus state.
+
+        Notes
+        -----
+        Input data is validated to ensure the required columns exist before
+        deduplication operations are performed.
+        """
         
         self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
@@ -794,8 +1208,23 @@ class Literature:
 
     def _splitter(self) -> List[pd.DataFrame]:
         """
-        Split the literature by question_id and generate a string for duplicate detection.
-        Only question_id is needed; question_text is not included here.
+        Split literature records by research question.
+
+        Each research question is processed independently so that duplicate
+        detection occurs within the context of that question's literature.
+
+        The method also constructs a concatenated string combining:
+
+            - author names
+            - paper title
+            - publication year
+
+        This string is used for both exact and fuzzy duplicate detection.
+
+        Returns
+        -------
+        List[pd.DataFrame]
+            List of DataFrames, one per research question.
         """
         dfs: List[pd.DataFrame] = [
             self.corpus_state.insights[self.corpus_state.insights["question_id"] == qid].copy()
@@ -813,11 +1242,47 @@ class Literature:
         return dfs
 
     def drop_exact_duplicates(self) -> List[pd.DataFrame]:
+        """
+        Remove exact duplicate literature records.
+
+        Exact duplicates are identified using the constructed
+        `duplicate_check_string`, which combines author names,
+        paper title, and publication year.
+
+        Returns
+        -------
+        List[pd.DataFrame]
+            Updated list of question-specific DataFrames with exact
+            duplicates removed.
+        """
         for df in self.question_dfs:
             df.drop_duplicates(subset="duplicate_check_string", keep="first", inplace=True)
         return self.question_dfs
 
     def _get_fuzzy_match(self, similarity_threshold: int = 90) -> List[List[Tuple[str, str]]]:
+        """
+        Identify potential duplicate records using fuzzy string matching.
+
+        Pairwise similarity scores are computed for all literature records
+        within each research question using the RapidFuzz library.
+
+        Parameters
+        ----------
+        similarity_threshold : int, default=90
+            Minimum similarity score required for two records to be
+            considered potential duplicates.
+
+        Returns
+        -------
+        List[List[Tuple[str, str]]]
+            List of lists containing pairs of potentially duplicated
+            literature records for each research question.
+
+        Notes
+        -----
+        The similarity score is calculated using the RapidFuzz `ratio`
+        scorer, which measures overall string similarity.
+        """
         fuzzy_duplicates_list: List[List[Tuple[str, str]]] = []
 
         for df in self.question_dfs:
@@ -836,6 +1301,25 @@ class Literature:
         return fuzzy_duplicates_list
 
     def _get_similar_groups(self) -> List[pd.DataFrame]:
+        """
+        Group fuzzy duplicate matches into connected similarity clusters.
+
+        Potential duplicate pairs are converted into a graph structure where
+        edges represent high-similarity matches. Connected components in the
+        graph represent groups of records that may correspond to the same
+        publication.
+
+        Returns
+        -------
+        List[pd.DataFrame]
+            List of DataFrames containing similarity group assignments
+            for each research question.
+
+        Notes
+        -----
+        Records without fuzzy matches are assigned `sim_group = -1`.
+        """
+
         fuzzy_groups_list: List[pd.DataFrame] = []
         fuzzy_duplicates_list = self._get_fuzzy_match()
 
@@ -863,6 +1347,21 @@ class Literature:
         return fuzzy_groups_list
 
     def get_fuzzy_matches(self) -> None:
+        """
+        Export potential duplicate records for manual review.
+
+        For each research question, a CSV file is generated containing
+        literature records grouped by similarity cluster. These files are
+        intended for manual inspection to determine which records represent
+        true duplicates.
+
+        The exported files are written to `FUZZY_CHECK_PATH`.
+
+        Notes
+        -----
+        After manual review and editing, the updated files can be imported
+        back into the pipeline using `update_state()`.
+        """
         fuzzy_groups_list = self._get_similar_groups()
 
         for index, (fuzzy_group_df, df) in enumerate(zip(fuzzy_groups_list, self.question_dfs)):
@@ -883,6 +1382,32 @@ class Literature:
         )
 
     def update_state(self, path_to_files: Optional[str] = None) -> pd.DataFrame:
+        """
+        Update the corpus state using manually reviewed duplicate files.
+
+        This method reads the manually edited CSV or Excel files generated
+        during fuzzy duplicate inspection and updates the pipeline state
+        with the cleaned literature records.
+
+        Parameters
+        ----------
+        path_to_files : Optional[str]
+            Directory containing the manually reviewed literature files.
+            Defaults to the configured fuzzy-check directory.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated `CorpusState.insights` DataFrame containing deduplicated
+            literature records.
+
+        Notes
+        -----
+        Temporary columns used during duplicate detection
+        (`duplicate_check_string`, `sim_group`) are removed before the
+        updated state is saved.
+        """
+
         path_to_files = path_to_files or self.FUZZY_CHECK_PATH
         files_to_import = [
             os.path.join(path_to_files, f)
@@ -919,9 +1444,33 @@ class Literature:
 
 class AiLiteratureCheck:
     """
-    Class to check the completeness of literature for a set of research questions
-    using an LLM. Takes a CorpusState object and optionally a DataFrame of papers
-    and outputs missing literature suggested by the AI.
+    Identify potentially missing literature using an LLM.
+
+    This class performs a literature completeness check by asking an LLM
+    to review the current corpus of retrieved publications and suggest
+    additional papers that may be relevant to the research questions.
+
+    The LLM receives a structured JSON representation of the currently
+    identified literature and returns candidate missing papers for each
+    research question.
+
+    Suggested papers are normalized and merged into `CorpusState.insights`
+    so that they can be reviewed and potentially included in the corpus.
+
+    Workflow
+    --------
+    1. Convert the existing literature corpus into structured JSON.
+    2. Send the JSON to an LLM capable of reasoning and web search.
+    3. Parse the returned JSON containing suggested papers.
+    4. Clean and normalize the returned results.
+    5. Merge the suggested papers into the corpus state.
+
+    Notes
+    -----
+    This class is part of the `getlit` discovery toolkit and is intended
+    as a **sanity check** for literature coverage. It helps users identify
+    potential gaps in the collected literature but does not automatically
+    retrieve full documents.
     """
 
     def __init__(
@@ -933,13 +1482,31 @@ class AiLiteratureCheck:
         papers: Optional[pd.DataFrame] = None, 
     ) -> None:
         """
-        Initialize the AI Literature Check.
+        Initialize the AI literature completeness checker.
 
-        Args:
-            llm_client: An instance of the language model client (e.g., OpenAI client).
-            ai_model: The name of the LLM model to use.
-            corpus_state: CorpusState object containing current literature data.
-            papers: Optional DataFrame with literature to inject if corpus_state is None.
+        Parameters
+        ----------
+        llm_client : Any
+            Client used to communicate with the LLM API.
+
+        ai_reasoning_model : str, default="o3-deep-research"
+            Reasoning-capable model used to identify missing literature.
+
+        ai_chat_completion_model : str, default="gpt-4o"
+            Chat completion model used to clean and validate the JSON
+            returned by the reasoning model.
+
+        corpus_state : Optional[CorpusState]
+            Existing pipeline state containing literature records.
+
+        papers : Optional[pd.DataFrame]
+            Optional DataFrame containing literature records to inject
+            if a corpus state is not provided.
+
+        Notes
+        -----
+        The constructor validates the input data to ensure that the
+        literature records contain the required metadata fields.
         """
         self.llm_client: Any = llm_client
         self.ai_reasoning_model: str = ai_reasoning_model
@@ -967,11 +1534,30 @@ class AiLiteratureCheck:
 
     def _clean_data_for_prompt_insertion(self) -> str:
         """
-        Converts the literature DataFrame into JSON suitable for LLM prompt insertion.
-        Groups papers by question_id and question_text, flattening into a list of paper dicts.
+        Convert literature records into JSON for LLM prompt insertion.
 
-        Returns:
-            str: JSON string of grouped literature for input to the LLM.
+        This method prepares the current literature corpus in a structured
+        JSON format suitable for LLM processing. Papers are grouped by
+        research question so the model can evaluate literature coverage
+        within the context of each question.
+
+        Returns
+        -------
+        str
+            JSON string containing grouped literature records in the form:
+
+                [
+                    {
+                        "question_id": "...",
+                        "question_text": "...",
+                        "papers": [...]
+                    }
+                ]
+
+        Notes
+        -----
+        The resulting JSON is embedded directly into the prompt used for
+        the AI literature completeness check.
         """
         df = self.corpus_state.insights[[
             "question_id", "question_text", "paper_id", "paper_author", "paper_date", "paper_title"
@@ -991,14 +1577,52 @@ class AiLiteratureCheck:
 
     def ai_literature_check(self, resp_timeout = 1500) -> Optional[pd.DataFrame]:
         """
-        Uses the LLM to identify missing literature for each research question.
-        Parses the LLM JSON output, flattens it, merges with the corpus_state, and
-        assigns unique AI literature paper IDs.
+        Identify potentially missing literature using an LLM.
 
-        Returns:
-            Optional[pd.DataFrame]: DataFrame of AI-suggested missing papers with columns:
-            ["paper_id", "paper_title", "paper_author", "paper_date"].
-            Returns None if LLM call fails or invalid output is returned.
+        This method sends the current literature corpus to a reasoning-capable
+        language model and asks it to identify additional papers that may be
+        relevant to each research question.
+
+        The returned suggestions are cleaned, normalized, and merged into
+        the corpus state.
+
+        Parameters
+        ----------
+        resp_timeout : int, default=1500
+            Maximum allowed time (seconds) for the reasoning model request.
+
+        Returns
+        -------
+        Optional[pd.DataFrame]
+            DataFrame containing the AI-suggested literature records.
+
+            Columns include:
+
+                - question_id
+                - question_text
+                - paper_id
+                - paper_title
+                - paper_author
+                - paper_date
+                - doi
+
+            If no additional papers are suggested, the existing corpus state
+            is returned.
+
+        Workflow
+        --------
+        1. Generate a prompt containing the current literature corpus.
+        2. Send the prompt to a reasoning-capable LLM.
+        3. Clean the returned JSON using a secondary chat completion model.
+        4. Normalize the results into a DataFrame.
+        5. Merge the results into `CorpusState.insights`.
+        6. Persist the updated state to disk.
+
+        Notes
+        -----
+        AI-suggested papers receive unique identifiers prefixed with
+        `"ai_lit_"` to distinguish them from papers retrieved through
+        other discovery methods.
         """
         # Generate the prompt using preprocessed JSON
         prompt: str = Prompts().ai_literature_retrieve(
@@ -1073,7 +1697,17 @@ class AiLiteratureCheck:
         # Clean up any empty strings to None to not break parquet
         updated_state.replace(["", "NA", pd.NA, np.nan, "null", "No author found"], None, inplace=True)
         # Update the oder for pretty export
-        updated_state = updated_state[["question_id", "question_text", "search_string_id", "search_string", "search_engine", "paper_id", "paper_title", "paper_author", "paper_date", "doi"]]
+        updated_state = updated_state.reindex(columns=[
+            "question_id",
+            "question_text",
+            "search_string_id",
+            "search_string",
+            "paper_id",
+            "paper_title",
+            "paper_author",
+            "paper_date",
+            "doi"
+            ])
 
         # Asign to corpus_state attribute
         self.corpus_state.insights = updated_state
@@ -1086,9 +1720,31 @@ class AiLiteratureCheck:
 
 class DownloadManager:
     """
-    Class to manage downloading of papers listed in a CorpusState object.
-    Downloads are organized by sanitized question_id and paper_id to ensure
-    filesystem-safe filenames, while maintaining traceability to original IDs.
+     Manage manual downloading of literature identified during corpus discovery.
+
+    This class prepares a filesystem structure for storing documents
+    associated with literature records in `CorpusState`. It is designed
+    for workflows where documents must be downloaded manually from
+    external sources.
+
+    The class performs the following tasks:
+
+        1. Validate literature records stored in `CorpusState`.
+        2. Create a folder structure organized by research question.
+        3. Export literature metadata to CSV for manual download tracking.
+        4. Provide a mechanism to reload updated download metadata.
+
+    Downloaded files are expected to be placed into folders named after
+    the corresponding `question_id`. File names should ideally match
+    their `paper_id` to preserve traceability between the document
+    files and the literature records.
+
+    Notes
+    -----
+    This class does not perform automated downloading. It provides a
+    structured workflow for managing manual downloads while preserving
+    the pipeline's traceability between literature records and
+    documents.
     """
 
     def __init__(
@@ -1098,12 +1754,31 @@ class DownloadManager:
         DOWNLOAD_LOCATION: str = os.path.join(os.getcwd(), "data", "docs")
     ) -> None:
         """
-        Initialize the Downloader.
+        Initialize the DownloadManager.
 
-        Args:
-            corpus_state: CorpusState object containing literature data.
-            papers: Optional DataFrame of literature to inject.
-            DOWNLOAD_LOCATION: Base directory to save downloaded files.
+        Parameters
+        ----------
+        corpus_state : CorpusState, optional
+            Existing pipeline state containing literature records.
+
+        papers : Optional[pd.DataFrame]
+            DataFrame containing literature records to inject if a
+            corpus state is not provided.
+
+        DOWNLOAD_LOCATION : str
+            Directory where downloaded documents should be stored.
+
+        Notes
+        -----
+        During initialization the following actions occur:
+
+            - Validate the input literature records.
+            - Ensure a download directory exists.
+            - Create subfolders for each research question.
+            - Export literature metadata to a CSV file so users can track
+            download status manually.
+            - Sanitize identifiers used for filenames to ensure they are
+            compatible with the filesystem.
         """
         # Validate that the corpus_state or injected papers contain all required columns
         self.corpus_state: "CorpusState" = deepcopy(
@@ -1147,7 +1822,7 @@ class DownloadManager:
         
         print(
             f"Architecture for downloading papers has been created at {self.DOWNLOAD_LOCATION}.\n"
-            f"You sould manually download files and update thier status in the file at {os.path.join(self.DOWNLOAD_LOCATION, "insights.csv")}. "
+           f"You should manually download files and update their status in the file at {os.path.join(self.DOWNLOAD_LOCATION, 'insights.csv')}. "
             "Assuming you do not change the files location the easiest way to do this is to call DownloadManager.update()\n"
             f"Note when saving these files you MUST SAVE THEM IN THE FOLDER CORRESPONDING TO THIER QUESTION ID. You should also ensure the filenames match the paper_id in the form paper_id.[relevant extension]. " 
             "Matching filenames with paper_ids is not neccesary but will allow you to track papers back to search prompts. You can add papers to these folders that are not in your "
@@ -1155,7 +1830,18 @@ class DownloadManager:
 
     def _create_download_folder(self) -> None:
         """
-        Create subfolders for each sanitized question_id to organize downloaded files.
+        Create directory structure for manual downloads.
+
+        A separate folder is created for each `question_id`. This allows
+        downloaded documents to be organized according to the research
+        question they address.
+
+        The resulting directory structure resembles:
+
+            data/docs/
+                question_0/
+                question_1/
+                question_2/
         """
         for qid in self.corpus_state.insights["question_id"].unique():
             os.makedirs(os.path.join(self.DOWNLOAD_LOCATION, qid), exist_ok=True)
@@ -1163,18 +1849,43 @@ class DownloadManager:
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
         """
-        Sanitize a string to be a valid filename by removing illegal filesystem characters.
+        Convert an identifier into a filesystem-safe filename.
 
-        Args:
-            filename: Original filename string.
+        Illegal characters used in file paths are replaced with
+        underscores so that question IDs and paper IDs can safely be
+        used as folder names or filenames.
 
-        Returns:
-            Sanitized filename string.
+        Parameters
+        ----------
+        filename : str
+            Original identifier string.
+
+        Returns
+        -------
+        str
+            Sanitized filename safe for filesystem use.
         """
         sanitized = re.sub(r'[\\/:*?"<>|]', "_", filename)
         return sanitized.strip()
     
     def update(self):
+        """
+        Reload updated download metadata into the corpus state.
+
+        This method reads the CSV files stored in the download directory
+        and updates the `CorpusState` with any manual changes made to
+        the literature metadata (for example updated download status).
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated `CorpusState.insights` DataFrame.
+
+        Notes
+        -----
+        This method is typically used after the user has manually
+        downloaded documents and updated the exported metadata files.
+        """
         # This convenience function just calls the from csv method of the questionstate
         self.corpus_state = self.corpus_state.from_csv(filepath=os.path.join(self.DOWNLOAD_LOCATION))
         # And updates the corpus_state object on file by saving

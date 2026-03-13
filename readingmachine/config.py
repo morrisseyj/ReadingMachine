@@ -17,6 +17,9 @@ OUTPUT_SAVE_LOCATION = os.path.join(os.getcwd(), "outputs")
 # Location in which the paper chunks are saved after the chunking step of the pipeline completes
 PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
 
+# The seed value to ensure reproducibulity across runs
+seed = 42
+
 # Filename prefixes for summary objects:
 summary_state_prefix = {
     "cluster_summary_list": "cluster_summary_list",
