@@ -10,8 +10,16 @@ venv/
 # Ignore secrets
 .env
 
-# Ignore data and outputs
-data/
+# Ignore everything in data
+data/*
+
+# Keep the corpus directory itself
+!data/corpus/
+
+# Ignore everything inside corpus
+data/corpus/*
+
+#Ignore outputs
 outputs/
 
 # Ignore uv.lock
