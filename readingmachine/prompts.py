@@ -1,11 +1,132 @@
+"""
+Prompt registry for ReadingMachine.
 
-import random
+This module centralizes all prompt templates used throughout the
+ReadingMachine pipeline and supporting tools. Each method in the
+`Prompts` class returns a formatted prompt string designed for a
+specific stage of the workflow.
+
+The prompts are organized to mirror the architecture of the system,
+which separates corpus discovery, document ingestion, insight
+extraction, thematic synthesis, and final rendering.
+
+Pipeline alignment
+------------------
+
+The prompts correspond to the following stages of the ReadingMachine
+methodology:
+
+1. Corpus discovery (getlit tools)
+       - Generate search queries
+       - Retrieve academic and grey literature
+       - Identify missing literature
+
+2. Document ingestion
+       - Extract primary text from HTML documents
+       - Identify document metadata
+
+3. Insight extraction
+       - Extract atomic insights from text chunks
+       - Identify cross-chunk meta-insights
+
+4. Thematic synthesis
+       - Summarize clusters of insights
+       - Generate thematic schemas
+       - Map insights to themes
+       - Populate thematic summaries
+       - Detect orphan insights
+       - Reintegrate missing insights
+       - Reduce cross-theme redundancy
+
+5. Rendering
+       - Refine narrative style
+       - Generate question-level summaries
+       - Generate executive summaries and titles
+
+Design principles
+-----------------
+
+The prompt registry isolates prompt logic from pipeline logic so that:
+
+    • prompt text can evolve independently of pipeline code
+    • prompts can be audited and versioned easily
+    • different models can reuse the same prompt definitions
+
+All prompts are designed to return structured outputs whenever
+possible so that downstream pipeline stages can parse model responses
+deterministically.
+
+Notes
+-----
+
+Prompt design is a core component of the ReadingMachine methodology.
+The prompts in this module enforce strict behavioral constraints on
+the model in order to support reproducible large-scale corpus reading
+and synthesis.
+"""
 
 class Prompts:
+
+    """
+    Prompt registry for ReadingMachine.
+
+    This class centralizes all prompt templates used across the
+    ReadingMachine system. Each method returns a formatted prompt
+    string tailored for a specific task in the pipeline or corpus
+    discovery tools.
+
+    The prompts are grouped by functional category, including:
+
+        - search string generation
+        - grey literature discovery
+        - literature completeness checking
+        - JSON formatting validation
+
+    Keeping prompts in a dedicated registry ensures that:
+
+        • prompt logic remains separate from pipeline logic
+        • prompts can be easily updated or audited
+        • different LLM models can reuse the same prompt definitions
+
+    Notes
+    -----
+    All prompts returned by this class are designed to be used with
+    the utility functions defined in `utils.py`, which handle LLM
+    interactions and JSON parsing.
+    """
+
     def __init__(self):
         pass
 
+    #####
+    # GETLIT PROMPTS
+    #####
+
     def question_make_sys_prompt(self, num_prompts, search_engine='CrossRef and OpenAlex'):
+        """
+        Generate a system prompt for literature search string generation.
+
+        This prompt instructs the LLM to produce a set of search queries
+        derived from a research question. The generated search strings
+        are intended for use with scholarly search engines such as
+        Crossref or OpenAlex.
+
+        Parameters
+        ----------
+        num_prompts : int
+            Number of search queries the model should generate.
+
+        search_engine : str, default="CrossRef and OpenAlex"
+            Name of the search engine context used to guide query
+            generation.
+
+        Returns
+        -------
+        str
+            Formatted system prompt instructing the LLM to produce
+            structured JSON search queries.
+        """
+
         return (
             f'You are an assistant whose task is to generate search prompts for use in {search_engine}, '
             'based on a provided research question. Each input will be in the format:\n'
@@ -35,8 +156,28 @@ class Prompts:
 
     def grey_lit_retrieve(self, questions: list, example_grey_literature_sources: str) -> str:
         """
-        System prompt for retrieving grey literature relevant to research questions.
-        Maintains strict JSON object structure with a "results" array.
+        Generate a prompt for retrieving grey literature.
+
+        This prompt instructs a reasoning-capable LLM to search the web
+        for grey literature relevant to a set of research questions.
+        Grey literature includes reports, working papers, policy briefs,
+        and institutional publications.
+
+        Parameters
+        ----------
+        questions : list
+            List of research questions formatted as
+            "question_id: question_text".
+
+        example_grey_literature_sources : str
+            Example organizations that commonly publish relevant
+            grey literature.
+
+        Returns
+        -------
+        str
+            Prompt instructing the LLM to perform web search and
+            return results in a strict JSON format.
         """
 
         question_string = "\n".join(questions)
@@ -90,7 +231,17 @@ class Prompts:
 
     def grey_literature_format_check(self) -> str:
         """
-        System prompt for correcting mis-formatted JSON describing grey literature.
+         Generate a prompt for validating grey literature JSON output.
+
+        This prompt instructs a chat completion model to repair or
+        normalize malformed JSON returned by the grey literature
+        retrieval model.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to return strictly valid
+            JSON representing grey literature records.
         """
 
         return (
@@ -127,8 +278,28 @@ class Prompts:
 
     def ai_literature_retrieve(self, questions_papers_json: str) -> str:
         """
-        Prompt for identifying missing literature (academic or grey) for each research question.
-        Returns a JSON object with a single key 'results' containing an array of document objects.
+        Generate a prompt for identifying missing literature.
+
+        This prompt asks a reasoning-capable LLM to review the current
+        literature corpus and identify major publications that may
+        be missing for each research question.
+
+        Parameters
+        ----------
+        questions_papers_json : str
+            JSON string representing the currently identified literature
+            grouped by research question.
+
+        Returns
+        -------
+        str
+            Prompt instructing the LLM to return missing literature
+            records in a strict JSON format.
+
+        Notes
+        -----
+        The model is instructed to identify missing literature using both
+        its internal knowledge and external web search capabilities.
         """
         return (
             'You are an expert research assistant. Your task is to review the provided research questions '
@@ -196,7 +367,17 @@ class Prompts:
 
     def ai_literature_format_check(self):
         """
-        System prompt for correcting mis-formatted JSON describing grey literature.
+        Generate a prompt for validating AI literature suggestions.
+
+        This prompt instructs a chat completion model to correct
+        malformed JSON produced during the AI literature completeness
+        check.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to return strictly valid
+            JSON representing literature suggestions.
         """
 
         return (
@@ -230,8 +411,40 @@ class Prompts:
             "Return strictly valid JSON with the 'results' array, no extra text."
         )
 
+    ######
+    # /END OF GETLIT PROMPTS
+    ######
+
+    # -------------------------
+
+    ######
+    # CORE PROMPTS - INGESTOR
+    ######
+
 
     def extract_main_html_content(self):
+        
+        """
+        Generate a prompt for extracting the main article text from HTML-derived content.
+
+        This prompt instructs the model to isolate the primary narrative content
+        from text that has already been partially cleaned using HTML parsing tools
+        such as BeautifulSoup.
+
+        The model is expected to:
+
+            • retain only the article body, title, and author names
+            • remove navigation text, advertisements, related links, and other
+            non-content elements
+            • return a single block of plain text
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to extract the main article content
+            from cleaned HTML text.
+        """
+
         return (
             'You are a highly specialized text content extraction tool. Your task is to analyze the '
             'plain text provided and return **only the main article content**.'
@@ -263,6 +476,28 @@ class Prompts:
         )
     
     def get_metadata(self):
+        """
+        Generate a prompt for extracting document metadata.
+
+        This prompt instructs the model to parse the opening portion of a
+        document and extract key metadata fields required by the pipeline.
+
+        Extracted fields include:
+
+            - paper_title
+            - paper_author
+            - paper_date
+
+        The output must be returned as a strictly formatted JSON object so
+        that the metadata can be parsed programmatically.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to extract and return paper metadata
+            in JSON format.
+        """
+
         return (
             'You are a specialized metadata extraction tool. Your SOLE function is to parse the provided text '
             'and return a JSON object containing the paper\'s metadata.\n\n'
@@ -291,9 +526,45 @@ class Prompts:
             '    "paper_date": "<YYYY>"\n'
             '}\n'
         )
+    
+    ####
+    # /END INGESTOR
+    ####
+
+    #-------------------------
+
+    ####
+    # CORE PROMPTS - INSIGHTS
+    ####
 
 
     def gen_chunk_insights(self, paper_context):
+        """
+        Generate a prompt for extracting chunk-level insights.
+
+        This prompt instructs the model to identify atomic claims within a
+        bounded text chunk and assign those claims to the relevant research
+        question(s).
+
+        The extracted insights must:
+
+            • be directly supported by the text
+            • preserve wording where possible
+            • end with the citation appearing in the text
+            • be returned as a structured JSON object
+
+        Parameters
+        ----------
+        paper_context : str
+            Additional contextual instructions describing the corpus
+            or analytical framework.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to extract claims from a text chunk
+            and associate them with research questions.
+        """
         
         return (
             "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
@@ -329,8 +600,36 @@ class Prompts:
 
     def gen_meta_insights(self, paper_context):
         """
-        Generate a system prompt for extracting higher-level 'meta-insights' 
-        from entire papers, focusing on cross-chunk reasoning.
+        Generate a prompt for extracting paper-level meta-insights.
+
+        Meta-insights are higher-level claims or arguments that emerge from
+        reasoning across multiple sections of a document rather than from a
+        single chunk.
+
+        The model receives:
+
+            • the full (or partial) paper text
+            • metadata describing the paper
+            • previously extracted chunk insights
+            • the specific research question being evaluated
+
+        The model must identify broader insights that:
+
+            • synthesize information across the paper
+            • relate directly to the target research question
+            • do not duplicate previously extracted chunk insights
+
+        Parameters
+        ----------
+        paper_context : str
+            Additional contextual instructions describing the corpus or
+            analytical framework.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to generate higher-level
+            cross-chunk insights in JSON format.
         """
 
         return (
@@ -377,9 +676,52 @@ class Prompts:
             '- Do not repeat insights already found in chunks.\n'
             '- Do not output explanations, markdown, or any text outside the JSON object.'
         )
+    
+    ####
+    # /END INSIGHTS
+    ####
 
+    # -------------------------
+
+    ####
+    # CORE PROMPTS - SUMMARIZE
+    ####
 
     def summarize_clusters(self):
+        """
+        Generate the system prompt for cluster-level summarization.
+
+        This prompt instructs the model to synthesize the insights within a
+        semantic cluster into a coherent narrative summary.
+
+        The prompt provides the model with:
+
+            • the specific research question
+            • previously generated cluster summaries for context
+            • the cluster identifier
+            • the list of insights belonging to the cluster
+            • other research questions in the broader review
+
+        The model must produce a structured summary that:
+
+            • faithfully represents the claims contained in the insights
+            • preserves all citations exactly as provided
+            • situates the cluster within the broader thematic landscape
+            • maintains an academic literature-review tone
+
+        The output must be returned as a strict JSON object containing:
+
+            - question_id
+            - question_text
+            - cluster
+            - summary
+
+        Returns
+        -------
+        str
+            System prompt instructing the LLM to generate a cluster summary.
+        """
+
         return (
             "You are an agent specialized in summarizing insights from different corpuses (academic and grey literature, internal memos, emails, reports, etc.). "
             "The insights you will summarize have been generated by an LLM reading recursively chunked passages (~600 words) from larger documents. "
@@ -444,72 +786,42 @@ class Prompts:
             "- Do not include meta-commentary, instructions, or extraneous formatting in your response.\n"
         )
     
-
-    # def llm_sliding_window(self):
-    #     return (
-    #         "You reorganize text for clarity and coherence. Do not summarize or invent. Preserve all facts and citations verbatim. "
-    #         "Context: You are part of a human-in-the-loop literature review workflow. You rewrite generated summaries to improve coherence and readability "
-    #         "using a sliding window process.\n\n"
-
-    #         "You receive the following text:\n"
-    #         "- FROZEN: all finalized paragraphs (read-only)\n"
-    #         "- EDITABLE TAIL: the last paragraph of the frozen text, which you may revise if necessary\n"
-    #         "- LEFTOVERS: unused text from the prior pass that must be integrated or carried forward\n"
-    #         "- SUMMARY TO CLEAN: new text to be integrated this round\n\n"
-
-    #         "Goal per pass:\n"
-    #         "- Produce exactly one coherent paragraph that either (1) follows the FROZEN text or (2) revises the EDITABLE TAIL.\n"
-    #         "- Return updated leftovers containing all remaining content from the current LEFTOVERS and SUMMARY TO CLEAN that was not incorporated.\n\n"
-
-    #         "Constraints:\n"
-    #         "- Preserve all details and citations exactly; do not invent new facts.\n"
-    #         "- You may omit information only if it is clearly redundant with FROZEN content.\n"
-    #         "- When omitting due to redundancy, refer briefly instead of repeating (e.g., 'As discussed above...').\n"
-    #         "- You may rewrite for flow, reorder ideas, and merge or split sentences, but do not change meaning.\n"
-    #         "- You may revise the EDITABLE TAIL to integrate overlap and improve coherence, but do not modify earlier frozen paragraphs.\n"
-    #         "- For each pass, choose one action only: revise_tail or append. Do not perform both.\n"
-    #         "- Prefer revise_tail when the EDITABLE TAIL already covers the same drivers and only needs minor integration; "
-    #         "prefer append when introducing new, distinct drivers.\n"
-    #         "- Prefer merging adjacent fragments over splitting them.\n"
-    #         "- Write 3-6 sentences in a formal academic tone.\n"
-    #         "- If FROZEN is blank (and thus EDITABLE TAIL is blank), start naturally.\n"
-    #         "- If SUMMARY TO CLEAN is blank, work from LEFTOVERS; if LEFTOVERS is blank, work from SUMMARY TO CLEAN.\n"
-    #         "- Coverage must be lossless: (revised_tail or clean_text) plus left_overs together must contain all information from "
-    #         "(LEFTOVERS + SUMMARY TO CLEAN) except content already clearly present in FROZEN. No duplication across outputs.\n"
-    #         "- Do not repeat FROZEN content.\n"
-    #         '- If information in LEFTOVERS or SUMMARY TO CLEAN is already expressed in FROZEN, exclude it from left_overs. You may refer to it briefly without repeating.\n'
-    #         '- If you revise the tail, you must integrate at least one nontrivial claim from LEFTOVERS and remove it from left_overs.\n'
-    #         '- If you cannot reduce LEFTOVERS by revising the tail, you must append a new paragraph built from LEFTOVERS. Never return identical LEFTOVERS twice.\n'
-    #         "- Return valid a valid JSON object only, no extra text.\n\n"
-
-    #         "INPUT FORMAT\n"
-    #         "Research question id: <question_id>\n"
-    #         "Research question text: <question_text>\n"
-    #         "FROZEN SUMMARY TEXT (read-only):\n"
-    #         "<para_1>\n"
-    #         "<para_2>\n"
-    #         "...\n"
-    #         "EDITABLE TAIL (may be revised):\n"
-    #         "<tail_para>\n"
-    #         "LEFTOVERS:\n"
-    #         "<leftover_text>\n"
-    #         "SUMMARY TO CLEAN:\n"
-    #         "<summary_para_1>\n"
-    #         "<summary_para_2>\n"
-    #         "...\n\n"
-
-    #         "OUTPUT FORMAT\n"
-    #         "{\n"
-    #         '  "question_id": "<question_id>",\n'
-    #         '  "question_text": "<question_text>",\n'
-    #         '  "action": "append" | "revise_tail",\n'
-    #         '  "clean_text": "<new paragraph, required if action=append>",\n'
-    #         '  "revised_tail": "<revised tail paragraph, required if action=revise_tail>",\n'
-    #         '  "left_overs": "<updated leftover text>"\n'
-    #         "}\n"
-    #     )
     
     def gen_theme_schema(self):
+        """
+        Generate the system prompt for thematic schema construction.
+
+        This prompt instructs the model to analyze clustered summaries
+        or previously generated theme outputs and construct a thematic
+        codebook describing the conceptual structure of the corpus.
+
+        The model must:
+
+            • identify the dominant conceptual themes
+            • define clear semantic boundaries between themes
+            • optionally identify discursive conflicts between positions
+            • optionally define an "Other" category for residual ideas
+
+        Each theme must include:
+
+            - theme_label
+            - theme_description
+            - instructions
+
+        The instructions specify inclusion and exclusion rules for
+        assigning insights to themes.
+
+        The prompt explicitly prohibits the model from generating
+        numeric identifiers (`theme_id`). These identifiers are assigned
+        programmatically after schema generation.
+
+        Returns
+        -------
+        str
+            System prompt instructing the LLM to produce a thematic schema
+            in strict JSON format.
+        """
+
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
@@ -593,6 +905,51 @@ class Prompts:
        
     
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
+        """
+        Generate the system prompt for mapping insights to themes.
+
+        This prompt instructs the model to classify a batch of insights
+        according to the previously generated thematic schema.
+
+        The schema includes:
+
+            • theme identifiers
+            • theme descriptions
+            • inclusion and exclusion rules
+
+        The model must evaluate each insight against all themes and
+        assign one or more theme identifiers when appropriate.
+
+        Key constraints enforced in the prompt include:
+
+            • multi-label classification is permitted
+            • exclusion rules must be strictly respected
+            • only provided theme_ids may be returned
+            • identifiers must be returned as arrays of strings
+
+        Optional overrides may include:
+
+            - an "Other" theme for residual insights
+            - a "Conflicts" theme for incompatible positions
+
+        Parameters
+        ----------
+        allowed_ids : list
+            List of valid theme identifiers that may be assigned.
+
+        other_theme_id : int
+            Identifier for the "Other" category used when no substantive
+            theme applies.
+
+        conflicts_theme_id : int, optional
+            Identifier used to flag discursive conflicts when present.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to map insights to themes
+            using strict JSON output.
+        """
 
         allowed_ids_str = ", ".join(str(id) for id in allowed_ids)
         if other_theme_id is not None:
@@ -600,7 +957,7 @@ class Prompts:
         else:
            other_theme = ""
         if conflicts_theme_id is not None:
-            conflicts_theme = f"- **Conflict Flagging:** If the insight refelcts substantive discursive conflict and explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it to the theme_id {conflicts_theme_id}. Do NOT return the string 'conflicts' as the theme_id. As above all insights may be tagged to multiple themes.\n"
+            conflicts_theme = f"- **Conflict Flagging:** If the insight reflcts substantive discursive conflict and explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it to the theme_id {conflicts_theme_id}. Do NOT return the string 'conflicts' as the theme_id. As above all insights may be tagged to multiple themes.\n"
         else:       
             conflicts_theme = ""
 
@@ -658,6 +1015,56 @@ class Prompts:
 
 
     def populate_themes(self, theme_len: int, theme_type: str):
+
+        """
+         Generate the system prompt for theme population.
+
+        This prompt instructs the model to synthesize the insights assigned
+        to a single theme into a cohesive thematic narrative.
+
+        The synthesis must:
+
+            • adhere strictly to the theme description ("North Star logic")
+            • preserve all substantive insights and citations
+            • maintain the relative salience of claims
+            • remain within the allocated word limit
+            • produce the most concise synthesis possible without losing meaning
+
+        The prompt also adapts its structural instructions depending on
+        the type of theme being synthesized.
+
+        Supported theme types
+        ---------------------
+
+        general
+            Standard thematic synthesis of conceptually related insights.
+
+        other
+            Residual category capturing lower-frequency insights that do
+            not justify a standalone theme.
+
+        conflicts
+            Theme describing structured disagreement or discursive fault
+            lines present in the literature.
+
+        Parameters
+        ----------
+        theme_len : int
+            Maximum word count allocated to the theme synthesis.
+
+        theme_type : str
+            Type of theme being synthesized. Must be one of:
+
+                "general"
+                "other"
+                "conflicts"
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to synthesize insights into
+            a thematic section and return the result as strict JSON.
+        """
                
         # -----------------------------------------------------
         # Specific instructions for different theme types
@@ -778,6 +1185,31 @@ class Prompts:
     
 
     def identify_orphans(self):
+        """
+        Generate the system prompt for identifying orphan insights.
+
+        This prompt instructs the model to audit a thematic summary against
+        the insights originally mapped to that theme.
+
+        The model must determine which insights are substantively reflected
+        in the summary and return the identifiers of those insights.
+
+        An insight is considered reflected if:
+
+            • its core claim appears in the summary
+            • its contribution is preserved within a synthesized claim
+            • it is represented at an appropriate level of abstraction
+
+        Insights that are not reflected are considered "orphans" and must
+        be reintroduced into the thematic synthesis.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to identify which insights
+            are reflected in the thematic summary and return the result
+            as strict JSON.
+        """
         return(
             '# ROLE\n'
             'You are a Research Auditor. Your task is to verify the groundedness of a thematic summary by mapping source insights to the text.\n\n'
@@ -825,6 +1257,33 @@ class Prompts:
         )
     
     def integrate_orphans(self):
+        """
+        Generate the system prompt for reintegrating orphan insights.
+
+        This prompt instructs the model to revise a thematic summary so
+        that insights identified as missing ("orphans") are substantively
+        incorporated into the narrative.
+
+        The revised summary must:
+
+            • preserve the original findings
+            • integrate orphan insights coherently
+            • maintain the original analytical tone
+            • preserve all citations exactly as written
+            • avoid mechanical insertion of orphan sentences
+
+        The updated summary must remain faithful to:
+
+            • the research question
+            • the theme label
+            • the theme description
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to integrate orphan insights
+            into an updated thematic summary returned as strict JSON.
+        """
         return (
             '# ROLE\n'
             'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected.\n\n'
@@ -886,6 +1345,32 @@ class Prompts:
         )
     
     def address_redundancy(self):
+        """
+        Generate the system prompt for redundancy reduction across themes.
+
+        This prompt instructs the model to reduce unnecessary repetition
+        across previously synthesized themes while preserving the full
+        informational content of each theme.
+
+        Redundancy arises when insights assigned to multiple themes produce
+        overlapping statements across different thematic sections.
+
+        The model must:
+
+            • eliminate surface-level repetition
+            • preserve all substantive claims
+            • preserve all citations exactly as written
+            • maintain the logical integrity of each theme
+
+        If a claim already appears in earlier themes, the model should
+        reference it concisely rather than restating it in full.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to perform redundancy
+            reduction and return the refined theme text as strict JSON.
+        """
         return (
             "# ROLE\n"
             "You are a Research Editor performing a structural redundancy reduction pass on a set of themes.\n\n"
@@ -938,8 +1423,63 @@ class Prompts:
             "Return ONLY a JSON object with key 'refined_theme'. "
             "Do not include commentary."
         )
+    
+    ####
+    # /END PROMPTS FOR SYNTHESIS
+    ####
+
+    #-----------------------------
+
+    ####
+    # PROMPTs FOR RENDER
+    ####
 
     def stylistic_rewrite(self, style:str , label: str, index: int):
+        """
+        Generate the system prompt for stylistic refinement of thematic summaries.
+
+        This prompt instructs the model to improve the narrative quality of a
+        thematic summary while preserving all underlying information and citations.
+
+        The refinement process focuses on:
+
+            • improving narrative flow
+            • reducing repetitive phrasing
+            • strengthening transitions between themes
+            • maintaining a specified stylistic tone
+
+        The prompt dynamically selects stylistic guidance depending on the
+        type of theme being edited.
+
+        Theme categories
+        ----------------
+        dominant
+            Themes representing the central analytical findings of the corpus.
+
+        other
+            Themes capturing residual or lower-frequency insights.
+
+        conflict
+            Themes describing structured disagreement or interpretive tension.
+
+        Parameters
+        ----------
+        style : str
+            Narrative style to be applied (e.g., academic, journalistic).
+
+        label : str
+            Theme label used to determine the stylistic category.
+
+        index : int
+            Position of the theme within the research question sequence.
+            Used to rotate stylistic framing guidance.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to produce a refined thematic
+            summary while preserving all substantive content.
+            """
         
         style_guidelines = {
             "dominant": [
@@ -1026,8 +1566,37 @@ class Prompts:
             '- Do not provide preamble or commentary.'
         )
 
-
     def exec_summary(self, word_count: int):
+        """
+        Generate the system prompt for producing the executive summary.
+
+        This prompt instructs the model to synthesize the full corpus review
+        into a concise executive summary and generate a descriptive title.
+
+        The executive summary must:
+
+            • synthesize insights across all research questions
+            • highlight cross-cutting patterns in the literature
+            • identify key divergences or variations
+            • summarize implications emerging from the corpus
+
+        The output must be structured as a strict JSON object containing:
+
+            - executive_summary
+            - title
+
+        Parameters
+        ----------
+        word_count : int
+            Target length for the executive summary.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to generate an executive
+            summary and title in strict JSON format.
+        """
+
         return (
             "## ROLE\n"
             "You are a writing agent specialized in developing executive summaries for corpus reviews. "
@@ -1062,6 +1631,29 @@ class Prompts:
         )
     
     def question_summaries(self):
+        """
+        Generate the system prompt for research-question summaries.
+
+        This prompt instructs the model to produce a short overview
+        describing how the themes collectively answer a specific
+        research question.
+
+        The generated summary serves as a narrative bridge between the
+        research question and the detailed theme sections that follow.
+
+        The summary must:
+
+            • synthesize the themes conceptually
+            • remain faithful to the source text
+            • avoid introducing new claims or interpretations
+            • be written in formal academic prose
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to produce a concise
+            question-level summary in strict JSON format.
+        """
         return (
             "## ROLE\n"
             "You are an agent specialized in text synthesis. Your task is to synthesize thematic descriptions for a specific research question. Do not invent facts. Use only the provided content.\n"
@@ -1092,105 +1684,7 @@ class Prompts:
             "- End at a natural sentence boundary. Output valid JSON only."
         )
     
-
-    def ai_peer_review(self, paper_context, lit_review: str, output_length, max_tokens, themed = True) -> str:
-
-        if themed: 
-            workflow = (
-                'It loosely follows the workflow: paper retrieval → paper chunking → insight retrieval → insight embedding → '
-                'insight clustering → cluster summary generation -> theme identification -> theme population. You are reviewing these populated themes.\n\n'
-            )
-        else:
-            workflow = (
-                'It loosely follows the workflow: paper retrieval → paper chunking → insight retrieval → insight embedding → '
-                'insight clustering → cluster summary generation. You are reviewing these cluster summaries.\n\n'
-            )
-
-        return (
-            'You are a deep research enabled AI. Your task is to validate a literature review. '
-            'Specifically, explore the completeness of the review and provide feedback identifying any gaps or errors. '
-            'Gaps should focus on missing arguments, prominent inputs or points of view. If you identify gaps, '
-            'you should also state sources of literature that can address these gaps. These should be actual sources or authors, not just themes to look into.'
-            'If all salient arguments are made in the existing literature review, and it is only missing papers that '
-            'repeat already made arguments, do not highlight them unless your base model understands them to be canonical. '
-            'For errors, highlight any points in the literature review that are substantively false or incorrect. '
-            'Provide a substantive peer review.\n\n'
-            'The literature review has been conducted by a human-in-the-loop AI/LLM assisted process. '
-            f'{workflow}'
-            f'{paper_context}'
-            'You are reviewing the specific output for a single research question, which will be provided below under "CURRENT RESEARCH QUESTION" and "LIT REVIEW TEXT".\n\n'
-            'In addition, as context you will receive the executive summary for the paper, the other research questions that were posed as well as a summary of the findings for the other research questions. '
-            'These will be organized under EXEC SUMMARY, OTHER RESEARCH QUESTIONS and SUMMARIES\n\n'
-            'STRICT OUTPUT RULES:\n'
-            'You should only output JSON in the following format:\n\n'
-            '{\n'
-            '   "overall_comment": <Your overall comments on the review>,\n'
-            '   "resubmit": <True|False>,\n'
-            '   "specific_comments": [\n'
-            '       {\n'
-            '           "comment_id": <comment_id>,\n'
-            '           "comment": <comment>,\n'
-            '           "severity": "<Low|Medium|High>",\n'
-            '           "location": "<if possible, indicate where in the text the comment applies>"\n'    
-            '       },\n'
-            '       {\n'
-            '           "comment_id": <comment_id>,\n'
-            '           "comment": <comment>,\n'
-            '           "severity": "<Low|Medium|High>",\n'
-            '           "location": "<if possible, indicate where in the text the comment applies>"\n'
-            '       },\n'
-            '       ...\n'
-            '   ]\n'
-            '}\n\n'
-            'Do NOT include any text outside the specified JSON object.\n\n'
-            'INSTRUCTIONS:\n'
-            f'- Aim to provide your complete review in less than {output_length} words. Use fewer words if possible; do NOT generate exactly {output_length} words if unnecessary.\n'
-            f'- If your complete review requires more than {output_length} words, you may expand up to {max_tokens} tokens but end the text in a coherent manner.\n'
-            '- If the literature review is completely inadequate, indicate the need for full resubmission in the "resubmit" field.\n'
-            '- Focus on substantive review. Note missing perspectives, points, or arguments. Do not highlight missing papers unless extremely prominent or canonical.\n'
-            '- Highlight any points in the literature review that are false or incorrect.\n'
-            '- If the result of the literature review is robust, state that no major gaps or errors were found in the overall comment - do not comment for the sake of commenting. In this case leave specific_comments as an empty list.\n'
-            '- You may use information from your base model and available search tools (e.g., web_search_preview) to check for content relevant to the research questions.\n'
-            '- Focus on answering the current research question only, but keep the overall motivation for the literature review in mind as well as the other research questions and their summaries. \n\n'
-            f'{lit_review}\n'
-        )
+    ####
+    # /END PROMPTS FOR RENDER
+    ####
     
-    def peer_review_format_check(self):
-        """
-        System prompt for correcting mis-formatted JSON describing peer review.
-        """
-
-        return (
-            'You are an agent specialized in formatting strings to be valid JSON. '
-            'The user will provide text that is an approximation of valid JSON describing a formal peer review.\n\n'
-
-            'Your task is to correct it so it can be parsed with `json.loads()`.\n\n'
-
-            'Requirements:\n'
-            "- The input may have formatting errors including misplaced quotes, escaped characters, missing commas, or extra whitespace. Correct all errors.\n"
-            "- Preserve all the core data, only amend to ensure valid JSON.\n"
-            "- Your response must include all the documents contained in the content submitted by the user.\n"
-            "- Ensure string values are enclosed in double quotes.\n"
-            "- Example output:\n"
-            '{\n'
-            '   "overall_comment": <Your overall comments on the review>,\n'
-            '   "resubmit": <True|False>,\n'
-            '   "specific_comments": [\n'
-            '       {\n'
-            '           "comment_id": <comment_id>,\n'
-            '           "comment": <comment>,\n'
-            '           "severity": "<Low|Medium|High>",\n'
-            '           "location": "<if possible, indicate where in the text the comment applies>"\n'    
-            '       },\n'
-            '       {\n'
-            '           "comment_id": <comment_id>,\n'
-            '           "comment": <comment>,\n'
-            '           "severity": "<Low|Medium|High>",\n'
-            '           "location": "<if possible, indicate where in the text the comment applies>"\n'
-            '       },\n'
-            '       ...\n'
-            '   ]\n'
-            '}\n\n'
-            ' - Specific comments may be empty if overall comment indicates no issues found.\n'
-            "Return strictly valid JSON."
-        )
