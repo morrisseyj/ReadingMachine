@@ -14,6 +14,8 @@ ReadingMachine should therefore be understood primarily as a **semantic research
 
 ## Documentation
 
+For an overview of the repository layout, see `REPOSITORY_STRUCTURE.md`.
+
 Additional technical documentation describing the internal architecture of the system is available in:
 
 - `docs/ARCHITECTURE.md` — conceptual and state architecture

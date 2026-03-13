@@ -8,7 +8,7 @@ def reload():
 
     importlib.reload(config)
     importlib.reload(utils)
-    importlib.reload(state)
+    importlib.reload(CorpusState)
     importlib.reload(getlit)
 
     return(None)
