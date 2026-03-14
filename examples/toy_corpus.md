@@ -127,23 +127,21 @@ https://www.nber.org/system/files/working_papers/w28731/w28731.pdf
 
 ## Paper 3
 
-**Title**  
-How Effective Is Telecommuting? Assessing the Status of Our Scientific Findings
+**Title**
+How Does Working from Home Affect Developer Productivity? A Case Study of Baidu During COVID-19
 
-**Authors**  
-Tammy D. Allen, Timothy D. Golden, Kristen M. Shockley
+**Authors**
+Chenglong Bao, Dongsong Zhang, Alexey Chulkov, et al.
 
-**Year**  
-2015
+**Year**
+2020
 
-**Journal**  
-Psychological Science in the Public Interest
+**DOI**
+arXiv:2005.13167
 
-**DOI**  
-https://doi.org/10.1177/1529100615593273
+**PDF**
+https://arxiv.org/pdf/2005.13167
 
-**PDF**  
-https://journals.sagepub.com/doi/pdf/10.1177/1529100615593273
 
 
 ---
@@ -166,7 +164,7 @@ Journal of Public Economics
 https://doi.org/10.1016/j.jpubeco.2020.104235
 
 **PDF**  
-https://bfi.uchicago.edu/wp-content/uploads/BFI_WP_2020-46.pdf
+https://www.nber.org/system/files/working_papers/w26948/w26948.pdf
 
 
 ---
@@ -189,7 +187,7 @@ Management Science
 https://doi.org/10.1287/mnsc.2020.3848
 
 **PDF**  
-https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3304994
+https://www.hbs.edu/ris/Publication%20Files/Work%20from%20Anywhere_forthcoming%20SMJ_ee8cc7c5-c90e-4ad9-a1f4-47309d693a5c.pdf
 
 
 ---
