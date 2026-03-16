@@ -23,7 +23,7 @@ data/corpus/*
 outputs/
 
 # Ignore uv.lock
-uv.lock
+#uv.lock
 
 # Ignore hdbscan results
 hdbscan*
