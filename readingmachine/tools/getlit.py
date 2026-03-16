@@ -266,8 +266,6 @@ class ScholarSearchString:
             user_prompt: str = f"**QUESTION**\n{question_id}: {question_text}"
             # Generate json schema - this is small so i can do it in the loop
             json_schema = {
-                "type": "json_schema",
-                "json_schema": {
                     "name": "search_generation",
                     "strict": True,
                     "schema": {
@@ -285,19 +283,20 @@ class ScholarSearchString:
                     "additionalProperties": False
                     }
                 }
-                }
+            
             # Fall back for failed response
             fall_back = {"search_prompts": []}
             # Call llm 
             response = utils.call_chat_completion(
-                ai_model=self.llm_model,
                 llm_client=self.llm_client,
+                ai_model=self.llm_model,
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
+                fall_back = fall_back,
                 return_json=True,
-                response_format=json_schema,
-                fall_back = fall_back
-            )
+                json_schema=json_schema
+                )
+
             # procees respnse and append to output list
             prompts = response["search_prompts"]
             output_search_prompts.append(prompts)
