@@ -1844,19 +1844,19 @@ class Clustering:
         `corpus_state.insights`.
         """
 
-        # Strip citation-style parentheticals from the insight text
-        self.corpus_state.insights["no_author_insight_string"] = (
-            self.corpus_state.insights["insight"]
+        valid = self.corpus_state.insights[
+            self.corpus_state.insights["insight"].notna()
+        ].copy()
+
+        valid["no_author_insight_string"] = (
+            valid["insight"]
             .astype(str)
             .apply(self._strip_citation_parentheticals)
         )
 
-        # Keep only non-empty strings
-        out = self.corpus_state.insights[
-            self.corpus_state.insights["no_author_insight_string"].str.strip() != ""
-        ].copy()
+        valid = valid[valid["no_author_insight_string"].str.strip() != ""]
 
-        return out
+        return(valid)
     
     def embed_insights(self) -> np.ndarray:
         """
