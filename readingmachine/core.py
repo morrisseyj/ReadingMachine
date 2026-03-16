@@ -616,16 +616,27 @@ class Ingestor:
         self.failed_id_matches= failed_id_matches
 
         if failed_id_matches.shape[0] > 0:
+
+            unmatched_files = failed_id_matches[
+                failed_id_matches["ingestion_ids_matched"] == "import file does not match possible id"
+            ]
+
+            missing_files = failed_id_matches[
+                failed_id_matches["ingestion_ids_matched"] == "existing id had no corresponding file"
+            ]
+
+
             abort_failed_match = None
             while abort_failed_match not in ['y', 'n']:
                 abort_failed_match = input(
-                f"Warning: {failed_id_matches.shape[0]} paper(s) in the insights table "
-                "did not have a matching file in the ingestion directory. This is not neccessarily an error, but if you want to be able to match " 
-                "these papers to thier search terms and search engines later you will need to ensure the files are named correctly.\n\n"
-                "If you are conducting a literature review this warning is likely relevant to you. If you are reading your own corpus, you can likely ignore this message.\n\n"
-                "If you ignore this warning any paper ids that did not have a matching file will be deleted from corpus_state.insights. "  
-                "You can look these up later by exploring the corpus_state.insights object created earlier in the pipeline.\n\n"
-                "Do you wish to abort ingestion to review the failed id matches? (y/n):\n\n"
+                "\n\nWarning: File / metadata ID mismatches detected.\n\n"
+                f"Files ingested that did not match an existing paper_id: {len(unmatched_files)}\n"
+                f"Insights rows with no corresponding file: {len(missing_files)}\n\n"
+                "If you want files to link to specific questions, place them inside folders.\n"
+                "If you invoked the getlit.py module in this library this warning IS likely relevant to you.\n" \
+                "If you are reading your own corpus, you can likely ignore this message.\n\n"
+                "If you ignore this warning any paper ids that did not have a matching file will be deleted from corpus_state.insights. You can look these up later by exploring the corpus_state.insights object created earlier in the pipeline.\n\n"    
+                "Do you wish to abort ingestion to review the failed id matches? (y/n):\n"
             ).lower()
             
             if abort_failed_match == 'y':
