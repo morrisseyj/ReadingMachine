@@ -1443,10 +1443,11 @@ class Prompts:
 
         The refinement process focuses on:
 
-            • improving narrative flow
-            • reducing repetitive phrasing
-            • strengthening transitions between themes
-            • maintaining a specified stylistic tone
+            - improving narrative flow
+            - reducing repetitive phrasing
+            - Address rhetorical padding and mechanical language
+            - strengthening transitions between themes
+            - maintaining a specified stylistic tone
 
         The prompt dynamically selects stylistic guidance depending on the
         type of theme being edited.
