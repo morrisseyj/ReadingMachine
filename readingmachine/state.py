@@ -1259,11 +1259,12 @@ class SummaryState:
                 df = df_list[-1].copy()
 
                 df = (
-                    df.fillna("__NULL__")
-                    .sort_index(axis=1)
-                    .sort_values(by=sorted(df.columns))
-                    .reset_index(drop=True)
-                )
+                df.fillna("__NULL__")
+                .infer_objects(copy=False)
+                .sort_index(axis=1)
+                .sort_values(by=sorted(df.columns), kind="mergesort")
+                .reset_index(drop=True)
+            )
 
                 json_bytes = df.to_json().encode("utf-8")
                 hashed_df = hashlib.sha256(json_bytes).hexdigest()
