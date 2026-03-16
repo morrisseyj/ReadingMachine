@@ -1119,13 +1119,20 @@ class Insights:
         rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.corpus_state.questions.iterrows()]
         rqs_ids_str = "\n".join(rqs_ids)
 
-        temp_state_insights = self.corpus_state.insights.copy()
+        # get unique paper metadata to append to chunks so that insights can be cited
+        paper_metadata = (
+            self.corpus_state.insights
+            [["paper_id", "question_text", "paper_author", "paper_date"]]
+            .sort_values("paper_author", na_position="last")
+            .drop_duplicates("paper_id")
+        )
 
         # Merge chunk text with metadata (author, date, etc.)
         temp_state_insights: pd.DataFrame = remaining_chunks.merge(
-            temp_state_insights[["paper_id", "question_text", "paper_author", "paper_date"]],
+            paper_metadata[["paper_id", "question_text", "paper_author", "paper_date"]],
             how="left",
-            on=["paper_id"]
+            on=["paper_id"],
+            validate="many_to_one"
         )
 
         # Iterate over each chunk
