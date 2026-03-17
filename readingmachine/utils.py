@@ -404,16 +404,21 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
                            "You should proceed to set up your download architecture for your papers. Initialize the next class as follows:\n"
                            f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
                            "getlit.DownloadManager(corpus_state = latest_corpus_state)"),
-        "06_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
+        "06_download_manager": ("You have completed the getlit workflow: You have downloaded your papers and updated your corpus_state. "
+                                "You should proceed to the core workflow. The first step is to ingest the full text of your papers and chunk them. "
+                                "Initialize the next class as follows:\n"
+                                f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
+                                "core.Ingestor(corpus_state = latest_corpus_state, llm_client=llm_client, ai_model='gpt-4o')"),
+        "07_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
                                     f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
                                     "core.InsightsGenerator(corpus_state = latest_corpus_state, llm_client=llm_client)"),
-        "07_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
+        "08_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
                         "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
-        "08_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
+        "09_clusters": ("You have clustered your insights. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=8000).\n\n"
-                        "NOTE: If you are working in Summrize you can determine your position in the Summarize pipeline via: Summarize.status()")
+                        "core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model=\"gpt-4o\", paper_output_length=10000).\n\n"
+                        "NOTE: If you are already working in Summrize you can determine your position in the Summarize pipeline via: Summarize.status()")
         }
         
         # Call the dict to return the text
@@ -437,91 +442,6 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
     print(latest_step)
 
     
-    # now = datetime.datetime.now()
-    # end_time = now + datetime.timedelta(seconds=timeout + 10)
-
-    # print(
-    #     f"Undertaking AI-assisted research. Process will finish by {end_time.strftime('%Y-%m-%d %H:%M:%S')}."
-    #     " If not finished by then, the system may have hung."
-    # )
-
-    # # Call the LLM
-    # try:
-    #     response=llm_client.responses.create(
-    #         model=ai_model,
-    #         input=prompt,
-    #         tools=[{"type": "web_search_preview"}],
-    #         timeout=timeout
-    #     )
-    # except llm_client.error.Timeout as e:
-    #     print(f"{e} Consider increasing timeout (default is 1200s).")
-    #     return None
-    # except Exception as e:
-    #     print(f"Call to OpenAI failed. Error: {e}")
-    #     return None
-    # return response.output_text
-
-# def llm_json_clean(x, sys_prompt, llm_client, ai_model, fall_back):
-
-#     response = call_chat_completion(llm_client=llm_client, 
-#                                     ai_model=ai_model, 
-#                                     sys_prompt=sys_prompt, 
-#                                     user_prompt=x, 
-#                                     return_json=True, 
-#                                     fall_back=fall_back)
-    
-#     return response
-
-# def json_format_check(x):
-#     # Check if its valid json for loading
-#     try:
-#         response_dict = json.loads(x)
-#     except json.JSONDecodeError:
-#         error = "The LLM did not return valid json. Efforts to resolve this have failed. Try run the LLM call again."
-#         return False, error, x
-    
-#     result_key = list(response_dict.keys())[0]
-#     #Convert the list of dicts to a df
-#     response_df = pd.DataFrame(response_dict[result_key]).reset_index(drop = True)
-    
-#     # Loop to catch any level of escaping (i.e., "strings of strings")
-#     while True:
-#         # 1. Identify WHICH elements are still strings
-#         # This is the reliable check, NOT the column's overall dtype
-#         is_string_mask = response_df["paper_author"].apply(lambda val: isinstance(val, str))
-        
-#         # 2. Stop condition: If NO elements are strings, we are done un-escaping
-#         if not is_string_mask.any():
-#             break
-
-#         try:
-#             # 3. Apply json.loads ONLY to the elements identified as strings
-#             response_df.loc[is_string_mask, "paper_author"] = (
-#                 response_df.loc[is_string_mask, "paper_author"].apply(json.loads)
-#             )
-#         except json.JSONDecodeError:
-#             # If we fail to un-escape a string element, it's malformed JSON
-#             error = "The LLM failed to generate the paper authors as valid json after attempts to repair escaping. Try the LLM call again."
-#             return False, error, x
-    
-#     # --- FINAL VALIDATION CHECK ---
-    
-#     # Final Check: Ensure every element is definitely a list
-#     # The column's dtype will be 'object', so we must check the content
-#     if not all(isinstance(val, list) for val in response_df["paper_author"]):
-#         error = "The LLM did not return the paper authors as lists. This cannnot be fixed generically. Try call the LLM again"
-#         return False, error, x
-    
-#     # Check whether this output will save to a parquet file
-#     response_df_check = response_df.copy()
-#     response_df_check["paper_author"] = response_df_check["paper_author"].apply(json.dumps)
-#     try:
-#         pa.Table.from_pandas(response_df_check)
-#     except Exception as e:
-#         error = "Despite producing a valid dataframe with authors as lists, the dataframe will fail when saving to parquet. Manually inspect the output to understand the issue"
-#         return False, error, x 
-
-#     return True, None, response_df
 
 
 

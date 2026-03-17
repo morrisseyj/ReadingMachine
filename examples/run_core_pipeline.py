@@ -122,6 +122,14 @@ insights_df = questions_df.copy()
 # The Ingestor loads documents from disk, extracts text, confirms metadata,
 # and breaks the text into chunks suitable for LLM reading.
 
+# Note if you arrived here via the getlit tool, you can initialize the Ingestor class with the corpus_state object created by getlit
+# ingestor = core.Ingestor(
+#     corpus_state=latest_corpus_state,
+#     llm_client=llm_client,
+#     ai_model="gpt-4o"
+# )
+# If you are starting with your own corpus, you can initialize the Ingestor with the questions and insights dataframes created above
+
 ingestor = core.Ingestor(
     questions=questions_df,
     papers=insights_df,

@@ -988,7 +988,7 @@ class Ingestor:
         )
 
         # Save the updated corpus_state
-        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_full_text_and_chunks"))
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "07_full_text_and_chunks"))
 
 class Insights:
     def __init__(
@@ -1547,10 +1547,9 @@ class Insights:
         # Now we have the meta insights with all the metadata and we can append to the corpus_state insights
         self.corpus_state.insights = pd.concat([self.corpus_state.insights, meta_insights_complete], ignore_index=True)
         # Save to parquet and return
-        self.corpus_state.save(os.path.join(self.pickle_path, "07_insights"))
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_insights"))
         return self.corpus_state.insights
 
-      
     @staticmethod
     def ensure_list(x):
         """
@@ -1647,15 +1646,6 @@ class Insights:
         if current_chunk:
             chunks.append(current_chunk)
         return chunks
-    
-    # def recover_meta_insights_generation(self):
-    #     print("Opening pickle file to recover meta insights generation...")
-    #     with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "rb") as f:
-    #         recover_meta_insights = pickle.load(f)
-        
-    #     start = len(recover_meta_insights)
-    #     print(f"Resuming meta insights generation from paper {start}...")
-    #     self.get_meta_insights()
     
 class Clustering:
     """
@@ -2383,7 +2373,7 @@ class Clustering:
             Updated insights table containing a `selected_cluster` column.
         """
         if final_cluster_count is None:
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
             return(self.corpus_state.insights)
 
         else:
@@ -2419,79 +2409,9 @@ class Clustering:
             # Concatenate all research questions back together
             self.corpus_state.insights = pd.concat(selected_clusters_list)
             # Save the updated DataFrame to disk
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_clusters"))
+            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
             return self.corpus_state.insights
-        
 
-
-    # def generate_clusters(
-    #     self, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom"
-    # ) -> pd.DataFrame:
-    #     if self.reduced_insight_embeddings_array.size == 0:
-    #         raise ValueError("Reduced embeddings not available. Run .embed_insights() and .reduce_dimensions() first.")
-
-    #     clusterer = hdbscan.HDBSCAN(
-    #         min_cluster_size=min_cluster_size,
-    #         metric=metric,
-    #         cluster_selection_method=cluster_selection_method
-    #     )
-
-    #     self.valid_embeddings_df["reduced_insight_embeddings"] = [row.tolist() for row in self.reduced_insight_embeddings_array]
-
-    #     clustered_dfs = []
-    #     for rq in self.valid_embeddings_df["question_id"].unique():
-    #         print(f"Generating clusters for {rq}...")
-    #         rq_df = self.valid_embeddings_df[self.valid_embeddings_df["question_id"] == rq].copy()
-    #         embeddings_matrix = np.vstack(rq_df["reduced_insight_embeddings"].to_list())
-    #         cluster_labels = clusterer.fit_predict(embeddings_matrix)
-    #         cluster_probs = clusterer.probabilities_
-
-    #         rq_df["cluster"] = cluster_labels
-    #         rq_df["cluster_prob"] = cluster_probs
-    #         clustered_dfs.append(rq_df)   
-
-    #     clustered_df = pd.concat(clustered_dfs)
-
-    #     # In case the user is re-running generate clusters to adjust parameters, remove the old cluster assignments
-    #     for col in ["cluster", "cluster_prob"]:
-    #         if col in self.corpus_state.insights.columns:
-    #             self.corpus_state.insights.drop(columns=[col], inplace=True)   
-
-    #     self.corpus_state.insights = self.corpus_state.insights.merge(
-    #         clustered_df[["question_id", "paper_id", "chunk_id", "cluster", "cluster_prob"]],
-    #         on=["question_id", "paper_id", "chunk_id"],
-    #         how="left"
-    #     )
-
-    #     # 1. Calculate counts and prop per question_id and cluster
-    #     cum_prop_cluster = (
-    #         self.corpus_state.insights.dropna(subset=["cluster"])
-    #         .groupby(["question_id", "cluster"])
-    #         .size()
-    #         .reset_index(name="count")
-    #     )
-
-    #     # 2. Calculate proportions within each question_id
-    #     cum_prop_cluster["prop"] = cum_prop_cluster.groupby("question_id")["count"].transform(lambda x: x / x.sum())
-
-    #     # 3. Move -1 to the end and calculate cumsum within each question_id
-    #     def move_outlier_and_cumsum(df):
-    #         outlier = df[df["cluster"] == -1]
-    #         main = df[df["cluster"] != -1].sort_values("count", ascending=False)
-    #         df_sorted = pd.concat([main, outlier], ignore_index=True)
-    #         df_sorted["cum_prop"] = df_sorted["prop"].cumsum()
-    #         return df_sorted
-
-    #     cum_prop_cluster = cum_prop_cluster.groupby("question_id", group_keys=False).apply(move_outlier_and_cumsum)
-
-    #     self.cum_prop_cluster = cum_prop_cluster
-
-    #     print("Clusters generated; -1 indicates outliers. Empty insights remain with NaN clusters.")
-
-    #     return self.cum_prop_cluster
-
-    
-            
 class Summarize:
     def __init__(self,
                  corpus_state: Any,
