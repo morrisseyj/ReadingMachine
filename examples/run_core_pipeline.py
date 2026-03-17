@@ -214,8 +214,8 @@ cluster.tune_umap_params(
 
 # Reduce dimensions using chosen parameters
 cluster.reduce_dimensions(
-    n_neighbors=75,
-    min_dist=0,
+    n_neighbors=5,
+    min_dist=0.5,
     n_components=5,
     metric="cosine",
     random_state=config.seed
@@ -232,16 +232,22 @@ cluster.tune_hdbscan_params(
     cluster_selection_methods=["eom", "leaf"]
 )
 
+# Inspect the tuning results a choose params that balance cluster coherence with coverage - question-by-question
+cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
+
 # Apply clustering
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "leaf"},
-    "question_1": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "leaf"},
-    "question_2": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "leaf"},
+    "question_0": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom"},
+    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"},
+    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
     "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_4": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom"}
+    "question_4": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"}
 })
 
 # Optional: collapse very small clusters into outliers
+# Inspect the cumulative distribution of cluster sizes to choose a cutoff
+cluster.cum_prop_cluster
+# Clean to your new cutoff if you want
 cluster.clean_clusters()
 
 # ==========================================================
@@ -320,5 +326,3 @@ renderer.integrate_cosmetic_changes()
 renderer.render_output("docx", use_stylized=True)
 renderer.render_output("md", use_stylized=True)
 renderer.render_output("pdf", use_stylized=True)
-
-print("\nPipeline complete.")

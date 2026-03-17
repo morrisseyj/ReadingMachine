@@ -3,12 +3,10 @@ import importlib
 
 def reload():
     from readingmachine.tools import getlit
-    from readingmachine.state import CorpusState
     from readingmachine import utils, config
 
     importlib.reload(config)
     importlib.reload(utils)
-    importlib.reload(CorpusState)
     importlib.reload(getlit)
 
     return(None)
@@ -46,8 +44,7 @@ Environment setup:
 # ==========================================================
 
 from readingmachine.tools import getlit
-from readingmachine import utils, config
-from readingmachine.state import CorpusState
+from readingmachine import utils
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -108,13 +105,13 @@ utils.restart_pipeline()
 # The ScholarSearchString class converts research questions
 # into structured academic search queries.
 
-search_terms = getlit.ScholarSearchString(
+search_strings = getlit.ScholarSearchString(
     questions=questions,
     llm_client=llm_client,
     num_prompts=2   # number of search prompts per question
 )
 
-search_terms.searchstring_maker()
+search_strings.searchstring_maker()
 
 
 # ==========================================================
@@ -124,11 +121,13 @@ search_terms.searchstring_maker()
 # AcademicLit queries academic APIs such as Crossref and OpenAlex.
 
 academic_lit = getlit.AcademicLit(
-    corpus_state=search_terms.corpus_state
+    corpus_state=search_strings.corpus_state
 )
 
+#------------
+
 # Each search string returns `num_results` papers.
-# Total results ≈ prompts × results × questions (before deduplication).
+# Total results ≈ prompts × results × questions x 2 search engines (currently 2 search engines) (before deduplication).
 
 academic_lit.search_crossref(num_results=5)
 academic_lit.search_openalex(num_results=5)

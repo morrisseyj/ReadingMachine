@@ -241,7 +241,7 @@ class ScholarSearchString:
 
             - question_id
             - question_text
-            - search_term
+            - search_string
             - search_string_id
 
         Each search string receives a unique identifier to maintain
@@ -305,11 +305,11 @@ class ScholarSearchString:
         output_search_prompts_df = pd.DataFrame({
             "question_id": self.corpus_state.questions["question_id"],
             "question_text": self.corpus_state.questions["question_text"],
-            "search_term": output_search_prompts
+            "search_string": output_search_prompts
             })
 
         # Explode
-        output_search_prompts_df = output_search_prompts_df.explode("search_term").reset_index(drop=True)
+        output_search_prompts_df = output_search_prompts_df.explode("search_string").reset_index(drop=True)
         # Add search string id
         output_search_prompts_df["search_string_id"] = [f"search_string_{i}" for i in range(output_search_prompts_df.shape[0])]
 
@@ -318,7 +318,7 @@ class ScholarSearchString:
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "01_search_strings"))
         
         # Return the search strings for inspection
-        return self.corpus_state.insights["search_term"].to_list()
+        return self.corpus_state.insights["search_string"].to_list()
 
 
 class AcademicLit:

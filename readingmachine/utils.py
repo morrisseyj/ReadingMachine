@@ -64,11 +64,11 @@ from openai import OpenAI, APITimeoutError, APIConnectionError
 #     return [str(val)]
 
 def validate_format(
-    corpus_state: Optional["CorpusState"], 
-    questions: Optional[pd.DataFrame],
-    injected_value: Optional[pd.DataFrame],
-    state_required_cols: List[str], 
-    injected_required_cols: List[str]
+    corpus_state: Optional["CorpusState"] = None, 
+    questions: Optional[pd.DataFrame] = None,
+    injected_value: Optional[pd.DataFrame] = None,
+    state_required_cols: List[str] = [],
+    injected_required_cols: List[str] = []
 ) -> "CorpusState":
     """
    Validate and normalize pipeline input state.
