@@ -40,6 +40,11 @@ CorpusState containing candidate papers
 
 After downloading the papers you can proceed to the core pipeline.
 
+NOTE:
+Search results from getlit are intentionally broad. Users are expected to
+actively make judgement calls on whether papers are relevant before downloading and ingestion. 
+This preserves transparency in the retreival process of corpus construction and avoids hidden filtering biases.
+
 ---
 
 ## 2. Corpus Reading and Synthesis (core workflow)
@@ -93,11 +98,15 @@ Consult only the core pipeline:
 
 examples/run_core_pipeline.py
 
+Running the example script over the toy corpus will cost about $6.50 in OpenAI API credits to run.
+
 ### If you want help assembling a literature corpus
 
 Consult the discovery workflow first:
 
 examples/run_getlit_pipeline.py
+
+Running the example gitlit script will cost about $1.75 in OpenAI API credits to run.
 
 Then proceed to:
 
