@@ -989,10 +989,12 @@ class Literature:
     questions from influencing duplicate detection.
     """
 
-    FUZZY_CHECK_PATH: str = os.path.join(os.getcwd(), "data", "fuzzy_check")
-    os.makedirs(FUZZY_CHECK_PATH, exist_ok=True)
-
-    def __init__(self, corpus_state: "CorpusState", literature: Optional[pd.DataFrame] = None) -> None:
+    def __init__(self, 
+                 corpus_state: "CorpusState", 
+                 run: str,
+                 literature: Optional[pd.DataFrame] = None,
+                 FUZZY_CHECK_PATH: str = config.FUZZY_CHECK_PATH, 
+                ) -> None:
         """
         Initialize the Literature deduplication tool.
 
@@ -1012,6 +1014,16 @@ class Literature:
         deduplication operations are performed.
         """
         
+        
+        if run not in ["getlit", "ingest"]:
+            raise ValueError("run must be either 'getlit' or 'ingest'\n" \
+            "     'getlit' is for deduplicating literature retrieved from the getlit tools (academic and grey lit)\n" \
+            "     'ingest' is for deduplicating literature during the ingestion process")
+        
+        self.save_location = os.path.join(FUZZY_CHECK_PATH, run)
+        os.mkdirs(self.save_location, exist_ok=True)
+
+
         self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
             corpus_state=corpus_state,
@@ -1028,184 +1040,23 @@ class Literature:
             )
         )
 
-        # Split literature into a list of DataFrames per question_id
-        self.question_dfs: List[pd.DataFrame] = self._splitter()
+    def drop_duplicates(self) -> pd.DataFrame:
+        # Drop the duplicated - this is effectively a wrapper for the utis drop duplicaes function as a class method
+        self_unique_papers = utils.drop_exact_duplicates(self.corpus_state.insights).copy()
+        # Here we are going to update the state because we don't want to keep duplicate search results in the state. 
+        # Note later, when we check for duplicates during ingestion we will merge with state to id duplicates rather than delete them
+        self.corpus_state.insights = self_unique_papers
 
-    def _splitter(self) -> List[pd.DataFrame]:
-        """
-        Split literature records by research question.
+    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> None:
+        # Again this is largely a wrapper for the utils function as a class method. 
+        fuzzy_match_df = utils.get_fuzzy_matches(self.corpus_state.insights, similarity_threshold=similarity_threshold)
+        # Save the fuzzzy matches to a csv for manual inspection
+        fuzzy_match_df.to_csv(self.save_location, index=False)
+        print(f"Fuzzy matches exported to {self.save_location}. Check and remove any true duplicates manually. Only save as .csv to ensure update_state() works correctly.\n"
+              "NOTE Deduplication is global so later papers might show fewer papers than earlier ones as you remove duplicates "
+              "- this is expected. All questions will be accounted for on insight generation")
 
-        Each research question is processed independently so that duplicate
-        detection occurs within the context of that question's literature.
-
-        The method also constructs a concatenated string combining:
-
-            - author names
-            - paper title
-            - publication year
-
-        This string is used for both exact and fuzzy duplicate detection.
-
-        Returns
-        -------
-        List[pd.DataFrame]
-            List of DataFrames, one per research question.
-        """
-        dfs: List[pd.DataFrame] = [
-            self.corpus_state.insights[self.corpus_state.insights["question_id"] == qid].copy()
-            for qid in self.corpus_state.insights["question_id"].drop_duplicates()
-        ]
-
-        for df in dfs:
-            authors_str = df["paper_author"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
-            title_str = df["paper_title"].astype(str)
-            date_str = df["paper_date"].astype(str)
-
-            # Concatenate for duplicate checking
-            df["duplicate_check_string"] = authors_str + " " + title_str + " " + date_str
-
-        return dfs
-
-    def drop_exact_duplicates(self) -> List[pd.DataFrame]:
-        """
-        Remove exact duplicate literature records.
-
-        Exact duplicates are identified using the constructed
-        `duplicate_check_string`, which combines author names,
-        paper title, and publication year.
-
-        Returns
-        -------
-        List[pd.DataFrame]
-            Updated list of question-specific DataFrames with exact
-            duplicates removed.
-        """
-        for df in self.question_dfs:
-            df.drop_duplicates(subset="duplicate_check_string", keep="first", inplace=True)
-        return self.question_dfs
-
-    def _get_fuzzy_match(self, similarity_threshold: int = 90) -> List[List[Tuple[str, str]]]:
-        """
-        Identify potential duplicate records using fuzzy string matching.
-
-        Pairwise similarity scores are computed for all literature records
-        within each research question using the RapidFuzz library.
-
-        Parameters
-        ----------
-        similarity_threshold : int, default=90
-            Minimum similarity score required for two records to be
-            considered potential duplicates.
-
-        Returns
-        -------
-        List[List[Tuple[str, str]]]
-            List of lists containing pairs of potentially duplicated
-            literature records for each research question.
-
-        Notes
-        -----
-        The similarity score is calculated using the RapidFuzz `ratio`
-        scorer, which measures overall string similarity.
-        """
-        fuzzy_duplicates_list: List[List[Tuple[str, str]]] = []
-
-        for df in self.question_dfs:
-            strings = df["duplicate_check_string"].tolist()
-            fuzzy_scores = process.cdist(strings, strings, scorer=fuzz.ratio)
-            unique_fuzzy_matches: List[Tuple[str, str]] = []
-
-            for i, row in enumerate(fuzzy_scores):
-                for j, score in enumerate(row):
-                    if i < j and score >= similarity_threshold:
-                        unique_fuzzy_matches.append((strings[i], strings[j]))
-
-            fuzzy_duplicates_list.append(unique_fuzzy_matches)
-
-        print("Pairwise fuzzy score calculated.")
-        return fuzzy_duplicates_list
-
-    def _get_similar_groups(self) -> List[pd.DataFrame]:
-        """
-        Group fuzzy duplicate matches into connected similarity clusters.
-
-        Potential duplicate pairs are converted into a graph structure where
-        edges represent high-similarity matches. Connected components in the
-        graph represent groups of records that may correspond to the same
-        publication.
-
-        Returns
-        -------
-        List[pd.DataFrame]
-            List of DataFrames containing similarity group assignments
-            for each research question.
-
-        Notes
-        -----
-        Records without fuzzy matches are assigned `sim_group = -1`.
-        """
-
-        fuzzy_groups_list: List[pd.DataFrame] = []
-        fuzzy_duplicates_list = self._get_fuzzy_match()
-
-        for possible_duplicates, df in zip(fuzzy_duplicates_list, self.question_dfs):
-            graph = nx.Graph()
-            graph.add_edges_from(possible_duplicates)
-            groups = list(nx.connected_components(graph))
-
-            grouped_matches = []
-            matched_strings = set()
-
-            for i, group in enumerate(groups, start=1):
-                for string in group:
-                    grouped_matches.append({"duplicate_check_string": string, "sim_group": i})
-                    matched_strings.add(string)
-
-            # Assign -1 to strings with no matches
-            for string in df["duplicate_check_string"]:
-                if string not in matched_strings:
-                    grouped_matches.append({"duplicate_check_string": string, "sim_group": -1})
-
-            groups_df = pd.DataFrame(grouped_matches)
-            fuzzy_groups_list.append(groups_df)
-
-        return fuzzy_groups_list
-
-    def get_fuzzy_matches(self) -> None:
-        """
-        Export potential duplicate records for manual review.
-
-        For each research question, a CSV file is generated containing
-        literature records grouped by similarity cluster. These files are
-        intended for manual inspection to determine which records represent
-        true duplicates.
-
-        The exported files are written to `FUZZY_CHECK_PATH`.
-
-        Notes
-        -----
-        After manual review and editing, the updated files can be imported
-        back into the pipeline using `update_state()`.
-        """
-        fuzzy_groups_list = self._get_similar_groups()
-
-        for index, (fuzzy_group_df, df) in enumerate(zip(fuzzy_groups_list, self.question_dfs)):
-            df_for_manual_check = fuzzy_group_df.merge(
-                df, 
-                how="left",
-                on="duplicate_check_string"
-            )
-            df_for_manual_check.to_csv(
-                os.path.join(self.FUZZY_CHECK_PATH, f"question{index + 1}.csv"),
-                index=False
-            )
-
-        print(
-            f"All fuzzy matches exported to {self.FUZZY_CHECK_PATH}. "
-            "Check and remove any true duplicates manually. "
-            "Only save as .csv to ensure update_state() works correctly."
-        )
-
+    
     def update_state(self, path_to_files: Optional[str] = None) -> pd.DataFrame:
         """
         Update the corpus state using manually reviewed duplicate files.
@@ -1233,30 +1084,32 @@ class Literature:
         updated state is saved.
         """
 
-        path_to_files = path_to_files or self.FUZZY_CHECK_PATH
+        path_to_files = self.save_location
         files_to_import = [
             os.path.join(path_to_files, f)
             for f in os.listdir(path_to_files)
             if f.lower().endswith(".csv") or f.lower().endswith(".xlsx")
         ]
 
-        dfs: List[pd.DataFrame] = []
-        for file in files_to_import:
-            if file.lower().endswith(".csv"):
-                dfs.append(pd.read_csv(file))
-            else:
-                dfs.append(pd.read_excel(file))
+        if len(files_to_import) > 1:
+            raise ValueError(f"Multiple files found in {path_to_files}. There should only be one file handling deduplication globally.")
+      
+        file_to_import = files_to_import[0]
+        
+        if file_to_import.endswith(".csv"):
+            dedup_insights = pd.read_csv(file_to_import)
+        else:
+            dedup_insights = pd.read_excel(file_to_import)
         
         # Clean up empty authors or "no author found" entries.
-        for df in dfs:
-            if "paper_author" in df.columns:
-                df["paper_author"].replace(
-                    to_replace=["", "No author found", "NA", "null", pd.NA, np.nan],
-                    value=None,
-                    inplace=True
-                    )
+        if "paper_author" in dedup_insights.columns:
+            dedup_insights["paper_author"].replace(
+                to_replace=["", "No author found", "NA", "null", pd.NA, np.nan],
+                value=None,
+                inplace=True
+                )
         
-        self.corpus_state.insights = pd.concat(dfs, ignore_index=True)
+        self.corpus_state.insights = dedup_insights
 
         if "duplicate_check_string" in self.corpus_state.insights.columns:
             self.corpus_state.insights.drop(columns="duplicate_check_string", inplace=True)

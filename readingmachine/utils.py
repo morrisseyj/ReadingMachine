@@ -39,29 +39,8 @@ import os
 import datetime
 import time
 from openai import OpenAI, APITimeoutError, APIConnectionError
-
-# def ensure_list_of_strings(val):
-#     """
-#     Normalize input to a list of strings.
-#     Handles lists, strings, NaN, and other types.
-#     Flattens list-of-lists if encountered.
-#     """
-#     # Flatten list-of-lists (e.g., [["Smith", "Jones"]])
-#     if isinstance(val, list) and len(val) == 1 and isinstance(val[0], list):
-#         val = val[0]
-#     if isinstance(val, list):
-#         return [str(v) for v in val if v is not None]
-#     if isinstance(val, str):
-#         try:
-#             parsed = ast.literal_eval(val)
-#             if isinstance(parsed, list):
-#                 return [str(v) for v in parsed if v is not None]
-#         except Exception:
-#             pass
-#         return [val]
-#     if pd.isna(val):
-#         return []
-#     return [str(val)]
+import networkx as nx
+from rapidfuzz import process, fuzz
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
@@ -441,7 +420,243 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
     # Print the text containing instructions for the latest step
     print(latest_step)
 
-    
+
+def gen_duplicate_check_string(df: pd.DataFrame) -> pd.Series:
+    """
+    Generate a string used for duplicate checking.
+
+    This string combines author names, paper title, and publication year
+    into a single string for each record.
+
+    Returns
+    -------
+    pd.Series
+        Series containing the duplicate check strings.
+    """
+    for col in ["paper_author", "paper_title", "paper_date"]:
+        if col not in df.columns:
+            raise ValueError(f"DataFrame must contain '{col}' column for duplicate removal.")
+
+    authors_str = df["paper_author"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+    authors_str = authors_str.fillna("Unknown Authors")
+    authors_str = authors_str.apply(lambda x: x if x.strip().lower() else "Unknown Authors")
+    title_str = df["paper_title"].astype(str)
+    date_str = df["paper_date"].astype(str)
+
+    return authors_str + " " + title_str + " " + date_str
+
+def drop_exact_duplicates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove exact duplicate literature records.
+
+    Exact duplicates are identified using a constructed
+    `duplicate_check_string`, which combines author names,
+    paper title, and publication year.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing literature records.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with exact duplicates removed.
+
+    Notes
+    -----
+    - This operation is deterministic.
+    - The first occurrence of a duplicate is retained.
+    - The helper column `duplicate_check_string` is removed before return.
+    """
+
+    df = df.copy()
+
+    # Construct duplicate matching key
+    df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+    # Drop exact duplicates
+    df = df.drop_duplicates(subset="duplicate_check_string", keep="first")
+
+    # Clean up helper column
+    df = df.drop(columns=["duplicate_check_string"])
+
+    return df
+
+
+def get_fuzzy_matches(
+    df: pd.DataFrame,
+    similarity_threshold: int,
+) -> List[Tuple[str, str]]:
+    """
+    Identify potential duplicate records using fuzzy string matching.
+
+    Computes pairwise similarity scores across all records using
+    RapidFuzz and returns pairs exceeding the similarity threshold.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing literature records.
+
+    similarity_threshold : int, default=90
+        Minimum similarity score required to flag a pair as a potential duplicate.
+
+    Returns
+    -------
+    List[Tuple[str, str]]
+        List of tuple pairs representing potentially duplicated records.
+
+    Notes
+    -----
+    - Uses RapidFuzz `ratio` scorer (string similarity).
+    - O(N^2) complexity — can become expensive for large corpora.
+    """
+
+    df = df.copy()
+
+    # Generate matching strings
+    df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+    strings = df["duplicate_check_string"].tolist()
+
+    # Compute pairwise similarity matrix
+    similarity_matrix = process.cdist(strings, strings, scorer=fuzz.ratio)
+
+    fuzzy_pairs: List[Tuple[str, str]] = []
+
+    for i, row in enumerate(similarity_matrix):
+        for j, score in enumerate(row):
+            if i < j and score >= similarity_threshold:
+                fuzzy_pairs.append((strings[i], strings[j]))
+
+    print("Pairwise fuzzy similarity computed.")
+
+    return fuzzy_pairs
+
+def get_similar_groups(
+    df: pd.DataFrame,
+    fuzzy_pairs: List[Tuple[str, str]]
+) -> pd.DataFrame:
+    """
+    Group fuzzy duplicate matches into similarity clusters.
+
+    Constructs a graph where nodes are records and edges represent
+    high-similarity matches. Connected components define groups
+    of potentially duplicate records.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing literature records.
+
+    fuzzy_pairs : List[Tuple[str, str]]
+        List of pairwise duplicate matches from `get_fuzzy_matches`.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame mapping each record to a similarity group.
+
+        Columns:
+        - duplicate_check_string
+        - sim_group (int)
+
+    Notes
+    -----
+    - Records without matches are assigned `sim_group = -1`.
+    - Groups represent *candidate duplicates*, not confirmed duplicates.
+    """
+
+    df = df.copy()
+
+    if "duplicate_check_string" not in df.columns:
+        df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+    # Build graph
+    graph = nx.Graph()
+    graph.add_edges_from(fuzzy_pairs)
+
+    # Identify connected components
+    components = list(nx.connected_components(graph))
+
+    grouped_records = []
+    matched_strings = set()
+
+    # Assign group IDs
+    for group_id, component in enumerate(components, start=1):
+        for string in component:
+            grouped_records.append({
+                "duplicate_check_string": string,
+                "sim_group": group_id
+            })
+            matched_strings.add(string)
+
+    # Assign unmatched records
+    for string in df["duplicate_check_string"]:
+        if string not in matched_strings:
+            grouped_records.append({
+                "duplicate_check_string": string,
+                "sim_group": -1
+            })
+
+    groups_df = pd.DataFrame(grouped_records)
+
+    return groups_df
+
+def prepare_fuzzy_review_df(
+    df: pd.DataFrame,
+    similarity_threshold: int = 90
+) -> pd.DataFrame:
+    """
+    Prepare a DataFrame for manual duplicate review.
+
+    This function:
+    1. Generates fuzzy matches
+    2. Groups them into similarity clusters
+    3. Merges results back with original data
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing literature records.
+
+    similarity_threshold : int, default=90
+        Threshold for fuzzy matching.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame suitable for manual inspection.
+
+    Notes
+    -----
+    - Output should be exported (CSV/Excel) for manual review.
+    - Users should delete duplicate rows manually.
+    """
+
+    df = df.copy()
+
+    # Step 1: generate matching strings
+    df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+    # Step 2: fuzzy match pairs
+    fuzzy_pairs = get_fuzzy_matches(df, similarity_threshold)
+
+    # Step 3: group matches
+    groups_df = get_similar_groups(df, fuzzy_pairs)
+
+    # Step 4: merge back for inspection
+    review_df = groups_df.merge(
+        df,
+        how="left",
+        on="duplicate_check_string"
+    )
+
+    return review_df
+
+
+
 
 
 
