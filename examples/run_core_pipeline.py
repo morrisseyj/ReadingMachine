@@ -334,3 +334,11 @@ renderer.integrate_cosmetic_changes()
 renderer.render_output("docx", use_stylized=True)
 renderer.render_output("md", use_stylized=True)
 renderer.render_output("pdf", use_stylized=True)
+
+# Trace a specific claim back to it source text and metadata
+renderer.trace_claim(
+    question_id="question_1",
+    theme_label="Work-Life Balance",
+    citation_lastname= "Kossek",
+    citation_year=2006
+    )
