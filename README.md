@@ -28,17 +28,19 @@ These documents explain how the analytical workflow described below is implement
 
 ## Quick Start
 
-1. Install dependencies
+[See /examples/to_corpus.md for a more detailed account of setup]
 
-    uv sync
+1. Install dependencies (managing with uv is reccomended)
+
+    uv sync 
 
 2. Add your OpenAI API key to `.env`
 
 3. Place documents in `data/corpus`
 
-4. Run the example pipeline
+4. Execute code as laid out in the example pipeline
 
-    uv run python examples/run_pipeline.py
+    examples/run_core_pipeline.py
 
 ---
 
@@ -433,15 +435,15 @@ Thematic synthesis still requires integrating many insights within the context w
 
 **Redundancy trade-off**
 
-Because themes are synthesized independently, the system prioritizes **local completeness** within each theme. Even when previous theme summaries are provided as frozen context, models must balance preserving all relevant information locally with avoiding repetition globally. In practice, this often results in some redundancy across themes in the final synthesis. This is considered acceptable as a tradeoff for lowering omission risk and ensuring marginal claims are persisted in the final output.
-
-The architecture has been designed to accommodate future extensions that address these issues—for example through insight consolidation, staged synthesis, or hierarchical thematic structures—but these remain areas for further development.
-
-In practice, these constraints are expected to appear **later than the scale limits typically encountered by retrieval-based or hierarchical summarization workflows**, because ReadingMachine delays compression and operates on structured insight representations rather than raw document context.
+Because achieving these scale gains requires synthesizing themes independently, the system prioritizes **local completeness** within each theme. Even when previous theme summaries are provided as frozen context, models must balance preserving all relevant information locally with avoiding repetition globally. In practice, models prioritize the local task and this often results in some redundancy across themes in the final synthesis. This is considered acceptable as a tradeoff for lowering omission risk and ensuring marginal claims are persisted in the final output.
 
 **Corpus heterogeneity**
 
 The effects of extreme corpus heterogeneity on clustering stability and theme convergence remain an open empirical question. The current architecture is designed to expose instability (for example, through persistent orphan churn or shifting theme schemas across iterations) rather than conceal it. Future benchmarking will examine how heterogeneity interacts with clustering and synthesis behavior.  
+
+Note, that the architecture has been designed to accommodate future extensions that address some of these scaling issues—for example through insight consolidation, staged synthesis, or hierarchical thematic structures—but these remain areas for further development.
+
+In practice, these constraints are expected to appear **later than the scale limits typically encountered by retrieval-based or hierarchical summarization workflows**, because ReadingMachine delays compression and operates on structured insight representations rather than raw document context.
 
 ---
 
@@ -509,5 +511,8 @@ ReadingMachine has been tested on:
 - Python 3.12
 - scikit-learn 1.3.2
 - umap-learn 0.5.7
+- numpy 1.26.4
+- pandas 2.2.2
+- pynndescent 0.6.0
 
-These versions are pinned to avoid compatibility issues between UMAP, HDBSCAN, and sklearn.
+These versions are pinned to avoid compatibility issues between Pandas, Numpy, UMAP, HDBSCAN, and sklearn.
