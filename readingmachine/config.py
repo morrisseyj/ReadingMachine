@@ -56,6 +56,7 @@ OUTPUT_SAVE_LOCATION = os.path.join(os.getcwd(), "outputs")
 # Location in which the paper chunks are saved after the chunking step of the pipeline completes
 PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
 
+# Location in which the fuzzy duplicate checks are saved after the fuzzy duplicate check step of the pipeline completes
 FUZZY_CHECK_PATH = os.path.join(os.getcwd(), "data", "fuzzy_checks")
 
 ###

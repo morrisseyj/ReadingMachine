@@ -70,6 +70,7 @@ Implemented primarily in `core.py`.
 
 documents
 → full text ingestion
+→ deduplication
 → chunking
 → insight extraction
 → embedding

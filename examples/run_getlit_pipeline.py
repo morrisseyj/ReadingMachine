@@ -158,7 +158,8 @@ grey_literature.get_grey_lit(
 # ==========================================================
 
 literature = getlit.Literature(
-    corpus_state=grey_literature.corpus_state
+    corpus_state=grey_literature.corpus_state, 
+    run = "getlit"
 )
 
 # Remove exact duplicates automatically

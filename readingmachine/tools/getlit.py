@@ -956,169 +956,153 @@ class Literature:
     """
     Manage and deduplicate retrieved literature records.
 
-    This class provides utilities for identifying and resolving
-    duplicate literature records retrieved from multiple sources
-    (e.g., Crossref, OpenAlex, grey literature retrieval).
+    This class identifies and resolves duplicate literature records
+    retrieved from multiple sources (e.g., Crossref, OpenAlex, grey literature).
 
-    The deduplication process occurs in two stages:
+    Deduplication occurs in two stages:
 
         1. Exact duplicate removal
-           Records with identical author–title–year combinations are
-           automatically removed.
+        2. Fuzzy duplicate detection (human-in-the-loop)
 
-        2. Fuzzy duplicate detection
-           Records with highly similar author–title–year strings are
-           flagged as potential duplicates for manual inspection.
-
-    The workflow supports human-in-the-loop validation by exporting
-    candidate duplicates to CSV files for manual review before updating
-    the pipeline state.
+    Deduplication is GLOBAL across all questions to avoid redundant ingestion.
 
     Workflow
     --------
-    1. Split literature records by research question.
-    2. Construct a string used for duplicate detection.
-    3. Remove exact duplicates.
-    4. Detect fuzzy duplicates using pairwise string similarity.
-    5. Export potential duplicates for manual review.
-    6. Import manually reviewed files and update `CorpusState`.
-
-    Notes
-    -----
-    Deduplication occurs per research question to prevent unrelated
-    questions from influencing duplicate detection.
+    1. Remove exact duplicates
+    2. Generate fuzzy match candidates
+    3. Export for manual review
+    4. User deletes duplicates
+    5. Reload cleaned dataset into CorpusState
     """
 
-    def __init__(self, 
-                 corpus_state: "CorpusState", 
-                 run: str,
-                 literature: Optional[pd.DataFrame] = None,
-                 FUZZY_CHECK_PATH: str = config.FUZZY_CHECK_PATH, 
-                ) -> None:
-        """
-        Initialize the Literature deduplication tool.
+    def __init__(
+        self,
+        corpus_state: "CorpusState",
+        literature: Optional[pd.DataFrame] = None,
+        fuzzy_check_path: str = config.FUZZY_CHECK_PATH,
+    ) -> None:
 
-        Parameters
-        ----------
-        corpus_state : CorpusState
-            Pipeline state containing literature records retrieved from
-            academic and grey literature search tools.
+        self.RUN = "getlit"
+        self.fuzzy_check_path = fuzzy_check_path
+        self.save_location = os.path.join(self.fuzzy_check_path, self.RUN)
 
-        literature : Optional[pd.DataFrame]
-            Optional DataFrame containing literature records to be injected
-            into the corpus state.
-
-        Notes
-        -----
-        Input data is validated to ensure the required columns exist before
-        deduplication operations are performed.
-        """
-        
-        
-        if run not in ["getlit", "ingest"]:
-            raise ValueError("run must be either 'getlit' or 'ingest'\n" \
-            "     'getlit' is for deduplicating literature retrieved from the getlit tools (academic and grey lit)\n" \
-            "     'ingest' is for deduplicating literature during the ingestion process")
-        
-        self.save_location = os.path.join(FUZZY_CHECK_PATH, run)
-        os.mkdirs(self.save_location, exist_ok=True)
-
+        os.makedirs(self.save_location, exist_ok=True)
 
         self.corpus_state: "CorpusState" = deepcopy(
             utils.validate_format(
-            corpus_state=corpus_state,
-            injected_value=literature,
-            state_required_cols=[
-                "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date",
-                "doi"
-            ],
-            injected_required_cols=[
-                "question_id", "paper_id", "paper_title", "paper_author",
-                "paper_date", "doi"
-            ]
+                corpus_state=corpus_state,
+                injected_value=literature,
+                state_required_cols=[
+                    "question_id", "question_text", "search_string_id", "search_string",
+                    "paper_id", "paper_title", "paper_author", "paper_date",
+                    "doi"
+                ],
+                injected_required_cols=[
+                    "question_id", "paper_id", "paper_title", "paper_author",
+                    "paper_date", "doi"
+                ]
             )
         )
 
     def drop_duplicates(self) -> pd.DataFrame:
-        # Drop the duplicated - this is effectively a wrapper for the utis drop duplicaes function as a class method
-        self_unique_papers = utils.drop_exact_duplicates(self.corpus_state.insights).copy()
-        # Here we are going to update the state because we don't want to keep duplicate search results in the state. 
-        # Note later, when we check for duplicates during ingestion we will merge with state to id duplicates rather than delete them
-        self.corpus_state.insights = self_unique_papers
-
-    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> None:
-        # Again this is largely a wrapper for the utils function as a class method. 
-        fuzzy_match_df = utils.get_fuzzy_matches(self.corpus_state.insights, similarity_threshold=similarity_threshold)
-        # Save the fuzzzy matches to a csv for manual inspection
-        fuzzy_match_df.to_csv(self.save_location, index=False)
-        print(f"Fuzzy matches exported to {self.save_location}. Check and remove any true duplicates manually. Only save as .csv to ensure update_state() works correctly.\n"
-              "NOTE Deduplication is global so later papers might show fewer papers than earlier ones as you remove duplicates "
-              "- this is expected. All questions will be accounted for on insight generation")
-
-    
-    def update_state(self, path_to_files: Optional[str] = None) -> pd.DataFrame:
         """
-        Update the corpus state using manually reviewed duplicate files.
-
-        This method reads the manually edited CSV or Excel files generated
-        during fuzzy duplicate inspection and updates the pipeline state
-        with the cleaned literature records.
-
-        Parameters
-        ----------
-        path_to_files : Optional[str]
-            Directory containing the manually reviewed literature files.
-            Defaults to the configured fuzzy-check directory.
+        Remove exact duplicates from corpus_state.
 
         Returns
         -------
         pd.DataFrame
-            Updated `CorpusState.insights` DataFrame containing deduplicated
-            literature records.
-
-        Notes
-        -----
-        Temporary columns used during duplicate detection
-        (`duplicate_check_string`, `sim_group`) are removed before the
-        updated state is saved.
+            Deduplicated insights DataFrame.
         """
 
-        path_to_files = self.save_location
-        files_to_import = [
-            os.path.join(path_to_files, f)
-            for f in os.listdir(path_to_files)
-            if f.lower().endswith(".csv") or f.lower().endswith(".xlsx")
+        unique_df = utils.drop_exact_duplicates(self.corpus_state.insights)
+
+        # Update state
+        self.corpus_state.insights = unique_df
+
+        return unique_df
+
+    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> pd.DataFrame:
+        """
+        Generate and export fuzzy duplicate candidates for manual review.
+
+        Parameters
+        ----------
+        similarity_threshold : int
+            Threshold for fuzzy matching.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame exported for manual inspection.
+        """
+
+        review_df = utils.prepare_fuzzy_review_df(
+            self.corpus_state.insights,
+            similarity_threshold=similarity_threshold
+        )
+
+        output_path = os.path.join(self.save_location, "fuzzy_matches.csv")
+        review_df.to_csv(output_path, index=False)
+
+        print(
+            f"Fuzzy matches exported to {output_path}.\n"
+            "Review the file and DELETE duplicate rows.\n"
+            "Save as CSV and run update_state().\n\n"
+            "NOTE: Deduplication is GLOBAL — later questions may show fewer papers.\n"
+            "This is expected and ensures no duplicate ingestion."
+        )
+
+        return review_df
+
+    def update_state(self) -> pd.DataFrame:
+        """
+        Update corpus state using manually reviewed duplicate file.
+
+        Returns
+        -------
+        pd.DataFrame
+            Cleaned insights DataFrame.
+        """
+
+        files = [
+            os.path.join(self.save_location, f)
+            for f in os.listdir(self.save_location)
+            if f.lower().endswith((".csv", ".xlsx"))
         ]
 
-        if len(files_to_import) > 1:
-            raise ValueError(f"Multiple files found in {path_to_files}. There should only be one file handling deduplication globally.")
-      
-        file_to_import = files_to_import[0]
-        
-        if file_to_import.endswith(".csv"):
-            dedup_insights = pd.read_csv(file_to_import)
+        if len(files) != 1:
+            raise ValueError(
+                f"Expected exactly one file in {self.save_location}, found {len(files)}."
+            )
+
+        file_path = files[0]
+
+        if file_path.endswith(".csv"):
+            df = pd.read_csv(file_path)
         else:
-            dedup_insights = pd.read_excel(file_to_import)
-        
-        # Clean up empty authors or "no author found" entries.
-        if "paper_author" in dedup_insights.columns:
-            dedup_insights["paper_author"].replace(
-                to_replace=["", "No author found", "NA", "null", pd.NA, np.nan],
-                value=None,
+            df = pd.read_excel(file_path)
+
+        # Clean author field
+        if "paper_author" in df.columns:
+            df["paper_author"].replace(
+                ["", "No author found", "NA", "null", pd.NA, np.nan],
+                None,
                 inplace=True
-                )
-        
-        self.corpus_state.insights = dedup_insights
+            )
 
-        if "duplicate_check_string" in self.corpus_state.insights.columns:
-            self.corpus_state.insights.drop(columns="duplicate_check_string", inplace=True)
+        # Remove helper columns
+        df = df.drop(
+            columns=["duplicate_check_string", "sim_group"],
+            errors="ignore"
+        )
 
-        if "sim_group" in self.corpus_state.insights.columns:
-            self.corpus_state.insights.drop(columns="sim_group", inplace=True)
+        self.corpus_state.insights = df
 
-        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "04_literature_deduped"))
-        return self.corpus_state.insights
+        self.corpus_state.save(
+            os.path.join(config.STATE_SAVE_LOCATION, "04_literature_deduped")
+        )
+
+        return df
 
 class AiLiteratureCheck:
     """

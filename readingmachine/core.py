@@ -184,7 +184,7 @@ import math
 
 class Ingestor:
     """
-    Document ingestion and metadata extraction stage of the ReadingMachine pipeline.
+    Document ingestion, metadata extraction, and deduplication stage of the ReadingMachine pipeline.
 
     The `Ingestor` class reads source documents from a filesystem directory
     and converts them into the structured corpus representation used by the
@@ -200,8 +200,8 @@ class Ingestor:
     HTML files are cleaned using structural parsing and then optionally
     processed by an LLM to extract the main textual content of the page.
 
-    After ingestion, the class optionally performs **metadata extraction**
-    using an LLM. This step populates the following fields for each paper:
+    After ingestion, the class performs **metadata extraction** using an LLM.
+    This step populates the following fields for each paper:
 
     - paper_title
     - paper_author
@@ -211,12 +211,37 @@ class Ingestor:
     validated for type consistency before being written back into
     `corpus_state.insights`.
 
+    Deduplication
+    -------------
+    Following metadata extraction, the ingestion stage performs a **global
+    deduplication pass** over the corpus.
+
+    Deduplication occurs in two steps:
+
+        1. Exact duplicate removal
+           Records with identical author–title–year combinations are removed.
+
+        2. Fuzzy duplicate detection (human-in-the-loop)
+           Records with highly similar metadata are exported for manual review.
+           The user removes duplicates and confirms a final deduplicated set.
+
+    After user confirmation, the corpus is filtered so that only unique
+    `paper_id` values are retained across:
+
+        - `corpus_state.full_text`
+        - `corpus_state.insights`
+
+    Importantly, this process does **not modify the user's filesystem**.
+    Duplicate files may remain on disk, but they are excluded from all
+    downstream processing.
+
     Pipeline role
     -------------
-    The ingestion stage produces two key artifacts:
+    The ingestion stage produces three key artifacts:
 
         corpus_state.full_text
-        corpus_state.insights (cleaned and metadata-complete)
+        corpus_state.insights (metadata-complete and deduplicated)
+        corpus_state.questions (canonicalized)
 
     These artifacts are later used by downstream stages such as:
 
@@ -224,6 +249,12 @@ class Ingestor:
     - insight extraction
     - clustering
     - thematic synthesis
+
+    Deduplication ensures that:
+
+    - duplicate documents are not reprocessed
+    - token usage and runtime are minimized
+    - insights are not artificially duplicated during synthesis
 
     Design principles
     -----------------
@@ -233,6 +264,9 @@ class Ingestor:
     present in the insights table. Duplicate filenames or mismatches between
     the corpus metadata and filesystem contents will trigger warnings or
     user confirmation prompts.
+
+    Deduplication is performed **after metadata extraction** because metadata
+    provides the canonical basis for identifying duplicate documents.
 
     Attributes
     ----------
@@ -255,6 +289,10 @@ class Ingestor:
     pickle_path : str
         Directory used to persist intermediate metadata extraction results
         for resume support.
+
+    fuzzy_check_path : str
+        Directory used to store fuzzy duplicate review files for
+        manual deduplication.
     """
 
     def __init__(
@@ -265,10 +303,14 @@ class Ingestor:
         questions: Optional[List[str]] = None,
         papers: Optional[pd.DataFrame] = None,
         file_path: str = os.path.join(os.getcwd(), config.CORPUS_LOCATION),
-        pickle_path: str = config.PICKLE_SAVE_LOCATION # For storing the pickles of LLM metadata retreival for resume
+        pickle_path: str = config.PICKLE_SAVE_LOCATION, # For storing the pickles of LLM metadata retreival for resume
+        fuzzy_check_path: str = config.FUZZY_CHECK_PATH
     ) -> None:
         """Initialize Ingestor and validate corpus_state/papers format."""
-               
+
+        self.RUN = "ingest"
+        self.fuzzy_check_path = fuzzy_check_path
+    
         self.corpus_state = deepcopy(
             utils.validate_format(
                 corpus_state=corpus_state,
@@ -289,7 +331,6 @@ class Ingestor:
         self.ai_model: str = ai_model
         self.ingestion_errors: List[str] = []
         self.pickle_path: str = pickle_path
-
 
     @staticmethod
     def _pprint_dict(d: dict):
@@ -947,6 +988,122 @@ class Ingestor:
         self.corpus_state.insights = updated_insights
 
         return self.corpus_state.insights
+    
+    def drop_duplicates(self) -> pd.DataFrame:
+        """
+        Remove exact duplicates from insights using metadata.
+
+        Returns
+        -------
+        pd.DataFrame
+            Deduplicated DataFrame.
+        """
+
+        dropped_exact = utils.drop_exact_duplicates(self.corpus_state.insights)
+
+        # Store for fuzzy pass
+        self.dropped_exact_dupes = dropped_exact.copy()
+
+        return self.dropped_exact_dupes
+
+    def drop_fuzzy_duplicates(self, similarity_threshold: int = 90) -> pd.DataFrame:
+        """
+        Generate fuzzy duplicate candidates for manual review.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame exported for manual inspection.
+        """
+
+        if not hasattr(self, "dropped_exact_dupes"):
+            raise ValueError("Run drop_duplicates() before drop_fuzzy_duplicates().")
+
+        review_df = utils.prepare_fuzzy_review_df(
+            self.dropped_exact_dupes,
+            similarity_threshold=similarity_threshold
+        )
+
+        # Create run-specific folder
+        save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
+        os.makedirs(save_dir, exist_ok=True)
+
+        output_path = os.path.join(save_dir, "fuzzy_matches.csv")
+        review_df.to_csv(output_path, index=False)
+
+        print(
+            f"Fuzzy duplicate review file saved to {output_path}.\n"
+            "Delete duplicate rows and keep one per paper.\n"
+            "Then run update_state()."
+        )
+
+        return review_df
+
+    def update_state(self) -> pd.DataFrame:
+        """
+        Apply manual dedup results to corpus_state.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated insights DataFrame.
+        """
+
+        save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
+
+        files = [
+            os.path.join(save_dir, f)
+            for f in os.listdir(save_dir)
+            if f.lower().endswith((".csv", ".xlsx"))
+        ]
+
+        if len(files) != 1:
+            raise ValueError(
+                f"Expected one reviewed file in {save_dir}, found: {files}"
+            )
+
+        file_path = files[0]
+
+        if file_path.endswith(".csv"):
+            dedup_df = pd.read_csv(file_path)
+        else:
+            dedup_df = pd.read_excel(file_path)
+
+        # Clean author column
+        if "paper_author" in dedup_df.columns:
+            dedup_df["paper_author"].replace(
+                ["", "No author found", "NA", "null", pd.NA, np.nan],
+                None,
+                inplace=True
+            )
+
+        # Remove helper columns
+        dedup_df = dedup_df.drop(
+            columns=["duplicate_check_string", "sim_group"],
+            errors="ignore"
+        )
+
+        valid_ids = dedup_df["paper_id"].unique()
+        # Sanity check
+        if len(valid_ids) == 0:
+            raise ValueError("No valid paper_ids found in the reviewed file. Please ensure you have kept at least one record per paper and that the paper_id column is intact.")
+
+        # Filter full_text
+        self.corpus_state.full_text = (
+            self.corpus_state.full_text[
+                self.corpus_state.full_text["paper_id"].isin(valid_ids)
+            ].copy()
+        )
+
+        # Filter insights
+        self.corpus_state.insights = (
+            self.corpus_state.insights[
+                self.corpus_state.insights["paper_id"].isin(valid_ids)
+            ].copy()
+        )
+
+        return self.corpus_state.insights
+        
 
     def chunk_papers(
         self,

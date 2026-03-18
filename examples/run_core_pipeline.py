@@ -145,6 +145,16 @@ ingestor.ingest_papers()
 # Metadata is treated as a first-class object in the pipeline
 ingestor.update_metadata()
 
+# Remove exact duplicates based on title, author and year
+ingestor.drop_duplicates()
+
+# Identify fuzzy duplicates based on text similarity
+# This is a semi-manual process - the system identifies potential duplicates and you review them to confirm which ones to drop.
+ingestor.drop_fuzzy_duplicates()
+
+# Update the state with the deduplicated file you confirmed in the previous step.
+ingestor.update_state()
+
 # Break each document into bounded segments (~paragraph scale)
 # This ensures the LLM reads manageable text windows
 ingestor.chunk_papers()

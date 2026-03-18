@@ -486,7 +486,7 @@ def drop_exact_duplicates(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_fuzzy_matches(
     df: pd.DataFrame,
-    similarity_threshold: int,
+    similarity_threshold: int = 90,
 ) -> List[Tuple[str, str]]:
     """
     Identify potential duplicate records using fuzzy string matching.
@@ -575,29 +575,19 @@ def get_similar_groups(
 
     # Build graph
     graph = nx.Graph()
+    graph.add_nodes_from(df["duplicate_check_string"])
     graph.add_edges_from(fuzzy_pairs)
 
     # Identify connected components
     components = list(nx.connected_components(graph))
 
     grouped_records = []
-    matched_strings = set()
-
-    # Assign group IDs
+    
     for group_id, component in enumerate(components, start=1):
         for string in component:
             grouped_records.append({
                 "duplicate_check_string": string,
-                "sim_group": group_id
-            })
-            matched_strings.add(string)
-
-    # Assign unmatched records
-    for string in df["duplicate_check_string"]:
-        if string not in matched_strings:
-            grouped_records.append({
-                "duplicate_check_string": string,
-                "sim_group": -1
+                "sim_group": group_id if len(component) > 1 else -1
             })
 
     groups_df = pd.DataFrame(grouped_records)
@@ -652,6 +642,9 @@ def prepare_fuzzy_review_df(
         how="left",
         on="duplicate_check_string"
     )
+
+    # Sort to make manual review easier
+    review_df = review_df.sort_values(by=["sim_group"]).reset_index(drop=True)
 
     return review_df
 
