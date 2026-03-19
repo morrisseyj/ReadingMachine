@@ -100,10 +100,7 @@ import random
 import requests
 import pickle
 import numpy as np
-from rapidfuzz import process, fuzz
-import networkx as nx
 import re
-from kneed import KneeLocator
 
 
 
@@ -1486,8 +1483,10 @@ class DownloadManager:
             f"Architecture for downloading papers has been created at {self.DOWNLOAD_LOCATION}.\n"
            f"You should manually download files and update their status in the file at {os.path.join(self.DOWNLOAD_LOCATION, 'insights.csv')}. "
             "Assuming you do not change the files location the easiest way to do this is to call DownloadManager.update()\n"
-            f"Note when saving these files you MUST SAVE THEM IN THE FOLDER CORRESPONDING TO THIER QUESTION ID. You should also ensure the filenames match the paper_id in the form paper_id.[relevant extension]. " 
-            "Matching filenames with paper_ids is not neccesary but will allow you to track papers back to search prompts. You can add papers to these folders that are not in your "
+            f"Note should you want to link papers to the search terms that generated them:\n"
+            "1. You must save them in the folder corresponding to their question ID.\n" 
+            "2. You must ensure the filenames match the paper_id in the form paper_id.[relevant extension].\n\n"
+            "Allocating to folders and matching filenames is not necessary. All documents in data/corpus/ will be processed (after additional deduplication)."
             )
 
     def _create_download_folder(self) -> None:
@@ -1530,7 +1529,7 @@ class DownloadManager:
         sanitized = re.sub(r'[\\/:*?"<>|]', "_", filename)
         return sanitized.strip()
     
-    def update(self):
+    def update_state(self, filename: str) -> pd.DataFrame:
         """
         Reload updated download metadata into the corpus state.
 
@@ -1548,8 +1547,11 @@ class DownloadManager:
         This method is typically used after the user has manually
         downloaded documents and updated the exported metadata files.
         """
+
+        filepath = os.path.join(self.DOWNLOAD_LOCATION, filename)
+
         # This convenience function just calls the from csv method of the questionstate
-        self.corpus_state = self.corpus_state.from_csv(filepath=os.path.join(self.DOWNLOAD_LOCATION, "06_download_manager"))
+        self.corpus_state = self.corpus_state.update_insights(filepath = filepath)
         # And updates the corpus_state object on file by saving
-        self.corpus_state.save(config.STATE_SAVE_LOCATION)
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_download_manager"))
         return(self.corpus_state.insights)

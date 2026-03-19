@@ -158,12 +158,11 @@ grey_literature.get_grey_lit(
 # ==========================================================
 
 literature = getlit.Literature(
-    corpus_state=grey_literature.corpus_state, 
-    run = "getlit"
+    corpus_state=grey_literature.corpus_state
 )
 
 # Remove exact duplicates automatically
-literature.drop_exact_duplicates()
+literature.drop_duplicates()
 
 # Export fuzzy matches for manual review
 literature.get_fuzzy_matches()
@@ -231,7 +230,7 @@ downloads = getlit.DownloadManager(
 #
 # Once the files have been downloaded, update the state using:
 
-downloads.update()
+downloads.update_state("insights.csv")
 
 
 # ----------------------------------------------------------

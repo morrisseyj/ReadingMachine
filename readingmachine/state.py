@@ -350,18 +350,6 @@ class CorpusState:
                     continue
 
                 idx = table.column_names.index(col)
-                
-                # # ---- list of strings ----
-                # if col == "paper_author":
-                #     # First make sure NA values empty lists or lists that have [NA] are all converted to None
-                #     df_to_save[col] = df_to_save[col].apply(lambda x: x if isinstance(x, list) and len(x) > 0 and not pd.isna(x[0]) else None)
-                #     # each cell is a list[str]; Arrow handles NULLs automatically
-                #     arr = pa.array(df_to_save[col].tolist(), type=pa.list_(pa.string()))
-                #     table = table.set_column(idx, col, arr)
-
-                # ---- embeddings ----
-                #else:
-                # First make sure NA values or empty lists are all converted to None
                 df_to_save[col] = df_to_save[col].apply(lambda x: x if isinstance(x, list) and len(x) > 0 and not pd.isna(x[0]) else None)
                 arr = pa.array(
                     [None if x is None else np.asarray(x, np.float32)
@@ -423,156 +411,140 @@ class CorpusState:
         if write_chunks:
             self.chunks.to_csv(os.path.join(save_location, "chunks.csv"), index=False)
 
-    # ---------------------------------------------------------------------- #
-    #                             LOAD METHODS                              #
-    # ---------------------------------------------------------------------- #
-    
-    # @classmethod
-    # def from_json(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), join_str="-||-|||-||-") -> "CorpusState":
-    #     if not os.path.exists(filepath):
-    #         raise FileNotFoundError(f"No folder found at {filepath}")
-
-    #     files = os.listdir(filepath)
-    #     files = [file for file in files if Path(file).suffix.lower() == ".json"]
-    #     if "insights.json" not in files:
-    #         raise FileNotFoundError(f"'insights.json' file not found in {filepath}, cannot load CorpusState.")
-    #     state_df_dict = {}
-    #     for file in files:
-    #         full_path = os.path.join(filepath, file)
-    #         df = pd.read_json(full_path, orient="records", lines=True)
-    #         df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
-
-    #         for col in ["paper_author", "insight", "chunks", "pages"]:
-    #             if col in df.columns:
-    #                 df[col] = df[col].apply(
-    #                     lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
-    #                 )
-
-    #         state_df_dict[Path(file).stem] = df
-
-    #     question_state = cls(
-    #         questions=state_df_dict.get("questions"),
-    #         insights=state_df_dict["insights"],
-    #         full_text=state_df_dict.get("full_text", None),
-    #         chunks=state_df_dict.get("chunks", None)
-    #     )
-
-    #     return question_state
-
-    # @classmethod
-    # def from_parquet(cls, filepath: str = os.path.join(os.getcwd(), "data", "parquet", "state"), new = True, join_str="-||-|||-||-") -> "CorpusState":
-    #     if not os.path.exists(filepath):
-    #         raise FileNotFoundError(f"No folder found at {filepath}")
-         
-    #     files = [file for file in os.listdir(filepath) if Path(file).suffix.lower() == ".parquet"]
-    #     state_df_dict = {}
-    #     if new:
-    #         if "insights.parquet" not in files:
-    #             raise FileNotFoundError(f"'insights.parquet' file not found in {filepath}, cannot load CorpusState.")
-
-    #         for file in files:
-    #             full_path = os.path.join(filepath, file)
-    #             df = pd.read_parquet(full_path)
-    #             df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
-    #             state_df_dict[Path(file).stem] = df
-    #             for col in ["paper_author", "insight", "chunks", "pages"]:
-    #                 if col in df.columns:
-    #                     df[col] = df[col].apply(
-    #                         lambda x: x.split(join_str) if pd.notna(x) and x != "" else []
-    #                     )
-
-    #         corpus_state = cls(
-    #             questions=state_df_dict.get("questions"),
-    #             insights=state_df_dict["insights"],
-    #             full_text=state_df_dict.get("full_text", None),
-    #             chunks=state_df_dict.get("chunks", None)
-    #         )
-
-    #         return corpus_state
-       
-    #     else:
-    #         files = os.listdir(filepath)
-    #         state_df_dict = {}
-    #         for file in files:
-    #             full_path = os.path.join(filepath, file)
-    #             df = pd.read_parquet(full_path)
-    #             df = df.loc[:, ~df.columns.str.contains("^Unnamed")] #Remove unnamed cols
-    #             state_df_dict[Path(file).stem] = df
-
-    #         corpus_state = cls(
-    #             questions=state_df_dict.get("questions"),
-    #             insights=state_df_dict.get("insights", None),
-    #             full_text=state_df_dict.get("full_text", None),
-    #             chunks=state_df_dict.get("chunks", None)
-    #         )
-            
-    #         # Normalize the columns - first get arrays to lists then get 
-    #         corpus_state.arrays_to_lists(["paper_author", "insight", "chunks", "pages"])
-    #         corpus_state.normalize_list_columns(["paper_author", "insight", "chunks", "pages"])
-    #         return corpus_state
-    
-    @classmethod
+    @classmethod 
     def load(cls, filepath: str) -> "CorpusState":
         """
-        Load a CorpusState object from a folder of Parquet files.
-        Expects one Parquet per DataFrame attribute.
+        Load a CorpusState from a directory of Parquet files.
+
+        This method reconstructs a `CorpusState` by reading a directory
+        containing one Parquet file per table. Each file is expected to be
+        named after the corresponding attribute:
+
+        - questions.parquet
+        - insights.parquet
+        - full_text.parquet (optional)
+        - chunks.parquet (optional)
+
+        The method iterates over all `.parquet` files in the directory,
+        converts them to pandas DataFrames, removes any extraneous
+        "Unnamed" columns, and maps them to their respective attributes
+        based on filename.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the directory containing Parquet files.
+
+        Returns
+        -------
+        CorpusState
+            A reconstructed `CorpusState` instance populated with the
+            available tables. Missing optional tables (`full_text`,
+            `chunks`) will be set to empty DataFrames via the class
+            initializer.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified directory does not exist.
+
+        FileNotFoundError
+            If no Parquet files are found in the directory.
+
+        ValueError
+            If required tables (`questions`, `insights`) are missing
+            required columns, as enforced by the class initializer.
+
+        Notes
+        -----
+        This method assumes that the directory was created using the
+        `CorpusState.save()` method and follows the same naming conventions.
+
+        The presence of additional Parquet files in the directory will be
+        ignored unless their filenames match expected attribute names.
+
+        Any `_done` marker file is ignored during loading.
         """
 
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No folder found at {filepath}")
-
+        
         state_df_dict = {}
 
-        for file in os.listdir(filepath):
-            if not file.endswith(".parquet"):
-                continue  # skip _done or other files
+        parquet_files = [f for f in os.listdir(filepath) if f.endswith(".parquet")]
 
+        if len(parquet_files) == 0:
+            raise FileNotFoundError(f"No Parquet files found in {filepath}. Ensure the directory contains the expected Parquet files for questions, insights, full_text, and chunks.")
+        
+        print(f"Loading from Parquet files in {filepath}...")
+        for file in parquet_files:
             full_path = os.path.join(filepath, file)
             table = pq.read_table(full_path)
-
-            # --- FIX 1: remove stray arg ---
-            # to_pandas() takes no filepath argument
             df = table.to_pandas()
-
-            # --- optional cleanup ---
             df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-
             state_df_dict[Path(file).stem] = df
 
-        # --- FIX 2: handle missing keys safely ---
-        return cls(
-            questions=state_df_dict.get("questions"),
-            insights=state_df_dict.get("insights"),
-            full_text=state_df_dict.get("full_text"),
-            chunks=state_df_dict.get("chunks"),
-        )
-
-    @classmethod
-    def from_csv(cls, filepath: str, encoding="utf-8") -> "CorpusState":
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"No folder found at {filepath}")
-
-        df_dict = {}
-        for file in os.listdir(filepath):
-            # Check the file is a csv, otherwise skip it
-            if Path(file).suffix.lower() != ".csv":
-                continue
-
-            full_path = os.path.join(filepath, file)
-            df = pd.read_csv(full_path, encoding=encoding)
-            df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-
-            df_dict[Path(file).stem] = df
-
         corpus_state = cls(
-            questions=df_dict.get("questions"),
-            insights=df_dict.get("insights", None),
-            full_text=df_dict.get("full_text", None),
-            chunks=df_dict.get("chunks", None)
+            questions=state_df_dict.get("questions"),
+            insights=state_df_dict.get("insights", None),
+            full_text=state_df_dict.get("full_text", None),
+            chunks=state_df_dict.get("chunks", None)
         )
+
+        return(corpus_state)
+
+    def update_insights(self,
+                        filepath: str,
+                        encoding: str = "utf-8"
+                        ) -> "CorpusState":
+        """
+        Load only the insights table from a specified path.
+
+        This method is a convenience function for cases where only the
+        insights table needs to be restored, such as after manual review
+        of fuzzy matches. It assumes that the insights are stored in a
+        file named "insights.xlsx" or "insights.csv" within the given
+        directory.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the insights file with extension (.xlsx or .csv).
+
+        encoding : str
+            Encoding to use when reading CSV files. Ignored for Excel files.
+
+        Returns
+        -------
+        CorpusState
+            A CorpusState object with updated insights and values for other tables inherited from the current state.
+        """
+
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"No file found at {filepath}. Ensure the insights file is correctly named and located in the specified directory.")
         
-        # Normalize the columns - first get arrays to lists then get viable lists
-        return corpus_state
+        if filepath.endswith(".csv"):
+            print(f"Loading insights from CSV file at {filepath}...")
+            insights_df = pd.read_csv(filepath, encoding=encoding)
+            insights_df = insights_df.loc[:, ~insights_df.columns.str.contains("^Unnamed")]
+        else:
+            print(f"Loading insights from Excel file at {filepath}...")
+            insights_df = pd.read_excel(filepath)
+            insights_df = insights_df.loc[:, ~insights_df.columns.str.contains("^Unnamed")]
+
+        questions_df = self.questions.copy()
+        full_text_df = self.full_text.copy()
+        chunks_df = self.chunks.copy()
+
+        updated_corpus_state = type(self)(
+            questions = questions_df,
+            insights = insights_df,
+            full_text = full_text_df,
+            chunks = chunks_df
+        )
+
+        return updated_corpus_state
+
 
     def fingerprint(self) -> str:
         """
@@ -868,35 +840,6 @@ class SummaryState:
                         f"This may cause ordering or join errors downstream.\n"
                         f"Correct dtype drift before proceeding.\n"
                 )
-
-    # def _delete_summary_outputs(self, file_prefixes: List[str]) -> None:
-    #     """
-    #     Delete persisted summary artifacts matching specific prefixes.
-
-    #     This utility removes Parquet files associated with selected
-    #     synthesis stages. It is primarily used when rewinding or
-    #     restarting the summarization pipeline.
-
-    #     Parameters
-    #     ----------
-    #     file_prefixes : List[str]
-    #         Filename prefixes identifying artifact groups to remove.
-    #     """
-    #     if not self.summary_save_location:
-    #         return
-
-    #     base_dir = Path(self.summary_save_location)
-        
-    #     # Ensure we don't try to glob an empty path or a non-existent directory
-    #     if not base_dir.is_dir():
-    #         return
-
-    #     for prefix in file_prefixes:
-    #         # glob finds every file starting with prefix and ending in .parquet
-    #         for file_path in base_dir.glob(f"{prefix}*.parquet"):
-    #             # missing_ok=True prevents crashes if another process 
-    #             # deletes the file between globbing and unlinking
-    #             file_path.unlink(missing_ok=True)
 
     
     def save(self) -> None:
