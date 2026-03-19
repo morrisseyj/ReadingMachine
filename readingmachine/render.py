@@ -1382,7 +1382,7 @@ class Render:
         doc.build(elements)
 
     def trace_claim(self, 
-                    question_id: str, 
+                    question_text: str, 
                     theme_label:str, 
                     citation_lastname: list, 
                     citation_year: int):
@@ -1403,8 +1403,8 @@ class Render:
 
         Parameters
         ----------
-        question_id : str
-            Identifier of the research question containing the claim.
+        question_text : str
+            Text of the research question containing the claim.
 
         theme_label : str
             Theme label under which the claim appears in the rendered output.
@@ -1442,6 +1442,7 @@ class Render:
         """
         
         # Get the theme_id for the question and theme label
+        question_id = self.final_render_df[self.final_render_df["question_text"] == question_text]["question_id"].iloc[0]
         theme_id = self.final_render_df[
             (self.final_render_df["question_id"] == question_id) & (self.final_render_df["theme_label"] == theme_label)
         ]["theme_id"].iloc[0]
@@ -1460,7 +1461,7 @@ class Render:
         possible_insights_df = (
             possible_insights_df[
             possible_insights_df["paper_author"].str.contains(
-                pattern = regex_pattern, case=False, na=False, regex=True
+                pat = regex_pattern, case=False, na=False, regex=True
                 ) 
                 & (possible_insights_df["paper_date"] == citation_year)
             ].merge(
@@ -1472,279 +1473,4 @@ class Render:
         # Return the relevant columns for the user to parse. Allows them to confirm they have the correct citation.
         possible_insights_df = possible_insights_df[["insight_id", "insight", "chunk_id", "chunk_text", "paper_title", "paper_author", "paper_date"]]
         return(possible_insights_df)
-        
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    # def summary_to_doc(self, paper_title: str = None, summary_filename: str = None) -> str:
-        
-    #     def _sanitize(text: str) -> str:
-    #         control_chars = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
-    #         if text is None:
-    #             return ""
-    #         # ensure str
-    #         s = str(text)
-    #         # normalize unicode
-    #         s = unicodedata.normalize("NFC", s)
-    #         # drop XML-illegal control chars (keep \t, \n, \r)
-    #         s = control_chars.sub('', s)
-    #         return s
-        
-    #     if summary_filename is None:
-    #         summary_filename = "literature_review.docx"
-
-    #     if paper_title is None and hasattr(self, "title"):
-    #         paper_title = self.title
-    #     elif paper_title is None:
-    #         raise ValueError("Paper_title must be provided. Either pass it in summary_to_doc or call get_executive_summary() which will provide a title.")
-
-    #     doc = Document()
-    #     doc.add_heading(_sanitize(paper_title), level=0)
-
-    #     # Executive summary
-    #     if getattr(self, "exec_summary", None):
-    #         doc.add_heading("Executive summary", level=1)
-    #         for para in str(self.exec_summary).splitlines():
-    #             p = _sanitize(para)
-    #             if p.strip():
-    #                 doc.add_paragraph(p)
-    #         doc.add_page_break()
-    #     else: 
-    #         raise ValueError("exec_summary attribute not found. Please run gen_executive_summary() before exporting to doc.")
-
-    #     df = self.summaries.copy().reset_index(drop=False).rename(columns={"index": "_row"})
-    #     themed = {"label", "contents"}.issubset(df.columns)
-
-    #     if themed:
-    #         for question_text, qdf in df.groupby("question_text", sort=False):
-    #             doc.add_heading(_sanitize(question_text), level=1)
-    #             if "question_summary" in qdf.columns:
-    #                 qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
-    #                     if not qdf["question_summary"].dropna().empty else "")
-    #                 if qs.strip():
-    #                     doc.add_paragraph(_sanitize(qs))
-    #             qdf = qdf.sort_values("_row")
-    #             for _, r in qdf.iterrows():
-    #                 label = _sanitize(r.get("label", ""))
-    #                 contents = _sanitize(r.get("contents", ""))
-    #                 if label:
-    #                     doc.add_heading(f"Theme: {label}", level=2)
-    #                 if contents:
-    #                     for para in contents.splitlines():
-    #                         p = _sanitize(para)
-    #                         if p.strip():
-    #                             doc.add_paragraph(p)
-    #             doc.add_page_break()
-    #     else:
-    #         for question_text, qdf in df.groupby("question_text", sort=False):
-    #             doc.add_heading(_sanitize(question_text), level=1)
-    #             if "question_summary" in qdf.columns:
-    #                 qs = (qdf["question_summary"].dropna().astype(str).iloc[0]
-    #                     if not qdf["question_summary"].dropna().empty else "")
-    #                 if qs.strip():
-    #                     doc.add_paragraph(_sanitize(qs))
-    #             qdf = qdf.sort_values("_row")
-    #             for _, r in qdf.iterrows():
-    #                 summ = _sanitize(r.get("summary", ""))
-    #                 if summ:
-    #                     for para in summ.splitlines():
-    #                         p = _sanitize(para)
-    #                         if p.strip():
-    #                             doc.add_paragraph(p)
-    #             doc.add_page_break()
-
-        
-    #     # Save
-    #     save_dir = self.output_save_location
-    #     os.makedirs(save_dir, exist_ok=True)
-        
-    #     out_path = os.path.join(save_dir, summary_filename)
-    #     doc.save(out_path)
-        
-    #     # Mark that doc has been generated - as flag for running the AI peer review (neccesary as all the steps for running the dog generation are needed for peer reviewn).
-    #     self.doc = True
-
-    #     return (
-    #         f'Word doc of the literature review generated and save here: {out_path}'
-    #     )
-    
-    # def get_ai_peer_review(self, 
-    #                        save_directory: str = None,
-    #                        save_filename: str = "ai_peer_review.parquet",
-    #                        output_length: int = 5000, 
-    #                        max_tokens: int = 10000) -> pd.DataFrame:
-    #     """
-    #     Request an AI peer review of the concatenated summaries.
-
-    #     Args:
-    #         output_length: Suggested maximum word count for the review.
-    #         max_tokens: Hard limit on token usage for the AI model.
-
-    #     Returns:
-    #         AI review as a dataframe. If the review exceeds token budget, 'error' key may appear.
-    #     """        
-    #     # Function specific utilities ---------------------
-    #     # Get the RQ and summaries excluding the current RQ
-    #     def get_rq_summaries(self, current_rq_id) -> str:
-    #         output_parts = []
-    #         for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
-    #             if rq_id == current_rq_id:
-    #                 continue
-    #             else:
-    #                 output_parts.append(f"RESEARCH QUESTION:\n{rq_id}\n")
-    #                 question_summary = rq_df["question_summary"].iloc[0]
-    #                 output_parts.append(f"SUMMARY:\n{question_summary}\n")
-    #         return "\n".join(output_parts)
-        
-    #     # Get the RQ and its associated content
-    #     def get_rq_content(self, current_rq_id) -> str:
-    #         current_rq_df = self.summaries[self.summaries["question_id"] == current_rq_id]
-    #         current_rq_text = current_rq_df["question_text"].iloc[0]
-    #         output_parts = []
-    #         output_parts.append(f"RESEARCH QUESTION:\n{current_rq_text}\n")
-    #         themed = {"label", "contents"}.issubset(self.summaries.columns)
-    #         if themed:
-    #             for _, row in current_rq_df.iterrows():
-    #                 label = row["label"].strip()
-    #                 content = row["contents"].strip()
-    #                 output_parts.append(
-    #                     f"Theme: {label}\n"
-    #                     f"Summary: {content}\n"
-    #                 )
-
-    #             return "\n".join(output_parts)
-            
-    #         else:
-    #             for _, row in current_rq_df.iterrows():
-    #                 summary = row["summary"].strip()
-    #                 output_parts.append(f"Summary: {summary}\n")
-    #             return "\n".join(output_parts)
-        
-    #     # END UTILS -------------------------------
-
-    #     # Check that executive summary has been generated
-    #     if getattr(self, "exec_summary", None) is None:
-    #         raise ValueError("Please run gen_executive_summary() before requesting an AI peer review.")
-        
-    #     # Check that the peer review has not already been generated
-    #     if save_directory is None:
-    #         save_directory = self.summaries_folder
-
-    #     if os.path.exists(os.path.join(save_directory, save_filename)):
-    #         recover = None
-    #         while recover not in ["r", "n"]:
-    #             recover = input("AI peer review file already exists. Loading existing file. (r)eload or create (n)ew? ")
-    #         if recover == "r":
-    #             self.ai_peer_review = pd.read_parquet(os.path.join(save_directory, save_filename))
-    #             return self.ai_peer_review
-    #         else:
-    #             print("Generating new AI peer review and overwriting existing file.")
-
-    #     # Populate the list that will form the prompt for the LLM
-    #     output_list = []
-    #     for rq_id, rq_df in self.summaries.groupby("question_id", sort=False):
-    #         output_parts = []
-    #         output_parts.append("INFORMATION FOR CONTEXT\n")
-    #         output_parts.append("EXECUTIVE SUMMARY:\n")
-    #         output_parts.append(self.exec_summary + "\n")
-    #         output_parts.append("OTHER RESEARCH QUESTIONS AND SUMMARIES:\n")
-    #         output_parts.append(get_rq_summaries(self, current_rq_id=rq_id))
-    #         output_parts.append("CURRENT RESEARCH QUESTION AND CONTENT:\n")
-    #         output_parts.append(get_rq_content(self, current_rq_id=rq_id))
-
-    #         output_string = "\n".join(output_parts)
-            
-    #         # Call the reasoning model
-    #         resp = utils.call_reasoning_model(
-    #             prompt=Prompts().ai_peer_review(
-    #                 lit_review=output_string,
-    #                 output_length=output_length,
-    #                 max_tokens=max_tokens,
-    #                 themed={"label", "contents"}.issubset(self.summaries.columns)
-    #             ),
-    #             llm_client=self.llm_client,
-    #             ai_model=self.ai_model,
-    #             timeout=1200
-    #         )
-
-    #         # Handle the response with a retry to clean the JSON via an LLM
-    #         try:
-    #             response_dict = json.loads(resp)
-    #         except json.JSONDecodeError:
-    #             response_retry = utils.llm_json_clean(x = resp,
-    #                                             prompt = Prompts().peer_review_format_check(),
-    #                                             llm_client=self.llm_client,
-    #                                             ai_model=self.ai_model)
-    #             response_dict = json.loads(response_retry)
-
-    #         overall_comment_df = pd.DataFrame({"comment_id": "overall", 
-    #                                            "comment": response_dict.get("overall_comment"),
-    #                                            "severity": pd.NA, 
-    #                                            "location": "overall"}, index=[0])
-                 
-
-    #         specific_comments_df = pd.DataFrame(
-    #             response_dict.get("specific_comments", []), 
-    #             columns=["comment_id", "comment", "severity", "location"]
-    #         )
-
-
-    #         output = pd.concat([overall_comment_df, specific_comments_df], ignore_index=True)
-    #         output["research_question_id"] = rq_id
-    #         output["research_question_text"] = rq_df["question_text"].iloc[0]
-    #         output["resubmit"] = response_dict.get("resubmit", False)
-
-    #         output_list.append(output)
-
-    #     output_df = pd.concat(output_list).reset_index(drop=True)
-    #     # Convert to string and fill missing severity with "None" so that parquet will accept it
-    #     output_df["severity"] = output_df["severity"].apply(lambda x: x if pd.notna(x) else "None")
-    #     # Also make all id str (handle int and "overall" fields)
-    #     output_df["comment_id"] = output_df["comment_id"].astype(str)
-
-    #     self.ai_peer_review = output_df
-
-    #     os.makedirs(save_directory, exist_ok=True)
-    #     self.ai_peer_review.to_parquet(os.path.join(save_directory, save_filename), index=False)
-        
-    #     return self.ai_peer_review
-    
-    # def peer_review_to_doc(self):
-    #     if self.ai_peer_review is None:
-    #         print("No AI peer review data available. Please run get_ai_peer_review() first.")
-    #         return None
-        
-    #     # Convert the AI peer review DataFrame to a formatted string or document
-    #     # This is a placeholder for actual document generation logic
-    #     doc = Document()
-    #     for _, row in self.ai_peer_review.iterrows():
-    #         doc.add_paragraph(f"Comment ID: {row['comment_id']}")
-    #         if row["severity"] is not None:
-    #             doc.add_paragraph(f"Severity: {row['severity']}")
-    #         if row["resubmit"]:
-    #             doc.add_paragraph("**Resubmission Required**")
-    #         if row["location"] == "overall":
-    #             doc.add_paragraph(f"Location: {row['research_question_text']}")
-    #         else:
-    #             doc.add_paragraph(f"Location: {row['research_question_text']} - {row['location']}")
-    #         doc.add_paragraph(f"Comment: {row['comment']}")
-    #         doc.add_paragraph("---------------------")
-
-
-    #     # Save
-    #     save_dir = self.output_save_location
-    #     os.makedirs(save_dir, exist_ok=True)
-
-    #     out_path = os.path.join(save_dir, "peer_review.docx")
-    #     doc.save(out_path)
-
-    #     print(f"Peer review generated and saved to {out_path}")
         

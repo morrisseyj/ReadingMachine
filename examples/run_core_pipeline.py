@@ -346,14 +346,10 @@ renderer.render_output("md", use_stylized=True)
 renderer.render_output("pdf", use_stylized=True)
 
 # Trace a specific claim back to it source text and metadata
+# This will need to reflect your specific question and theme text, produced by your run
 renderer.trace_claim(
-    question_id="question_1",
+    question_text="How does remote work affect worker satisfaction and retention?",
     theme_label="Work-Life Balance",
-    citation_lastname= "Kossek",
-    citation_year=2006
+    citation_lastname= "Lingfeng",
+    citation_year=2021
     )
-
-
-latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\testing\ReadingMachine\data\runs\09_clusters')
-
-summarize = core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model="gpt-4o", paper_output_length=10000)
