@@ -42,7 +42,7 @@ can understand what each step of the ReadingMachine workflow does.
 # Imports
 # ==========================================================
 
-from readingmachine import core, utils, state, render, config
+from readingmachine import core, render, config
 
 from dotenv import load_dotenv
 from openai import OpenAI
