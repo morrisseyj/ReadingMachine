@@ -28,21 +28,29 @@ These documents explain how the analytical workflow described below is implement
 
 ## Quick Start
 
-[See /examples/to_corpus.md for a more detailed account of setup]
+### Recommended setup
+- Python 3.11
+- uv (https://github.com/astral-sh/uv)
 
-1. Install dependencies (managing with uv is reccomended)
+1. Install dependencies:
 
-    uv sync 
+    uv sync
 
 2. Add your OpenAI API key to `.env`
 
 3. Place documents in `data/corpus`
 
-4. Execute code as laid out in the example pipeline
+4. Run:
 
-    examples/run_core_pipeline.py
+    python examples/run_core_pipeline.py
 
 ---
+
+## Notes for Contributors
+
+- The `uv.lock` file defines a known-good environment.
+- If you modify dependencies, please ensure the pipeline runs end-to-end.
+- Cross-platform compatibility (macOS/Linux) is an active area for improvement.
 
 ## Motivation
 
@@ -506,13 +514,21 @@ This project should be understood as an open methodological experiment in large-
 
 ## Environment
 
-ReadingMachine has been tested on:
+This project uses a pinned environment (`uv.lock`) to ensure reproducibility.
 
-- Python 3.12
-- scikit-learn 1.3.2
-- umap-learn 0.5.7
-- numpy 1.26.4
-- pandas 2.2.2
-- pynndescent 0.6.0
+Tested baseline:
+- OS: Windows (x86_64)
+- Python: 3.11
 
-These versions are pinned to avoid compatibility issues between Pandas, Numpy, UMAP, HDBSCAN, and sklearn.
+Key dependencies:
+- numpy==1.26.4
+- pandas==2.2.2
+- pymupdf==1.24.9
+- umap-learn==0.5.7
+- scikit-learn==1.3.2
+- pyarrow==14.0.2
+- fastparquet==2024.5.0
+
+These versions are known to work together for the current pipeline.
+
+Contributions and experiments on other platforms (macOS, Linux) and Python versions are welcome, but may require dependency adjustments.

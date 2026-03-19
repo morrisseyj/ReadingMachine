@@ -1107,12 +1107,12 @@ class Render:
         # --- Title + Exec summary ---
         if hasattr(self, "title_exec_summary_df"):
             title_exec_df = self.title_exec_summary_df.copy()
-            title_exec_df["question_id"] = None
-            title_exec_df["theme_id"] = None
             # Check if there is a stylized rewrite, in which case copy the content column to the stylized text so we have something to render
             if "stylized_text" in render_df.columns:
                 title_exec_df["stylized_text"] = title_exec_df["content"] # This is to ensure that if there is a stylized rewrite for the title and exec summary, which otherwise are under content.
-            render_df = pd.concat([title_exec_df, render_df], ignore_index=True)
+            # use safe concat with schema to ensure that schema is adopted - to keep ordering dtypes correct, take schema from render.
+            render_df = utils.concat_with_schema(title_exec_df, render_df, schema_from="bottom")
+
 
 
         # --- Final ordering ---

@@ -648,9 +648,51 @@ def prepare_fuzzy_review_df(
 
     return review_df
 
+def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -> pd.DataFrame:
+    """
+    Safely concatenate two DataFrames, ensuring schema consistency. Built because of pandas new behavior of not allowing astype on empty columns, 
+    which was causing issues with our previous concat approach where we were filling missing columns with NaN and then trying to astype to ensure consistent dtypes across runs.
 
+    Parameters
+    ----------
+    df1 : pd.DataFrame
+        First DataFrame.
 
+    df2 : pd.DataFrame
+        Second DataFrame.
 
+    schema_from : str
+        Source of the schema to enforce ("top" or "bottom").
 
+    Returns
+    -------
+    pd.DataFrame
+        Concatenated DataFrame with consistent schema.
+    """
+    if schema_from == "top":
+        ref = df1
+        other = df2.copy()
+    elif schema_from == "bottom":
+        ref = df2
+        other = df1.copy()
+    else:
+        raise ValueError("schema_from must be 'top' or 'bottom'")
+
+    # Add missing columns with correct dtype
+    for col, dtype in ref.dtypes.items():
+        if col not in other.columns:
+            other[col] = pd.Series(index=other.index, dtype=dtype)
+
+    # Reorder columns
+    other = other[ref.columns]
+
+    # Cast existing columns
+    other = other.astype(ref.dtypes.to_dict(), copy=False)
+
+    # Concat
+    if schema_from == "top":
+        return pd.concat([ref, other], ignore_index=True)
+    else:
+        return pd.concat([other, ref], ignore_index=True)
 
 
