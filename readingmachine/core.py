@@ -1039,71 +1039,91 @@ class Ingestor:
 
         return review_df
 
-    def update_state(self) -> pd.DataFrame:
+    def update_state(self, 
+                     filename: str, 
+                     encoding: str = "utf-8",
+                     output_cols = [
+                        "question_id",
+                        "question_text",
+                        "search_string_id",
+                        "search_string",
+                        "paper_id",
+                        "paper_title",
+                        "paper_author",
+                        "paper_date",
+                        "doi"
+                        ]
+                    ) -> pd.DataFrame:
         """
-        Apply manual dedup results to corpus_state.
+        Updates the insights df after the user has manually removed fuzzy duplicate papers from the cvs/xlsx file generated in the drop_fuzzy_duplicates function.
+
+        Becuase this is done after ingestion (because complete metadata is used for duplicate checking and that is done by LLM on the full_text) 
+        the insights and full_text elements of the state stand to be out of sync. This function realigns them and updates the state
+
+        Parameters
+        ----------
+        filename : str
+            Name of the manually reviewed file.
+
+        encoding : str
+            File encoding for reading the reviewed file.
+
+        output_cols : list, optional
+            List of columns to include in the output DataFrame. If empty, all columns are included.
 
         Returns
         -------
         pd.DataFrame
-            Updated insights DataFrame.
+            Cleaned insights DataFrame.
         """
+        # Set the filepath to the reviewed file based on the provided filename and the expected location of the fuzzy check outputs. 
+        filepath = os.path.join(self.fuzzy_check_path, self.RUN, filename)
 
-        save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
-
-        files = [
-            os.path.join(save_dir, f)
-            for f in os.listdir(save_dir)
-            if f.lower().endswith((".csv", ".xlsx"))
-        ]
-
-        if len(files) != 1:
-            raise ValueError(
-                f"Expected one reviewed file in {save_dir}, found: {files}"
-            )
-
-        file_path = files[0]
-
-        if file_path.endswith(".csv"):
-            dedup_df = pd.read_csv(file_path)
-        else:
-            dedup_df = pd.read_excel(file_path)
-
-        # Clean author column
-        if "paper_author" in dedup_df.columns:
-            dedup_df["paper_author"].replace(
-                ["", "No author found", "NA", "null", pd.NA, np.nan],
-                None,
-                inplace=True
-            )
-
-        # Remove helper columns
-        dedup_df = dedup_df.drop(
-            columns=["duplicate_check_string", "sim_group"],
-            errors="ignore"
-        )
-
-        valid_ids = dedup_df["paper_id"].unique()
-        # Sanity check
-        if len(valid_ids) == 0:
-            raise ValueError("No valid paper_ids found in the reviewed file. Please ensure you have kept at least one record per paper and that the paper_id column is intact.")
-
-        # Filter full_text
-        self.corpus_state.full_text = (
-            self.corpus_state.full_text[
-                self.corpus_state.full_text["paper_id"].isin(valid_ids)
-            ].copy()
-        )
-
-        # Filter insights
-        self.corpus_state.insights = (
-            self.corpus_state.insights[
-                self.corpus_state.insights["paper_id"].isin(valid_ids)
-            ].copy()
-        )
-
-        return self.corpus_state.insights
+        # Check file exists
+        if not os.path.isfile(filepath):
+            raise ValueError(f"Reviewed file not found at expected location: {filepath}. Please ensure the file is in the correct directory and the filename is correct.")
         
+        #Get the updated insights df with the correct schema
+        insights_df = CorpusState.load_insights_from_csv_xslx(filepath=filepath, encoding=encoding, output_cols=output_cols)
+
+        # Clean the author field:
+        if "paper_author" in insights_df.columns:
+            insights_df["paper_author"] = insights_df["paper_author"].replace(
+                ["", "No author found", "NA", "null", pd.NA, np.nan],
+                None
+            )
+
+        # Align with full text:
+        # Get unique valid paper ids from the deduped insights
+        valid_ids = insights_df["paper_id"].unique()
+        # Sanity check to make sure some papers came in
+        if len(valid_ids) == 0:
+            raise ValueError(f"No records found in {filepath}. Please ensure you have kept at least one record per paper and that the paper_id column is intact.")
+        
+        # Make temp copy of full text to operate over
+        temp_full_text = self.corpus_state.full_text.copy()
+
+        # Filter full text
+        temp_full_text = (
+           temp_full_text[
+                temp_full_text["paper_id"].isin(valid_ids)
+            ].copy()
+        )
+
+        # Filter insights - to make sure only unique ids
+        insights_df = (
+            insights_df[
+                insights_df["paper_id"].isin(valid_ids)
+            ].copy()
+        )
+
+        # reassign to corpus state
+        self.corpus_state.full_text = temp_full_text
+        self.corpus_state.insights = insights_df
+
+        # Note we don't save as we are now going to chunk this in the same class
+        # Return for inspection
+        return self.corpus_state.insights
 
     def chunk_papers(
         self,

@@ -1051,55 +1051,58 @@ class Literature:
 
         return review_df
 
-    def update_state(self) -> pd.DataFrame:
+    def update_state(self, 
+                     filename: str,
+                     encoding: str = "utf-8",
+                     output_cols = [
+                         "question_id",
+                         "question_text",
+                         "search_string_id",
+                         "search_string",
+                         "paper_id",
+                         "paper_title",
+                         "paper_author",
+                         "paper_date",
+                         "doi"
+            ]
+                    ) -> pd.DataFrame:
         """
         Update corpus state using manually reviewed duplicate file.
+
+        At this point in the pipeline we are just loading the deduped insights back into state. 
+        So there isnt any processing to do, other than to drop the helper columns - done by leaving them out of output_cols.
+        ----------
+        filename : str
+            Name of the manually reviewed file.
+
+        encoding : str, default="utf-8"
+            Encoding of the manually reviewed file.
+
+        output_cols : list
+            List of columns to include in the updated insights DataFrame. Helper columns used for review should be excluded from this list.
 
         Returns
         -------
         pd.DataFrame
             Cleaned insights DataFrame.
         """
+        # Set the file path for the manually reviewed file
+        filepath = os.path.join(self.save_location, filename)
 
-        files = [
-            os.path.join(self.save_location, f)
-            for f in os.listdir(self.save_location)
-            if f.lower().endswith((".csv", ".xlsx"))
-        ]
+        # Load manually reviewed file, ensuring only the specified columns are included
+        insights_df = CorpusState.load_insights_from_csv_xslx(filepath=filepath, encoding=encoding, output_cols=output_cols)
 
-        if len(files) != 1:
-            raise ValueError(
-                f"Expected exactly one file in {self.save_location}, found {len(files)}."
-            )
+        # Assign to state
+        self.corpus_state.insights = insights_df
 
-        file_path = files[0]
-
-        if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path)
-        else:
-            df = pd.read_excel(file_path)
-
-        # Clean author field
-        if "paper_author" in df.columns:
-            df["paper_author"].replace(
-                ["", "No author found", "NA", "null", pd.NA, np.nan],
-                None,
-                inplace=True
-            )
-
-        # Remove helper columns
-        df = df.drop(
-            columns=["duplicate_check_string", "sim_group"],
-            errors="ignore"
-        )
-
-        self.corpus_state.insights = df
-
+        # Save
         self.corpus_state.save(
             os.path.join(config.STATE_SAVE_LOCATION, "04_literature_deduped")
         )
 
-        return df
+        # Return the cleaned insights for inspection if needed
+        return self.corpus_state.insights
+
 
 class AiLiteratureCheck:
     """
@@ -1529,13 +1532,34 @@ class DownloadManager:
         sanitized = re.sub(r'[\\/:*?"<>|]', "_", filename)
         return sanitized.strip()
     
-    def update_state(self, filename: str) -> pd.DataFrame:
+    def update_state(
+            self, 
+            filename: str, 
+            encoding: str = "utf-8", 
+            output_cols: List = [
+                "question_id",
+                "question_text",
+                "search_string_id",
+                "search_string",
+                "paper_id",
+                "paper_title",
+                "paper_author",
+                "paper_date",
+                "doi",
+                "download_status",
+                "messy_question_id",
+                "messy_paper_id"
+                ]
+        ) -> pd.DataFrame:
+                
         """
         Reload updated download metadata into the corpus state.
 
         This method reads the CSV files stored in the download directory
         and updates the `CorpusState` with any manual changes made to
         the literature metadata (for example updated download status).
+
+        At this point in the pipeline we are just loading the 
 
         Returns
         -------
@@ -1544,14 +1568,16 @@ class DownloadManager:
 
         Notes
         -----
-        This method is typically used after the user has manually
-        downloaded documents and updated the exported metadata files.
+        This method is used after the user has manually
+        downloaded documents.
         """
-
+        # Set the filepaath for the manually reviewed file
         filepath = os.path.join(self.DOWNLOAD_LOCATION, filename)
-
-        # This convenience function just calls the from csv method of the questionstate
-        self.corpus_state = self.corpus_state.update_insights(filepath = filepath)
-        # And updates the corpus_state object on file by saving
+        # Call the convennience function to load the insights from csv/xlsx with the schema matching what it should look like at this point in the pipeline. 
+        insights_df = CorpusState.load_insights_from_csv_xslx(filepath=filepath, encoding=encoding, output_cols=output_cols)
+        # Update state object with the loaded insights
+        self.corpus_state.insights = insights_df
+        # Save
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "06_download_manager"))
+        # Return for inspection
         return(self.corpus_state.insights)

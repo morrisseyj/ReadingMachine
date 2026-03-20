@@ -123,11 +123,11 @@ insights_df = questions_df.copy()
 # and breaks the text into chunks suitable for LLM reading.
 
 # Note if you arrived here via the getlit tool, you can initialize the Ingestor class with the corpus_state object created by getlit - downloads.corpus.state
-ingestor = core.Ingestor(
-    corpus_state=downloads.corpus_state,
-    llm_client=llm_client,
-    ai_model="gpt-4o"
-)
+# ingestor = core.Ingestor(
+#     corpus_state=downloads.corpus_state,
+#     llm_client=llm_client,
+#     ai_model="gpt-4o"
+# )
 # If you are starting with your own corpus, you can initialize the Ingestor with the questions and insights dataframes created above
 
 ingestor = core.Ingestor(
@@ -153,7 +153,7 @@ ingestor.drop_duplicates()
 ingestor.drop_fuzzy_duplicates()
 
 # Update the state with the deduplicated file you confirmed in the previous step.
-ingestor.update_state()
+ingestor.update_state("fuzzy_matches.csv")
 
 # Break each document into bounded segments (~paragraph scale)
 # This ensures the LLM reads manageable text windows

@@ -492,58 +492,64 @@ class CorpusState:
         )
 
         return(corpus_state)
+    
 
-    def update_insights(self,
-                        filepath: str,
-                        encoding: str = "utf-8"
-                        ) -> "CorpusState":
+
+    
+    def load_insights_from_csv_xslx(
+            filepath: str, 
+            encoding: str = "utf-8",
+            output_cols: List = []
+        ) -> pd.DataFrame:
         """
-        Load only the insights table from a specified path.
+        Load insights from a CSV or Excel file, ensuring consistent schema.
 
-        This method is a convenience function for cases where only the
-        insights table needs to be restored, such as after manual review
-        of fuzzy matches. It assumes that the insights are stored in a
-        file named "insights.xlsx" or "insights.csv" within the given
-        directory.
+        Function is used as a general drop in for when you have to grab the csv or xlsx version of the state insights df 
+        after manual review of duplicates or after downloading papers.
+
+        This method does not recompose the full state as at different point in the pipeline the process for recomposing after manual edit is different 
+        For example after dedup state is rebuilt simply by updating corpus_state.insights with the cleaned insights, 
+        whereas during ingestion we have to align corpus_state.full_text and corpus_state.insights so that only the valid paper_ids remain in the state.
 
         Parameters
         ----------
         filepath : str
-            Path to the insights file with extension (.xlsx or .csv).
-
-        encoding : str
-            Encoding to use when reading CSV files. Ignored for Excel files.
+            Path to the CSV or Excel file containing insights data. 
+        
+        encoding : str, default="utf-8"
+            Encoding to use when reading a CSV file.
+        
+        output_cols : List, default=[]
+            Optional list of columns to retain in the output DataFrame. If empty, all columns are retained.
 
         Returns
         -------
-        CorpusState
-            A CorpusState object with updated insights and values for other tables inherited from the current state.
+        pd.DataFrame
+            DataFrame containing the insights data with consistent schema.
         """
-
+        # Check if file exists
         if not os.path.isfile(filepath):
-            raise FileNotFoundError(f"No file found at {filepath}. Ensure the insights file is correctly named and located in the specified directory.")
+                raise FileNotFoundError(f"No file found at {filepath}. Ensure the insights file is correctly named and located in the specified directory.")
         
+        # Load the file based on extension
         if filepath.endswith(".csv"):
             print(f"Loading insights from CSV file at {filepath}...")
             insights_df = pd.read_csv(filepath, encoding=encoding)
-            insights_df = insights_df.loc[:, ~insights_df.columns.str.contains("^Unnamed")]
-        else:
+        elif filepath.endswith((".xlsx", ".xls")):
             print(f"Loading insights from Excel file at {filepath}...")
             insights_df = pd.read_excel(filepath)
-            insights_df = insights_df.loc[:, ~insights_df.columns.str.contains("^Unnamed")]
+        else:
+            raise ValueError("Unsupported file format. Please provide a .csv or .xlsx file.")
 
-        questions_df = self.questions.copy()
-        full_text_df = self.full_text.copy()
-        chunks_df = self.chunks.copy()
+        # Ensure the insights matches the expected schmema if passed in output_cols
+        if output_cols:
+            missing_cols = [col for col in output_cols if col not in insights_df.columns]
+            if missing_cols:
+                raise ValueError(f"The following specified output columns are missing from the file: {missing_cols}")
+            else:
+                insights_df = insights_df[output_cols]
 
-        updated_corpus_state = type(self)(
-            questions = questions_df,
-            insights = insights_df,
-            full_text = full_text_df,
-            chunks = chunks_df
-        )
-
-        return updated_corpus_state
+        return insights_df
 
 
     def fingerprint(self) -> str:

@@ -179,7 +179,7 @@ literature.get_fuzzy_matches()
 #
 # After editing the CSV files run:
 
-literature.update_state()
+literature.update_state("fuzzy_matches.csv")
 
 
 # ==========================================================

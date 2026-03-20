@@ -695,4 +695,3 @@ def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -
     else:
         return pd.concat([other, ref], ignore_index=True)
 
-
