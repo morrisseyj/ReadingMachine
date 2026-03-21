@@ -1018,7 +1018,7 @@ class Literature:
 
         return unique_df
 
-    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> pd.DataFrame:
+    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> None:
         """
         Generate and export fuzzy duplicate candidates for manual review.
 
@@ -1029,8 +1029,7 @@ class Literature:
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame exported for manual inspection.
+        None
         """
 
         review_df = utils.prepare_fuzzy_review_df(
@@ -1049,7 +1048,7 @@ class Literature:
             "This is expected and ensures no duplicate ingestion."
         )
 
-        return review_df
+        return None
 
     def update_state(self, 
                      filename: str,

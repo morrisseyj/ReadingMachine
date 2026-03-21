@@ -255,11 +255,11 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 # Apply clustering
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom"},
+    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "eom"},
     "question_1": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"},
     "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
     "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_4": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"}
+    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"}
 })
 
 # Optional: collapse very small clusters into outliers
