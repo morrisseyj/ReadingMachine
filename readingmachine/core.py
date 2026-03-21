@@ -1012,8 +1012,7 @@ class Ingestor:
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame exported for manual inspection.
+        None
         """
 
         if not hasattr(self, "dropped_exact_dupes"):
@@ -1037,7 +1036,7 @@ class Ingestor:
             "Then run update_state()."
         )
 
-        return review_df
+        return None
 
     def update_state(self, 
                      filename: str, 
@@ -2485,6 +2484,10 @@ class Clustering:
         summary_df = [df.assign(question_id=rq) for df, rq in zip(summary_df, rqs)]
         self.cum_prop_cluster = pd.concat(summary_df)
         clustered_df = pd.concat(data)
+
+        # Clean corpus_state_insights of cluster variables that might have been created on multiple passes of generate clusters:
+        cluster_cols = ["cluster", "cluster_prob", "full_insight_embedding", "reduced_insight_embedding"]
+        self.corpus_state.insights = self.corpus_state.insights.drop(columns=[col for col in cluster_cols if col in self.corpus_state.insights.columns])
 
         self.corpus_state.insights = self.corpus_state.insights.merge(
             clustered_df[["question_id", "paper_id", "chunk_id", "insight_id", "cluster", "cluster_prob", "full_insight_embedding", "reduced_insight_embedding"]],
