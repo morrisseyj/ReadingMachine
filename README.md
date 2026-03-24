@@ -531,6 +531,7 @@ Tested baseline:
 
 Key dependencies:
 - numpy==1.26.4
+- scipy==1.11.4
 - pandas==2.2.2
 - pymupdf==1.24.9
 - umap-learn==0.5.7
