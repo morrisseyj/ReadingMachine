@@ -615,6 +615,7 @@ class Ingestor:
                 list_of_papers_by_page.append(pages)
                 ingestion_status.append(1)
             except Exception as e:
+                print(f"Error ingesting file {file}: {e}")
                 list_of_papers_by_page.append([str(e)])
                 self.ingestion_errors.append(file)
                 ingestion_status.append(0)
