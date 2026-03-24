@@ -541,3 +541,7 @@ Key dependencies:
 These versions are known to work together for the current pipeline.
 
 Contributions and experiments on other platforms (macOS, Linux) and Python versions are welcome, but may require dependency adjustments.
+
+## Acknowledgement
+
+This project was developed as part of research and innovation work at Oxfam America.
