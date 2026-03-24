@@ -134,8 +134,7 @@ ingestor = core.Ingestor(
     questions=questions_df,
     papers=insights_df,
     llm_client=llm_client,
-    ai_model="gpt-4o",
-    file_path=os.path.join(os.getcwd(), config.CORPUS_LOCATION)
+    ai_model="gpt-4o"
 )
 
 # Read PDF/HTML files and extract text
@@ -206,9 +205,6 @@ cluster = core.Clustering(
     llm_client=llm_client,
     embedding_model="text-embedding-3-small"
 )
-
-# Set seed to make clustering reproducible
-random.seed(config.seed)
 
 # Convert insights to vector embeddings
 cluster.embed_insights()

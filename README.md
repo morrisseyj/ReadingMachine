@@ -26,6 +26,15 @@ These documents explain how the analytical workflow described below is implement
 
 ---
 
+## Citation
+
+If you use ReadingMachine in your work, please cite:
+
+Morrissey, J. (2026). ReadingMachine: A computational framework for qualitative corpus synthesis.
+https://github.com/morrisseyj/ReadingMachine
+
+---
+
 ## Quick Start
 
 ### Recommended setup

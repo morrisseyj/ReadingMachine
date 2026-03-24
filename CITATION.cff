@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "ReadingMachine"
+message: "If you use this project, please cite it as below."
+type: software
+
+authors:
+  - family-names: Morrissey
+    given-names: James
+
+version: "0.1.0"
+date-released: 2026-03-01
+
+url: "https://github.com/morrisseyj/ReadingMachine"
+
+abstract: >
+  ReadingMachine is a computational framework for large-scale qualitative corpus synthesis.
+  It structures LLM-driven reading into an inspectable pipeline that prioritizes completeness,
+  traceability, and conceptual coherence.
+
+license: Apache-2.0

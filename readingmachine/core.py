@@ -2097,8 +2097,14 @@ class Clustering:
         return self.insight_embeddings_array
 
     def reduce_dimensions(
-        self, full_embeddings: np.array = None, n_neighbors: int = 15, min_dist: float = 0.25, n_components: int = 10,
-        metric: str = "cosine", random_state: int = 42, update_attributes: bool = True
+        self, 
+        full_embeddings: np.array = None,
+        n_neighbors: int = 15,
+        min_dist: float = 0.25,
+        n_components: int = 10,
+        metric: str = "cosine",
+        random_state: int = config.seed,
+        update_attributes: bool = True
     ) -> np.ndarray:
         
         """
