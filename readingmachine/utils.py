@@ -509,7 +509,7 @@ def get_fuzzy_matches(
 
     Notes
     -----
-    - Uses RapidFuzz `ratio` scorer (string similarity).
+    - Uses RapidFuzz `token_set_ratio` scorer (word similarity).
     - O(N^2) complexity — can become expensive for large corpora.
     """
 
@@ -521,7 +521,7 @@ def get_fuzzy_matches(
     strings = df["duplicate_check_string"].tolist()
 
     # Compute pairwise similarity matrix
-    similarity_matrix = process.cdist(strings, strings, scorer=fuzz.ratio)
+    similarity_matrix = process.cdist(strings, strings, scorer=fuzz.token_set_ratio)
 
     fuzzy_pairs: List[Tuple[str, str]] = []
 
