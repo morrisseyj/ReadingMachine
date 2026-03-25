@@ -1124,6 +1124,157 @@ class Ingestor:
         # Return for inspection
         return self.corpus_state.insights
 
+    @staticmethod
+    def _drop_duplicate_chunks(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove exact duplicate text chunks within each paper.
+
+        This function deduplicates chunks at the (paper_id, chunk_text) level,
+        ensuring that identical text segments extracted multiple times (e.g.,
+        due to PDF parsing artifacts or layout duplication) are only processed once.
+
+        This is a low-risk operation: only exact matches are removed, so no
+        meaningful narrative content is lost.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Chunk-level DataFrame. Must contain:
+            - 'paper_id' : identifier for each document
+            - 'chunk_text' : extracted text content for each chunk
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with duplicate (paper_id, chunk_text) rows removed.
+            Index is reset.
+
+        Raises
+        ------
+        ValueError
+            If required columns are missing.
+
+        Notes
+        -----
+        - Deduplication is performed *within* papers, not across papers.
+        - This step reduces redundant LLM calls and improves efficiency.
+        """
+        if not set(["paper_id", "chunk_text"]).issubset(df.columns):
+            raise ValueError("Input DataFrame must contain 'paper_id' and 'chunk_text' columns.")
+        
+        df = df.drop_duplicates(subset=["paper_id", "chunk_text"])
+        return df.reset_index(drop=True)
+    
+    @staticmethod
+    def _drop_boilerplate(df) -> pd.DataFrame:
+        """
+        Remove high-frequency repeated chunks within each paper.
+
+        This function identifies chunks that appear repeatedly within the same
+        document (e.g., headers, footers, page titles) and removes them. These
+        elements are typically structural boilerplate and do not contribute
+        meaningful semantic content.
+
+        A chunk is considered boilerplate if it appears more than 10 times
+        within a single paper.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Chunk-level DataFrame. Must contain:
+            - 'paper_id'
+            - 'chunk_text'
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with high-frequency repeated chunks removed.
+            Index is reset.
+
+        Notes
+        -----
+        - Filtering is applied at the (paper_id, chunk_text) level.
+        - This does NOT remove entire papers, only repeated text segments.
+        - The threshold (10) is intentionally conservative to avoid removing
+        legitimate repeated content.
+        """
+        counts = df.groupby(["paper_id", "chunk_text"])["chunk_text"].transform("size")
+        boilerplate = df[counts <= 10].reset_index(drop=True)
+        return boilerplate
+
+    @staticmethod
+    def _drop_extreme_table_chunks(df):
+        """
+        Remove chunks that are highly likely to represent tabular or non-narrative content.
+
+        This function filters out chunks dominated by numeric or structurally
+        fragmented content (e.g., table rows, data grids) while preserving
+        narrative text. The filtering logic is conservative and designed to
+        minimize loss of meaningful prose.
+
+        A chunk is removed if it:
+        - Contains a high proportion of numeric tokens (digit_ratio > 0.5), OR
+        - Is short and lacks lexical richness (few longer words), AND does not
+        resemble a sentence.
+
+        Chunks are retained if they exhibit sentence-like structure (e.g.,
+        contain punctuation or sufficient lexical complexity), even if they
+        partially resemble table content.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Chunk-level DataFrame. Must contain:
+            - 'chunk_text'
+
+        Returns
+        -------
+        pd.DataFrame
+            Filtered DataFrame with extreme table-like chunks removed.
+
+        Notes
+        -----
+        - This function prioritizes recall of narrative text over aggressive filtering.
+        - Designed to handle structured PDF extractions (e.g., MuPDF output).
+        - Filtering is heuristic-based and language-agnostic.
+        - Applied after deduplication and boilerplate removal for efficiency.
+        """
+
+        def is_extreme_table(text):
+            words = text.split()
+
+            digit_ratio = sum(any(c.isdigit() for c in w) for w in words) / max(len(words), 1)
+
+            # Strong signal: mostly numeric
+            if digit_ratio > 0.5:
+                return True
+    
+            # Weak signal: short + low lexical richness
+            if len(words) < 15:
+                long_words = sum(len(w) > 4 for w in words)
+                if long_words < 3:
+                    return True
+            
+            return False
+
+        def has_sentence_structure(text):
+            return (
+                "." in text or
+                len([w for w in text.split() if len(w) > 4]) > 5
+                )
+
+        working_df = df.copy()
+        texts = working_df["chunk_text"]
+
+        has_sentence = texts.apply(has_sentence_structure)
+        is_table = texts.apply(is_extreme_table)
+
+        working_df = working_df[has_sentence | ~is_table]
+
+        return working_df
+
+
+
     def chunk_papers(
         self,
         chunk_size: int = 600,
@@ -1132,7 +1283,58 @@ class Ingestor:
         separators: Optional[List[str]] = None,
         is_separator_regex: bool = False
     ) -> None:
-        """Split full_text into nested chunks and flatten for downstream processing."""
+        """
+        Split full-text documents into overlapping chunks and apply cleaning steps.
+
+        This method:
+        1. Splits each document in `corpus_state.full_text` into smaller text chunks
+        using a recursive character-based splitter.
+        2. Flattens the resulting nested structure into a chunk-level DataFrame.
+        3. Assigns unique chunk IDs.
+        4. Applies a series of cleaning operations:
+            - exact deduplication
+            - boilerplate removal (high-frequency repeated chunks)
+            - removal of extreme table-like content
+        5. Updates `corpus_state.chunks` with the cleaned chunks.
+        6. Rebuilds `corpus_state.insights` to align with the cleaned chunk set.
+        7. Saves the updated corpus state.
+
+        Parameters
+        ----------
+        chunk_size : int, default=600
+            Maximum size of each chunk (in characters or as defined by `length_function`).
+
+        chunk_overlap : int, default=120
+            Number of overlapping characters between consecutive chunks.
+
+        length_function : callable, default=len
+            Function used to measure chunk length.
+
+        separators : list of str, optional
+            Ordered list of separators used for recursive splitting.
+            Defaults to ["\\n\\n", "\\n", " ", ""].
+
+        is_separator_regex : bool, default=False
+            Whether separators should be treated as regex patterns.
+
+        Returns
+        -------
+        None
+
+        Side Effects
+        ------------
+        - Updates:
+            - `self.corpus_state.chunks`
+            - `self.corpus_state.insights`
+        - Persists updated state to disk.
+
+        Notes
+        -----
+        - `full_text` remains unchanged and acts as the source of truth.
+        - Cleaning steps are intentionally conservative to preserve narrative content.
+        - The pipeline is designed to reduce token usage and improve LLM efficiency
+           without sacrificing semantic coverage.
+        """
         if separators is None:
             separators = ["\n\n", "\n", " ", ""]
 
@@ -1146,7 +1348,6 @@ class Ingestor:
 
         full_text_list = self.corpus_state.full_text["full_text"].to_list()
         chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
-
         # Create the chunks corpus_state from the full_text corpus_state
         self.corpus_state.full_text["chunk_text"] = chunks_list
         self.corpus_state.chunks = self.corpus_state.full_text[["paper_id", "chunk_text"]].explode("chunk_text").reset_index(drop=True).copy()
@@ -1154,6 +1355,17 @@ class Ingestor:
 
         # Chunks from full_text as its now joined by paper and question id
         self.corpus_state.full_text.drop(columns=["chunk_text"], inplace=True)
+
+        # Now clean up the chunks by dropping duplicates, boilerplayte and tables
+        temp_chunks = self.corpus_state.chunks.copy()
+        # Remove NA to avoid crashing on split in the functions
+        temp_chunks = temp_chunks[temp_chunks["chunk_text"].notna()]
+        # Now call the cleaning functions
+        temp_chunks = self._drop_duplicate_chunks(temp_chunks)
+        temp_chunks = self._drop_boilerplate(temp_chunks)
+        temp_chunks = self._drop_extreme_table_chunks(temp_chunks)
+
+        self.corpus_state.chunks = temp_chunks.reset_index(drop=True).copy()
 
         # Get chunk_id into insights
         temp_insights = self.corpus_state.insights.copy()
