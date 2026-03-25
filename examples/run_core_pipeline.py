@@ -159,6 +159,9 @@ ingestor.update_state("fuzzy_matches.csv")
 # This ensures the LLM reads manageable text windows
 ingestor.chunk_papers()
 
+# Optional - sanity check your chunks to make sure they have not exploded due to OCR issues or something similar
+# Useful to do before sending chunks for insight extraction as this is the most expensive step in the pipeline
+ingestor.chunk_sanity_check()
 
 # ==========================================================
 # Pipeline recovery helper
