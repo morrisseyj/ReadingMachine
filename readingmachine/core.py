@@ -1185,12 +1185,12 @@ class Ingestor:
         """
         # Get the first few records of the chunks corpus_state to inspect
 
-        temp_insights = self.corpus_state.insights.copy()
+        temp_chunks = self.corpus_state.chunks.copy()
 
-        temp_insights["chunk_len"] = temp_insights["chunk_text"].str.split().str.len()
+        temp_chunks["chunk_len"] = temp_chunks["chunk_text"].str.split().str.len()
 
         summary = (
-            temp_insights
+            temp_chunks
             .groupby("paper_id")
             .agg(
                 num_chunks=("chunk_id", "nunique"),
