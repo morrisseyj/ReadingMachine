@@ -52,38 +52,6 @@ import pandas as pd
 import random
 
 
-# Process my insighs df and papers to get rid of low salience papers that were downloaded.
-# Import the insights df - note that i have left this on Box so all the original data from Pranathi is there
-# Manually create the cleaning_papers folder as a place holder for handling the papers
-# Copy all papers and insights df to the cleaning_papers folder - we will remove the low salience papers from this folder and the insights df before moving forward with the pipeline
-insights_df = pd.read_csv(os.path.join("cleaning_papers", "insights.csv"))
-# Get the low salience papers that were downloaded - we will remove these from the corpus and insights df before moving forward with the pipeline
-low_salience_papers = (
-    insights_df[(insights_df["download_status"] == 1) & (insights_df["salience"] == "low salience")]["paper_id"]
-).tolist()
-
-# Temporarily import path
-from pathlib import Path
-
-# Now delet the files from the temp cleaning papers folder
-p = Path("cleaning_papers")
-files = [f for f in p.rglob("*") if f.suffix.lower() in [".pdf", ".html"]]
-for file in files: 
-    if file.stem in low_salience_papers: 
-        print(f"Deleting {file.name} with salience {insights_df[insights_df['paper_id'] == file.stem]['salience'].values[0]}")
-        file.unlink()
-
-# Update the insights to remove the low salience papers and those that were not downloaded successfully
-insights_df = insights_df[~insights_df["paper_id"].isin(low_salience_papers)]
-insights_df = insights_df[insights_df["download_status"] == 1]
-# write the csv back to the data/corpus, where i manually move the papers shortly
-insights_df.to_csv(os.path.join("data", "corpus", "insights.csv"), index=False)
-
-# Manually move the cleaned papers /data/corpus
-# Manually delete the cleaning_papers folder and its contents to avoid confusion - we have now cleaned the corpus and insights df and are ready to move forward with the pipeline
-
-#write insights to csv 
-
 # ==========================================================
 # Load API credentials
 # ==========================================================
@@ -218,6 +186,8 @@ insights_generator = core.Insights(
     ai_model="gpt-4o",
     paper_context=paper_context
 )
+
+#--------------
 
 # Extract claims from each chunk
 insights_generator.get_chunk_insights()

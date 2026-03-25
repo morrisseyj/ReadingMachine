@@ -1166,6 +1166,46 @@ class Ingestor:
         # Save the updated corpus_state
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "07_full_text_and_chunks"))
 
+    def chunk_sanity_check(self):
+        """
+        Perform a sanity check on the chunking process.
+        
+        Calculates:
+            The number of chunks per paper
+            The average word length of the chunks per paper(approximate)
+            The min and max chunk length in words per paper
+        
+        Returns:
+           pd.DataFrame:
+                A DataFrame summarizing the chunking statistics for each paper
+        
+        Parameters:
+            None
+
+        """
+        # Get the first few records of the chunks corpus_state to inspect
+
+        temp_insights = self.corpus_state.insights.copy()
+
+        temp_insights["chunk_len"] = temp_insights["chunk_text"].str.split().str.len()
+
+        summary = (
+            temp_insights
+            .groupby("paper_id")
+            .agg(
+                num_chunks=("chunk_id", "nunique"),
+                avg_chunk_length=("chunk_len", "mean"),
+                min_chunk_length=("chunk_len", "min"),
+                max_chunk_length=("chunk_len", "max"),
+                total_words=("chunk_len", "sum")
+            )
+            .reset_index()
+        )
+
+        summary.sort_values("num_chunks", ascending=False, inplace=True)
+
+        return summary
+
 class Insights:
     def __init__(
         self,
