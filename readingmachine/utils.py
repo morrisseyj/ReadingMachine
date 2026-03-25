@@ -644,7 +644,7 @@ def prepare_fuzzy_review_df(
     )
 
     # Sort to make manual review easier
-    review_df = review_df.sort_values(by=["sim_group"]).reset_index(drop=True)
+    review_df = review_df.sort_values(by=["sim_group"], ascending=False).reset_index(drop=True)
 
     return review_df
 
