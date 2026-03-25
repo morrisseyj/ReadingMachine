@@ -110,11 +110,8 @@ questions_df = pd.DataFrame(
     columns=["question_id", "question_text"]
 )
 
-# Initialize an insights table we are taking this from the corpus gen
-insights_df = pd.read_csv(os.path.join("data", "corpus", "insights.csv"))
-# Drop the paper_retreival notes and salience columns since we won't need these going forward and they are specific to the corpus gen process
-insights_df = insights_df.drop(columns=["paper_retrieval_notes", "salience"])
-
+# Initialize an insights dataframe with the question information - this will be updated with the paper metadata and insights as we go through the pipeline
+insights_df = questions_df.copy()
 
 # ==========================================================
 # 1. INGEST DOCUMENTS
