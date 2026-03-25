@@ -937,8 +937,8 @@ class GreyLiterature:
 
         # Pickle the result so that it can be accessed later - this is an expensive call
         os.makedirs(self.grey_lit_pickle_folder, exist_ok=True)
-        with open(os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"), "wb") as f:
-            pickle.dump(self.grey_lit, f)
+        # Atomic pickle with safe pickle utility function to avoid corrupting the cache with failed writes
+        utils.safe_pickle(self.grey_lit, os.path.join(self.grey_lit_pickle_folder, "grey_lit.pkl"))
 
         # Update corpus_state
         self.corpus_state.insights = pd.concat([self.corpus_state.insights, self.grey_lit], ignore_index=True)

@@ -910,10 +910,9 @@ class Ingestor:
 
             output.append(paper_meta_df)
             
-            # Save to pickle to allow for resume, make sure path exists
+            # Save to pickle to allow for resume, make sure path exists - use safe pickle to ensure atomic save
             os.makedirs(self.pickle_path, exist_ok=True)
-            with open(os.path.join(self.pickle_path, "metadata_check.pkl"), "wb") as f:
-                pickle.dump(output, f)
+            utils.safe_pickle(output, os.path.join(self.pickle_path, "metadata_check.pkl"))
 
         return(output)
 
@@ -1375,8 +1374,7 @@ class Insights:
 
             # Append to insights list
             insights.append(response_df)
-            with open(os.path.join(self.pickle_path, self.chunk_insights_pickle_file), "wb") as f:
-                pickle.dump(insights, f)
+            utils.safe_pickle(insights, os.path.join(self.pickle_path, self.chunk_insights_pickle_file))
 
         # Convert insights list to DataFrame
         print("Converting insights to DataFrame and merging into corpus_state...")
@@ -1681,8 +1679,8 @@ class Insights:
 
             meta_insights_df_lst.append(meta_insight_df)
 
-            with open(os.path.join(self.pickle_path, self.meta_insights_pickle_file), "wb") as f:
-                pickle.dump(meta_insights_df_lst, f)
+            # Save using safe_pickle to assure atomic save
+            utils.safe_pickle(meta_insights_df_lst, os.path.join(self.pickle_path, self.meta_insights_pickle_file))
 
 
         # Now join up the list of dataframes to get a single value
@@ -2079,8 +2077,8 @@ class Clustering:
         Save embeddings safely, creating folder if it does not exist.
         """
         os.makedirs(os.path.dirname(self.embeddings_pickle_path), exist_ok=True)
-        with open(self.embeddings_pickle_path, "wb") as f:
-            pickle.dump(self.insight_embeddings_array, f)
+        # Use the safe_pickle utility to ensure atomic save and prevent corruption
+        utils.safe_pickle(self.insight_embeddings_array, self.embeddings_pickle_path)
         print(f"Embeddings safely saved to '{self.embeddings_pickle_path}'.")
 
     def _load_embeddings(self):
@@ -3628,9 +3626,8 @@ class Summarize:
                                                 "state_meta": state_meta, 
                                                 "mode": mode}
 
-                # Save progress safely after each batch
-                with open(in_progress_path, "wb") as f:
-                    pickle.dump(mapped_insights_df_with_meta, f)
+                # Save progress safely after each batch = use safe pickle to avoid corruption if something goes wrong during the write
+                utils.safe_pickle(mapped_insights_df_with_meta, in_progress_path)
             
         # Check insights existed and were mapped, then concat and return the mapped insights
         if not mapped_insights_df_list:
@@ -4637,8 +4634,8 @@ class Summarize:
                     "mode": mode
                 }
                 os.makedirs(config.PICKLE_SAVE_LOCATION, exist_ok=True)
-                with open(self.orphan_pickle_resume_path, "wb") as f:
-                    pickle.dump(checked_insights_df_meta_state_mode, f)
+                # Pickle the results of the batch so that if the process is interrupted we can resume from the last batch completed without losing all progress. 
+                utils.safe_pickle(checked_insights_df_meta_state_mode, self.orphan_pickle_resume_path)
 
         orphans_df = checked_insights_df[checked_insights_df["found"] == False].copy()
         orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema

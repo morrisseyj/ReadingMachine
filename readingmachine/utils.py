@@ -29,18 +29,18 @@ they exist solely to support reliable execution of the pipeline.
 
 from .state import CorpusState
 
-import ast
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, List, Union, Tuple
 import json
 import pyarrow as pa
 import os
-import datetime
 import time
 from openai import OpenAI, APITimeoutError, APIConnectionError
 import networkx as nx
 from rapidfuzz import process, fuzz
+import pickle
+import os
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
@@ -695,3 +695,31 @@ def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -
     else:
         return pd.concat([other, ref], ignore_index=True)
 
+
+def safe_pickle(obj, path):
+    """
+    Safely pickles an object to disk, by saving a temp file and then renaming it to the true path and then clean up the temp
+    This is an atomic save that prevents issues with partial writes. If the write fails only the temp fails, not the backup.
+    
+    Parameters
+    ----------
+    obj : Any
+        The object to pickle.
+
+    path : str
+        The file path to save the pickle.
+
+    Returns
+    -------
+    None
+    """
+    # Create the tmp path
+    temp_path = f"{path}.tmp"
+    # Clean up old temp file if it exists - crash happebed during a write and left a temp file, we want to remove it before writing again
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    # Write to temp path first
+    with open(temp_path, "wb") as f:
+        pickle.dump(obj, f)
+    # Atomically move temp file to final path
+    os.replace(temp_path, path)
