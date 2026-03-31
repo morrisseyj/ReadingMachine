@@ -1001,54 +1001,110 @@ class Literature:
             )
         )
 
-    def drop_duplicates(self) -> pd.DataFrame:
+    def drop_duplicates(self, theshold = 85) -> pd.DataFrame:
         """
-        Remove exact duplicates from corpus_state.
+        Perform the metadata-based duplicate detection stage of the pipeline and generate a review file.
 
-        Returns
-        -------
-        pd.DataFrame
-            Deduplicated insights DataFrame.
-        """
+        This method identifies potential duplicate papers using fuzzy matching on normalized
+        titles and prepares a CSV file for manual review. It represents the early-stage
+        deduplication step (pre-ingestion), but does NOT modify the corpus state.
 
-        unique_df = utils.drop_exact_duplicates(self.corpus_state.insights)
-
-        # Update state
-        self.corpus_state.insights = unique_df
-
-        return unique_df
-
-    def get_fuzzy_matches(self, similarity_threshold: int = 90) -> None:
-        """
-        Generate and export fuzzy duplicate candidates for manual review.
+        The user is expected to:
+        1. Open the generated CSV file
+        2. Review grouped duplicates (`sim_group`)
+        3. Remove duplicate rows (keeping one per paper)
+        4. Run `update_state()` to apply the changes
 
         Parameters
         ----------
-        similarity_threshold : int
-            Threshold for fuzzy matching.
+        threshold : float, default=85
+            Similarity threshold for fuzzy matching (0-100 scale).
+            Higher values are stricter and result in fewer candidate matches.
 
         Returns
         -------
         None
+            This function does not return a DataFrame. It writes a CSV file for manual review.
+
+        Side Effects
+        ------------
+        - Writes a CSV file to:
+        `self.save_location / potential_duplicates.csv`
+        - Prints instructions for completing the deduplication workflow
+
+        Notes
+        -----
+        - This is the pre-ingestion deduplication stage using metadata (titles).
+        - Uses fuzzy string matching (RapidFuzz token_set_ratio).
+        - The corpus state remains unchanged until `update_state()` is called.
+        - Deduplication is global across all questions; removing duplicates here
+        will affect downstream ingestion and reduce repeated documents.
         """
 
-        review_df = utils.prepare_fuzzy_review_df(
-            self.corpus_state.insights,
-            similarity_threshold=similarity_threshold
-        )
+        output_path = os.path.join(self.save_location, "potential_duplicates.csv")
 
-        output_path = os.path.join(self.save_location, "fuzzy_matches.csv")
+        review_df = utils.prepare_dedup_review(state = self.corpus_state, similarity_threshold=theshold, engine = "fuzzy")
+
         review_df.to_csv(output_path, index=False)
 
         print(
             f"Fuzzy matches exported to {output_path}.\n"
-            "Review the file and DELETE duplicate rows.\n"
+            "Review the file and DELETE duplicate rows, leaving only one unique entry per duplicate set.\n"
             "Save as CSV and run update_state().\n\n"
             "NOTE: Deduplication is GLOBAL — later questions may show fewer papers.\n"
             "This is expected and ensures no duplicate ingestion."
         )
 
         return None
+    
+    # def drop_duplicates(self) -> pd.DataFrame:
+    #     """
+    #     Remove exact duplicates from corpus_state.
+
+    #     Returns
+    #     -------
+    #     pd.DataFrame
+    #         Deduplicated insights DataFrame.
+    #     """
+
+    #     unique_df = utils.drop_exact_duplicates(self.corpus_state.insights)
+
+    #     # Update state
+    #     self.corpus_state.insights = unique_df
+
+    #     return unique_df
+
+    # def get_fuzzy_matches(self, similarity_threshold: int = 90) -> None:
+    #     """
+    #     Generate and export fuzzy duplicate candidates for manual review.
+
+    #     Parameters
+    #     ----------
+    #     similarity_threshold : int
+    #         Threshold for fuzzy matching.
+
+    #     Returns
+    #     -------
+    #     None
+    #     """
+
+    #     review_df = utils.prepare_fuzzy_review_df(
+    #         self.corpus_state.insights,
+    #         similarity_threshold=similarity_threshold
+    #     )
+
+    #     output_path = os.path.join(self.save_location, "fuzzy_matches.csv")
+    #     review_df.to_csv(output_path, index=False)
+
+    #     print(
+    #         f"Fuzzy matches exported to {output_path}.\n"
+    #         "Review the file and DELETE duplicate rows.\n"
+    #         "Save as CSV and run update_state().\n\n"
+    #         "NOTE: Deduplication is GLOBAL — later questions may show fewer papers.\n"
+    #         "This is expected and ensures no duplicate ingestion."
+    #     )
+
+    #     return None
 
     def update_state(self, 
                      filename: str,

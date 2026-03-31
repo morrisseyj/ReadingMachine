@@ -161,11 +161,10 @@ literature = getlit.Literature(
     corpus_state=grey_literature.corpus_state
 )
 
-# Remove exact duplicates automatically
+# Drop duplicates to limit the impact of acquiring duplicate papers. This is a two-step process:
+# 1) Drop exact duplicates based on exact text match: paper_author, paper_title and paper_year
+# 2) Drop potential duplicates based on a fuzzy match of the paper_author, paper_title and paper_year - creates a manual review file
 literature.drop_duplicates()
-
-# Export fuzzy matches for manual review
-literature.get_fuzzy_matches()
 
 # ----------------------------------------------------------
 # Manual Step
@@ -173,13 +172,13 @@ literature.get_fuzzy_matches()
 #
 # Review the exported CSV files located in:
 #
-#    data/fuzzy_check/
+#    data/potential_duplicates/
 #
 # Remove any duplicate rows manually.
 #
 # After editing the CSV files run:
 
-literature.update_state("fuzzy_matches.csv")
+literature.update_state("potential_duplicates.csv")
 
 
 # ==========================================================

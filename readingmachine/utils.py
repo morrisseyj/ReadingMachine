@@ -41,6 +41,8 @@ import networkx as nx
 from rapidfuzz import process, fuzz
 import pickle
 import os
+import hashlib
+import re
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
@@ -421,232 +423,659 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
     print(latest_step)
 
 
-def gen_duplicate_check_string(df: pd.DataFrame) -> pd.Series:
+#------------DEDUPLICATION FUNCTIONS START/----------------------
+
+def normalize_text(text: str) -> str:
     """
-    Generate a string used for duplicate checking.
+    Normalize text for downstream comparison and hashing.
 
-    This string combines author names, paper title, and publication year
-    into a single string for each record.
+    This function standardizes text by:
+    - converting to lowercase
+    - collapsing consecutive whitespace
+    - stripping leading/trailing spaces
 
-    Returns
-    -------
-    pd.Series
-        Series containing the duplicate check strings.
-    """
-    for col in ["paper_author", "paper_title", "paper_date"]:
-        if col not in df.columns:
-            raise ValueError(f"DataFrame must contain '{col}' column for duplicate removal.")
-
-    authors_str = df["paper_author"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
-    authors_str = authors_str.fillna("Unknown Authors")
-    authors_str = authors_str.apply(lambda x: x if x.strip().lower() else "Unknown Authors")
-    title_str = df["paper_title"].astype(str)
-    date_str = df["paper_date"].astype(str)
-
-    return authors_str + " " + title_str + " " + date_str
-
-def drop_exact_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove exact duplicate literature records.
-
-    Exact duplicates are identified using a constructed
-    `duplicate_check_string`, which combines author names,
-    paper title, and publication year.
+    Non-string inputs return an empty string.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Input DataFrame containing literature records.
+    text : str
+        Input text to normalize.
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with exact duplicates removed.
+    str
+        Normalized text.
 
     Notes
     -----
-    - This operation is deterministic.
-    - The first occurrence of a duplicate is retained.
-    - The helper column `duplicate_check_string` is removed before return.
+    - Used to reduce false negatives in both hashing and similarity comparisons.
+    - Does not remove punctuation (handled elsewhere if needed).
     """
+    if not isinstance(text, str):
+        return ""
 
-    df = df.copy()
+    text = text.lower()
+    text = re.sub(r"\s+", " ", text)  # collapse whitespace
+    return text.strip()
 
-    # Construct duplicate matching key
-    df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-    # Drop exact duplicates
-    df = df.drop_duplicates(subset="duplicate_check_string", keep="first")
-
-    # Clean up helper column
-    df = df.drop(columns=["duplicate_check_string"])
-
-    return df
-
-
-def get_fuzzy_matches(
-    df: pd.DataFrame,
-    similarity_threshold: int = 90,
-) -> List[Tuple[str, str]]:
+def drop_exact_author_title_year(corpus_state: CorpusState) -> CorpusState:
     """
-    Identify potential duplicate records using fuzzy string matching.
+    Remove exact duplicate records based on author, title, and publication date.
 
-    Computes pairwise similarity scores across all records using
-    RapidFuzz and returns pairs exceeding the similarity threshold.
+    Constructs a normalized composite string of (author + title + date) and
+    removes duplicate entries using exact matching. Updates both `insights`
+    and `full_text` to retain only the deduplicated set of paper_ids.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Input DataFrame containing literature records.
-
-    similarity_threshold : int, default=90
-        Minimum similarity score required to flag a pair as a potential duplicate.
+    corpus_state : CorpusState
+        Input state containing `insights` and optionally `full_text`.
 
     Returns
     -------
-    List[Tuple[str, str]]
-        List of tuple pairs representing potentially duplicated records.
+    CorpusState
+        New CorpusState with duplicates removed.
 
     Notes
     -----
-    - Uses RapidFuzz `token_set_ratio` scorer (word similarity).
-    - O(N^2) complexity — can become expensive for large corpora.
+    - Operates on a copy of the input state (does not mutate original).
+    - Intended as a fast, low-risk pre-filter before fuzzy matching.
+    - Assumes that identical author-title-date combinations are duplicates.
     """
+    # Make working copy
+    temp_corpus_state = corpus_state.copy()
+    df = temp_corpus_state.insights.copy()
+    # Create author_title_year string for exact matching
+    df["author_title_year"] = df["paper_author"].fillna("") + " " + df["paper_title"].fillna("") + " " + df["paper_date"].fillna("")
+    # Normalize the string to avoid false negatives due to minor formatting differences
+    df["norm_author_title_year"] = df["author_title_year"].apply(normalize_text)
+    # Drop dupes
+    df = df.drop_duplicates(subset="norm_author_title_year", keep="first")
 
-    df = df.copy()
+    # Get unique IDs after dropping exact dupes to clean state objects
+    valid_paper_ids = set(df["paper_id"])
 
-    # Generate matching strings
-    df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-    strings = df["duplicate_check_string"].tolist()
-
-    # Compute pairwise similarity matrix
-    similarity_matrix = process.cdist(strings, strings, scorer=fuzz.token_set_ratio)
-
-    fuzzy_pairs: List[Tuple[str, str]] = []
-
-    for i, row in enumerate(similarity_matrix):
-        for j, score in enumerate(row):
-            if i < j and score >= similarity_threshold:
-                fuzzy_pairs.append((strings[i], strings[j]))
-
-    print("Pairwise fuzzy similarity computed.")
-
-    return fuzzy_pairs
-
-def get_similar_groups(
-    df: pd.DataFrame,
-    fuzzy_pairs: List[Tuple[str, str]]
-) -> pd.DataFrame:
-    """
-    Group fuzzy duplicate matches into similarity clusters.
-
-    Constructs a graph where nodes are records and edges represent
-    high-similarity matches. Connected components define groups
-    of potentially duplicate records.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input DataFrame containing literature records.
-
-    fuzzy_pairs : List[Tuple[str, str]]
-        List of pairwise duplicate matches from `get_fuzzy_matches`.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame mapping each record to a similarity group.
-
-        Columns:
-        - duplicate_check_string
-        - sim_group (int)
-
-    Notes
-    -----
-    - Records without matches are assigned `sim_group = -1`.
-    - Groups represent *candidate duplicates*, not confirmed duplicates.
-    """
-
-    df = df.copy()
-
-    if "duplicate_check_string" not in df.columns:
-        df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-    # Build graph
-    graph = nx.Graph()
-    graph.add_nodes_from(df["duplicate_check_string"])
-    graph.add_edges_from(fuzzy_pairs)
-
-    # Identify connected components
-    components = list(nx.connected_components(graph))
-
-    grouped_records = []
+    # Update the insights in corpus_state to only include the deduped paper ids
+    temp_corpus_state.insights = temp_corpus_state.insights[temp_corpus_state.insights["paper_id"].isin(valid_paper_ids)].reset_index(drop=True)
     
-    for group_id, component in enumerate(components, start=1):
-        for string in component:
-            grouped_records.append({
-                "duplicate_check_string": string,
-                "sim_group": group_id if len(component) > 1 else -1
+    # Update full text if it needs it:
+    if temp_corpus_state.full_text.shape[0] > 0:
+        temp_corpus_state.full_text = temp_corpus_state.full_text[temp_corpus_state.full_text["paper_id"].isin(valid_paper_ids)].reset_index(drop=True)
+    
+    return temp_corpus_state
+
+
+def drop_exact_hash(corpus_state: CorpusState) -> CorpusState:
+    """
+    Remove exact duplicate documents using a hash of normalized full text.
+
+    Computes an MD5 hash of normalized document text and removes duplicates
+    based on identical hashes. Updates both `insights` and `full_text` to
+    retain only unique documents.
+
+    Parameters
+    ----------
+    corpus_state : CorpusState
+        Input state containing `full_text` and `insights`.
+
+    Returns
+    -------
+    CorpusState
+        New CorpusState with exact duplicate documents removed.
+
+    Notes
+    -----
+    - Uses normalized text to avoid false negatives due to formatting differences.
+    - MD5 is used for speed; collision risk is negligible for this use case.
+    - Operates on a copy of the input state.
+    """ 
+    # Hash function
+    def hash_text(text:str) -> str:
+        """
+        Generate a stable hash for a document.
+
+        Uses MD5 for speed (sufficient for deduplication purposes).
+        """
+        return hashlib.md5(text.encode("utf-8")).hexdigest()
+   
+    temp_corpus_state = corpus_state.copy()
+    # Build hashes for the full text
+    temp_full_text = temp_corpus_state.full_text.copy()
+    # normalize the full text to avoid false negatives due to minor formatting differences
+    temp_full_text["normalized"] = temp_full_text["full_text"].apply(normalize_text)
+    # hash the text
+    temp_full_text["paper_hash"] = temp_full_text["normalized"].apply(hash_text)
+
+    # Drop duplicates based on the hash
+    temp_full_text = temp_full_text.drop_duplicates(subset="paper_hash", keep="first").reset_index(drop=True)
+
+    # Clean the state so that only valid deduped ids exist in all dfs
+    valid_paper_ids = set(temp_full_text["paper_id"])
+    # update the insights and full text to reflect only the deduped paper ids
+    temp_corpus_state.insights = temp_corpus_state.insights[temp_corpus_state.insights["paper_id"].isin(valid_paper_ids)].reset_index(drop=True)
+    temp_corpus_state.full_text = temp_corpus_state.full_text[temp_corpus_state.full_text["paper_id"].isin(valid_paper_ids)].reset_index(drop=True)
+    
+    return temp_corpus_state      
+
+def gen_shingles_items(df: pd.DataFrame, k: int = 5) -> Dict[str, set]:
+    """
+    Generate k-word shingles for each document in the DataFrame.
+
+    Each document is converted into a set of overlapping k-word sequences
+    ("shingles"), which are later used for Jaccard similarity comparison.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing at least:
+        - 'paper_id'
+        - 'full_text'
+
+    k : int, default=5
+        Number of words per shingle.
+
+    Returns
+    -------
+    Dict[str, set]
+        Dictionary mapping paper_id → set of shingles.
+
+    Notes
+    -----
+    - Empty or very short texts return empty sets.
+    - Shingles capture phrase-level structure, making them robust to formatting changes.
+    - Used for full-text near-duplicate detection.
+     """
+
+    def gen_shingles(text: str, k: int) -> set:
+        """
+        Generate shingles (k-grams) for a given text.
+        """
+        if not text:
+            return set()
+        words = text.split()
+        if len(words) < k:
+            return set()
+        
+        return {
+            " ".join(words[i:i+k])
+            for i in range(len(words) - k + 1)
+        }
+    
+    temp_df = df.copy()
+    # compute shingles for the full text
+    temp_df["normalized_full_text"] = temp_df["full_text"].apply(normalize_text)
+    temp_df["shingles"] = temp_df["normalized_full_text"].apply(lambda x: gen_shingles(x, k))
+
+    # Create dict of paper id to shingles
+    paper_ids = temp_df["paper_id"].tolist()
+    shingles = temp_df["shingles"].tolist()
+    return dict(zip(paper_ids, shingles))
+
+
+def gen_title_items(df: pd.DataFrame) -> Dict[str, str]:
+    """
+    Generate normalized title representations for fuzzy matching.
+
+    Each paper_id is mapped to a normalized version of its title,
+    which is used for fuzzy similarity comparison.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing:
+        - 'paper_id'
+        - 'paper_title'
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary mapping paper_id → normalized title string.
+
+    Notes
+    -----
+    - Only title is used (author/year intentionally excluded).
+    - Designed to surface candidate duplicates for manual review.
+    - Less precise than full-text matching but useful pre-ingestion.
+    """
+    temp_df = df.copy()
+    temp_df["normalized_title"] = temp_df["paper_title"].apply(normalize_text)
+    return dict(zip(temp_df["paper_id"], temp_df["normalized_title"]))
+
+def jaccard_sim(set_a: set, set_b: set) -> float:
+    """
+    Compute Jaccard similarity between two sets.
+
+    Jaccard similarity is defined as:
+        |A ∩ B| / |A ∪ B|
+
+    Parameters
+    ----------
+    set_a : set
+        First set (e.g., shingles of document A).
+
+    set_b : set
+        Second set (e.g., shingles of document B).
+
+    Returns
+    -------
+    float
+        Similarity score in [0, 1].
+
+    Notes
+    -----
+    - Returns 0.0 if both sets are empty.
+    - High values (~0.9+) indicate near-identical documents.
+    """
+    intersection = set_a.intersection(set_b)
+    union = set_a.union(set_b)
+    
+    if len(union) == 0:
+        return 0.0
+    
+    return len(intersection) / len(union)
+
+
+def fuzzy_sim(str_a: str, str_b: str, scorer=fuzz.token_set_ratio) -> float:
+    """
+    Compute fuzzy similarity between two strings.
+
+    Uses RapidFuzz scorers (default: token_set_ratio) to measure
+    similarity between two text strings.
+
+    Parameters
+    ----------
+    str_a : str
+        First string.
+
+    str_b : str
+        Second string.
+
+    scorer : callable, default=fuzz.token_set_ratio
+        RapidFuzz scoring function.
+
+    Returns
+    -------
+    float
+        Similarity score (typically 0–100 for token_set_ratio).
+
+    Notes
+    -----
+    - token_set_ratio is robust to word order and extra tokens.
+    - Used for metadata-based deduplication (titles).
+    """
+    score = scorer(str_a, str_b)
+    return score
+    
+
+def get_similar_groups(items: Dict[str, Any], similarity_fn, threshold: float) -> pd.DataFrame:
+    """
+    Compute fuzzy similarity between two strings.
+
+    Uses RapidFuzz scorers (default: token_set_ratio) to measure
+    similarity between two text strings.
+
+    Parameters
+    ----------
+    str_a : str
+        First string.
+
+    str_b : str
+        Second string.
+
+    scorer : callable, default=fuzz.token_set_ratio
+        RapidFuzz scoring function.
+
+    Returns
+    -------
+    float
+        Similarity score (typically 0–100 for token_set_ratio).
+
+    Notes
+    -----
+    - token_set_ratio is robust to word order and extra tokens.
+    - Used for metadata-based deduplication (titles).
+    """    
+    # Create a graph and add all ids as nodes
+    G = nx.Graph()
+    G.add_nodes_from(items.keys())
+    
+    # Get the combinations i want to compare
+    for id_a, id_b in combinations(items.keys(), 2):
+    # Compute the similarity score between the two items
+        score = similarity_fn(items[id_a], items[id_b])
+    # Conditionally add to the graph
+        if score >= threshold:
+            G.add_edge(id_a, id_b)
+
+    # Get all connected components - singletons have no edges and therfore are not a group
+    components = list(nx.connected_components(G))
+
+    # Create a dataframe with paper_id and sim_group, where sim_group is the group id of similar papers, and -1 for singletons
+    groups = []
+
+    for group_id, comp in enumerate(components, start=1):
+        for paper_id in comp:
+            groups.append({
+                "paper_id": paper_id,
+                "sim_group": group_id if len(comp) > 1 else -1
             })
 
-    groups_df = pd.DataFrame(grouped_records)
+    groups_df = pd.DataFrame(groups)
 
     return groups_df
 
-def prepare_fuzzy_review_df(
-    df: pd.DataFrame,
-    similarity_threshold: int = 90
-) -> pd.DataFrame:
+
+def prepare_dedup_review(state: CorpusState, threshold: float, engine:str) -> pd.DataFrame:
     """
-    Prepare a DataFrame for manual duplicate review.
+    Prepare a DataFrame for manual deduplication review.
 
     This function:
-    1. Generates fuzzy matches
-    2. Groups them into similarity clusters
-    3. Merges results back with original data
+    1. Removes exact duplicates (hash or author-title-year)
+    2. Builds representations (shingles or titles)
+    3. Computes similarity groups using graph-based clustering
+    4. Returns a DataFrame for manual inspection
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Input DataFrame containing literature records.
+    state : CorpusState
+        Input corpus state containing `insights` and/or `full_text`.
 
-    similarity_threshold : int, default=90
-        Threshold for fuzzy matching.
+    threshold : float
+        Similarity threshold for grouping:
+        - ~0.9 for shingles (Jaccard)
+        - ~85 for fuzzy title matching
+
+    engine : str
+        Deduplication method:
+        - "shingles" → full-text similarity
+        - "fuzzy" → title similarity
 
     Returns
     -------
     pd.DataFrame
-        DataFrame suitable for manual inspection.
+        DataFrame of candidate duplicates with columns:
+        - original insights fields
+        - 'sim_group'
 
     Notes
     -----
-    - Output should be exported (CSV/Excel) for manual review.
-    - Users should delete duplicate rows manually.
+    - Does NOT mutate the original state.
+    - Intended for human review (not automatic deletion).
+    - Results are sorted by sim_group to cluster duplicates together.
+    - Full-text method is more precise; fuzzy is broader but noisier.
     """
+    if engine not in ["shingles", "fuzzy"]:
+        raise ValueError("engine must be either 'shingles' or 'fuzzy'")
+    
+    # Create a working copy
+    temp_corpus_state = state.copy()
+    
+    # Process either on shingles or titles based on the engine choice
+    if engine == "shingles":
+        print("Dropping exact duplicates...")
+        no_exact_dupes_state = drop_exact_hash(temp_corpus_state)
+        print("Generating shingles...")
+        items = gen_shingles_items(no_exact_dupes_state.full_text, k=5)
+        similarity_fn = jaccard_sim
 
-    df = df.copy()
+    else:
+        print("Dropping exact duplicates...")
+        no_exact_dupes_state = drop_exact_author_title_year(temp_corpus_state)
+        print("Generating comparison strings...")
+        items = gen_title_items(no_exact_dupes_state.insights)
+        similarity_fn = fuzzy_sim
 
-    # Step 1: generate matching strings
-    df["duplicate_check_string"] = gen_duplicate_check_string(df)
+    print("Computing similar groups...")
+    similar_groups_df = get_similar_groups(items=items, similarity_fn=similarity_fn, threshold=threshold)
 
-    # Step 2: fuzzy match pairs
-    fuzzy_pairs = get_fuzzy_matches(df, similarity_threshold)
-
-    # Step 3: group matches
-    groups_df = get_similar_groups(df, fuzzy_pairs)
-
-    # Step 4: merge back for inspection
-    review_df = groups_df.merge(
-        df,
-        how="left",
-        on="duplicate_check_string"
+    # Prepare df for manual review
+    manual_review_df = (
+        no_exact_dupes_state.insights
+        .merge(
+            similar_groups_df, 
+            how="left", 
+            on="paper_id"
+            )
+        .sort_values(by=["sim_group"], ascending=False)
+        .reset_index(drop=True)
     )
 
-    # Sort to make manual review easier
-    review_df = review_df.sort_values(by=["sim_group"], ascending=False).reset_index(drop=True)
+    return manual_review_df
 
-    return review_df
+    
+# --------------------DEDUPLICATION FUNCTIONS END/----------------------
+
+
+
+
+# def gen_duplicate_check_string(df: pd.DataFrame) -> pd.Series:
+#     """
+#     Generate a string used for duplicate checking.
+
+#     This string combines author names, paper title, and publication year
+#     into a single string for each record.
+
+#     Returns
+#     -------
+#     pd.Series
+#         Series containing the duplicate check strings.
+#     """
+#     for col in ["paper_author", "paper_title", "paper_date"]:
+#         if col not in df.columns:
+#             raise ValueError(f"DataFrame must contain '{col}' column for duplicate removal.")
+
+#     authors_str = df["paper_author"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+#     authors_str = authors_str.fillna("Unknown Authors")
+#     authors_str = authors_str.apply(lambda x: x if x.strip().lower() else "Unknown Authors")
+#     title_str = df["paper_title"].astype(str)
+#     date_str = df["paper_date"].astype(str)
+
+#     return authors_str + " " + title_str + " " + date_str
+
+# def drop_exact_duplicates(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Remove exact duplicate literature records.
+
+#     Exact duplicates are identified using a constructed
+#     `duplicate_check_string`, which combines author names,
+#     paper title, and publication year.
+
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#         Input DataFrame containing literature records.
+
+#     Returns
+#     -------
+#     pd.DataFrame
+#         DataFrame with exact duplicates removed.
+
+#     Notes
+#     -----
+#     - This operation is deterministic.
+#     - The first occurrence of a duplicate is retained.
+#     - The helper column `duplicate_check_string` is removed before return.
+#     """
+
+#     df = df.copy()
+
+#     # Construct duplicate matching key
+#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+#     # Drop exact duplicates
+#     df = df.drop_duplicates(subset="duplicate_check_string", keep="first")
+
+#     # Clean up helper column
+#     df = df.drop(columns=["duplicate_check_string"])
+
+#     return df
+
+
+# def get_fuzzy_matches(
+#     df: pd.DataFrame,
+#     similarity_threshold: int = 90,
+# ) -> List[Tuple[str, str]]:
+#     """
+#     Identify potential duplicate records using fuzzy string matching.
+
+#     Computes pairwise similarity scores across all records using
+#     RapidFuzz and returns pairs exceeding the similarity threshold.
+
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#         Input DataFrame containing literature records.
+
+#     similarity_threshold : int, default=90
+#         Minimum similarity score required to flag a pair as a potential duplicate.
+
+#     Returns
+#     -------
+#     List[Tuple[str, str]]
+#         List of tuple pairs representing potentially duplicated records.
+
+#     Notes
+#     -----
+#     - Uses RapidFuzz `token_set_ratio` scorer (word similarity).
+#     - O(N^2) complexity — can become expensive for large corpora.
+#     """
+
+#     df = df.copy()
+
+#     # Generate matching strings
+#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+#     strings = df["duplicate_check_string"].tolist()
+
+#     # Compute pairwise similarity matrix
+#     similarity_matrix = process.cdist(strings, strings, scorer=fuzz.token_set_ratio)
+
+#     fuzzy_pairs: List[Tuple[str, str]] = []
+
+#     for i, row in enumerate(similarity_matrix):
+#         for j, score in enumerate(row):
+#             if i < j and score >= similarity_threshold:
+#                 fuzzy_pairs.append((strings[i], strings[j]))
+
+#     print("Pairwise fuzzy similarity computed.")
+
+#     return fuzzy_pairs
+
+# def get_similar_groups(
+#     df: pd.DataFrame,
+#     fuzzy_pairs: List[Tuple[str, str]]
+# ) -> pd.DataFrame:
+#     """
+#     Group fuzzy duplicate matches into similarity clusters.
+
+#     Constructs a graph where nodes are records and edges represent
+#     high-similarity matches. Connected components define groups
+#     of potentially duplicate records.
+
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#         Input DataFrame containing literature records.
+
+#     fuzzy_pairs : List[Tuple[str, str]]
+#         List of pairwise duplicate matches from `get_fuzzy_matches`.
+
+#     Returns
+#     -------
+#     pd.DataFrame
+#         DataFrame mapping each record to a similarity group.
+
+#         Columns:
+#         - duplicate_check_string
+#         - sim_group (int)
+
+#     Notes
+#     -----
+#     - Records without matches are assigned `sim_group = -1`.
+#     - Groups represent *candidate duplicates*, not confirmed duplicates.
+#     """
+
+#     df = df.copy()
+
+#     if "duplicate_check_string" not in df.columns:
+#         df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+#     # Build graph
+#     graph = nx.Graph()
+#     graph.add_nodes_from(df["duplicate_check_string"])
+#     graph.add_edges_from(fuzzy_pairs)
+
+#     # Identify connected components
+#     components = list(nx.connected_components(graph))
+
+#     grouped_records = []
+    
+#     for group_id, component in enumerate(components, start=1):
+#         for string in component:
+#             grouped_records.append({
+#                 "duplicate_check_string": string,
+#                 "sim_group": group_id if len(component) > 1 else -1
+#             })
+
+#     groups_df = pd.DataFrame(grouped_records)
+
+#     return groups_df
+
+# def prepare_fuzzy_review_df(
+#     df: pd.DataFrame,
+#     similarity_threshold: int = 90
+# ) -> pd.DataFrame:
+#     """
+#     Prepare a DataFrame for manual duplicate review.
+
+#     This function:
+#     1. Generates fuzzy matches
+#     2. Groups them into similarity clusters
+#     3. Merges results back with original data
+
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#         Input DataFrame containing literature records.
+
+#     similarity_threshold : int, default=90
+#         Threshold for fuzzy matching.
+
+#     Returns
+#     -------
+#     pd.DataFrame
+#         DataFrame suitable for manual inspection.
+
+#     Notes
+#     -----
+#     - Output should be exported (CSV/Excel) for manual review.
+#     - Users should delete duplicate rows manually.
+#     """
+
+#     df = df.copy()
+
+#     # Step 1: generate matching strings
+#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
+
+#     # Step 2: fuzzy match pairs
+#     fuzzy_pairs = get_fuzzy_matches(df, similarity_threshold)
+
+#     # Step 3: group matches
+#     groups_df = get_similar_groups(df, fuzzy_pairs)
+
+#     # Step 4: merge back for inspection
+#     review_df = groups_df.merge(
+#         df,
+#         how="left",
+#         on="duplicate_check_string"
+#     )
+
+#     # Sort to make manual review easier
+#     review_df = review_df.sort_values(by=["sim_group"], ascending=False).reset_index(drop=True)
+
+#     return review_df
+
+
 
 def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -> pd.DataFrame:
     """

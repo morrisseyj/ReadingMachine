@@ -989,54 +989,108 @@ class Ingestor:
 
         return self.corpus_state.insights
     
-    def drop_duplicates(self) -> pd.DataFrame:
+    def drop_duplicates(self, threshold = 0.9) -> pd.DataFrame:
         """
-        Remove exact duplicates from insights using metadata.
+         Perform the duplicate detection stage of the pipeline and generate a review file.
 
-        Returns
-        -------
-        pd.DataFrame
-            Deduplicated DataFrame.
-        """
+        This method identifies potential duplicate documents using full-text similarity
+        (shingles + Jaccard) and prepares a CSV file for manual review. It represents
+        the "deduplication step" in the pipeline, but does NOT modify the corpus state.
 
-        dropped_exact = utils.drop_exact_duplicates(self.corpus_state.insights)
+        The user is expected to:
+        1. Open the generated CSV file
+        2. Review grouped duplicates (`sim_group`)
+        3. Remove duplicate rows (keeping one per document)
+        4. Run `update_state()` to apply the changes
 
-        # Store for fuzzy pass
-        self.dropped_exact_dupes = dropped_exact.copy()
-
-        return self.dropped_exact_dupes
-
-    def drop_fuzzy_duplicates(self, similarity_threshold: int = 90) -> pd.DataFrame:
-        """
-        Generate fuzzy duplicate candidates for manual review.
+        Parameters
+        ----------
+        threshold : float, default=0.9
+            Similarity threshold for grouping documents using Jaccard similarity.
+            Must be between 0 and 1. Higher values result in stricter duplicate detection.
 
         Returns
         -------
         None
+            This function does not return a DataFrame. It writes a CSV file for manual review.
+
+        Side Effects
+        ------------
+        - Writes a CSV file to:
+        `self.fuzzy_check_path / self.RUN / duplicate_check.csv`
+        - Prints instructions for completing the deduplication workflow
+
+        Notes
+        -----
+        - This function is part of a prescriptive CLI pipeline:
+        detection → manual review → update_state
+        - The corpus state remains unchanged until `update_state()` is called
+        - Uses full-text similarity for high-precision duplicate detection
         """
-
-        if not hasattr(self, "dropped_exact_dupes"):
-            raise ValueError("Run drop_duplicates() before drop_fuzzy_duplicates().")
-
-        review_df = utils.prepare_fuzzy_review_df(
-            self.dropped_exact_dupes,
-            similarity_threshold=similarity_threshold
-        )
-
-        # Create run-specific folder
+        # Set the save path for use to insepct
         save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
         os.makedirs(save_dir, exist_ok=True)
+        output_path = os.path.join(save_dir, "duplicate_check.csv")
 
-        output_path = os.path.join(save_dir, "fuzzy_matches.csv")
-        review_df.to_csv(output_path, index=False)
+        df_for_review = utils.prepare_dedup_review(state = self.corpus_state, threshold=threshold, engine="shingles")
+        df_for_review.to_csv(output_path, index=False)
 
         print(
-            f"Fuzzy duplicate review file saved to {output_path}.\n"
+            f"Potential duplicate review file saved to {output_path}.\n"
             "Delete duplicate rows and keep one per paper.\n"
             "Then run update_state()."
         )
 
         return None
+    
+    # def drop_duplicates(self) -> pd.DataFrame:
+    #     """
+    #     Remove exact duplicates from insights using metadata.
+
+    #     Returns
+    #     -------
+    #     pd.DataFrame
+    #         Deduplicated DataFrame.
+    #     """
+
+    #     dropped_exact = utils.drop_exact_duplicates(self.corpus_state.insights)
+
+    #     # Store for fuzzy pass
+    #     self.dropped_exact_dupes = dropped_exact.copy()
+
+    #     return self.dropped_exact_dupes
+
+    # def drop_fuzzy_duplicates(self, similarity_threshold: int = 90) -> pd.DataFrame:
+    #     """
+    #     Generate fuzzy duplicate candidates for manual review.
+
+    #     Returns
+    #     -------
+    #     None
+    #     """
+
+    #     if not hasattr(self, "dropped_exact_dupes"):
+    #         raise ValueError("Run drop_duplicates() before drop_fuzzy_duplicates().")
+
+    #     review_df = utils.prepare_fuzzy_review_df(
+    #         self.dropped_exact_dupes,
+    #         similarity_threshold=similarity_threshold
+    #     )
+
+    #     # Create run-specific folder
+    #     save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
+    #     os.makedirs(save_dir, exist_ok=True)
+
+    #     output_path = os.path.join(save_dir, "fuzzy_matches.csv")
+    #     review_df.to_csv(output_path, index=False)
+
+    #     print(
+    #         f"Fuzzy duplicate review file saved to {output_path}.\n"
+    #         "Delete duplicate rows and keep one per paper.\n"
+    #         "Then run update_state()."
+    #     )
+
+    #     return None
 
     def update_state(self, 
                      filename: str, 
@@ -1272,8 +1326,6 @@ class Ingestor:
         working_df = working_df[has_sentence | ~is_table]
 
         return working_df
-
-
 
     def chunk_papers(
         self,

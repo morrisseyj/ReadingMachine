@@ -587,6 +587,28 @@ class CorpusState:
         json_bytes = df_normalized.to_json().encode("utf-8")
         return hashlib.sha256(json_bytes).hexdigest()
 
+    
+    def copy(self) -> "CorpusState":
+        """
+        Create a deep copy of the CorpusState.
+
+        This method creates a new instance of `CorpusState` with deep copies
+        of all DataFrame attributes. This is useful for creating modified
+        versions of the state without altering the original.
+
+        Returns
+        -------
+        CorpusState
+            A new `CorpusState` instance with copied data.
+        """
+        return CorpusState(
+            questions=self.questions.copy(deep=True),
+            insights=self.insights.copy(deep=True),
+            full_text=self.full_text.copy(deep=True),
+            chunks=self.chunks.copy(deep=True)
+        )
+    
+
     # ---------------------------------------------------------------------- #
     #                             HELPER UTILS                              #
     # ---------------------------------------------------------------------- #
@@ -1224,6 +1246,28 @@ class SummaryState:
 
         combined = "".join(parts).encode("utf-8")
         return hashlib.sha256(combined).hexdigest()
+    
+    def copy(self) -> "SummaryState":
+        """
+        Create a deep copy of the SummaryState.
+
+        This method creates a new instance of `SummaryState` with deep copies
+        of all synthesis artifact lists. This is useful for creating modified
+        versions of the state without altering the original.
+
+        Returns
+        -------
+        SummaryState
+            A new `SummaryState` instance with copied data.
+        """
+        new_state = SummaryState(summary_save_location=self.summary_save_location)
+        new_state.cluster_summary_list = [df.copy(deep=True) for df in self.cluster_summary_list]
+        new_state.theme_schema_list = [df.copy(deep=True) for df in self.theme_schema_list]
+        new_state.mapped_theme_list = [df.copy(deep=True) for df in self.mapped_theme_list]
+        new_state.populated_theme_list = [df.copy(deep=True) for df in self.populated_theme_list]
+        new_state.orphan_list = [df.copy(deep=True) for df in self.orphan_list]
+        new_state.redundancy_list = [df.copy(deep=True) for df in self.redundancy_list]
+        return new_state
 
 
 

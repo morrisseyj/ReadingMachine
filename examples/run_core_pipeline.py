@@ -142,15 +142,25 @@ ingestor.ingest_papers()
 # Metadata is treated as a first-class object in the pipeline
 ingestor.update_metadata()
 
-# Remove exact duplicates based on title, author and year
+# Drop duplicate files to make sure each paper only enters the pipeline once. This is a two-step process:
+# 1) Drop exact duplicates based on exact hash of the full text
+# 2) Drop potential duplicates based on a jaccard score calculated on shingles of the text - creates a manual review file
+# This is a semi-manual process - the system identifies potential duplicates and you review them to confirm which ones to drop.
 ingestor.drop_duplicates()
 
-# Identify fuzzy duplicates based on text similarity
-# This is a semi-manual process - the system identifies potential duplicates and you review them to confirm which ones to drop.
-ingestor.drop_fuzzy_duplicates()
+# ----------------------------------------------------------
+# Manual Step
+# ----------------------------------------------------------
+#
+# Review the exported CSV files located in:
+#
+#    data/potential_duplicates/
+#
+# Remove any duplicate rows manually.
+#
+# After editing the CSV files run:
 
-# Update the state with the deduplicated file you confirmed in the previous step.
-ingestor.update_state("fuzzy_matches.csv")
+ingestor.update_state("potential_duplicates.csv")
 
 # Break each document into bounded segments (~paragraph scale)
 # This ensures the LLM reads manageable text windows
