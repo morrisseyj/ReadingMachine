@@ -1678,7 +1678,9 @@ class Insights:
 
             # Append to insights list
             insights.append(response_df)
-            utils.safe_pickle(insights, os.path.join(self.pickle_path, self.chunk_insights_pickle_file))
+            # Batch writes every 10 chunks
+            if (idx + 1) % 10 == 0:
+                utils.safe_pickle(insights, os.path.join(self.pickle_path, self.chunk_insights_pickle_file))
 
         # Convert insights list to DataFrame
         print("Converting insights to DataFrame and merging into corpus_state...")
