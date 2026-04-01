@@ -10,6 +10,10 @@ The result is a structured map of the arguments and insights contained in a docu
 
 ReadingMachine should therefore be understood primarily as a **semantic research methodology implemented through machine reading**, instead of a conventional AI application.
 
+### Note on status
+
+ReadingMachine is an experimental methodological framework. Some aspects of its behavior—particularly at scale—are based on theoretical expectations and early observations rather than full empirical validation. The project is released to enable testing, critique, and iterative refinement.
+
 ---
 
 ## Documentation
@@ -299,6 +303,8 @@ ReadingMachine is designed to make these choices **reproducible and inspectable*
 
 Analytical configurations—such as corpus definition, prompts, clustering parameters, and models—can be fixed and recorded. This allows the same workflow to be rerun under comparable conditions, making it possible to reproduce the analytical process and evaluate how changes in configuration affect the results.
 
+It should be noted that reproducibility here does not mean the exact reproduction of text across runs. The LLM is mildly stochastic due to rounding differences on the CUDA cores. Similarly, embeddings invoke small rounding errors. As small differences propagate through the pipeline, we will see semantic drift across runs. That said, under the same configurations and while scale pressures are not dominant (see below), we should see the regeneration of the same conceptual-themaic space, even if the exact semantics differ across runs. This means the same themes - even if slightly differently described - and the same organization of insights within those themes. 
+
 ### Inspectability
 
 The pipeline preserves intermediate artifacts at every stage of the analysis:
@@ -413,54 +419,137 @@ Instead, ReadingMachine produces a **faithful thematic representation of the cla
 
 ### Scale Considerations
 
-The pipeline is designed to operate on corpora substantially larger than those typically handled by retrieval systems or hierarchical summarization workflows. However, it is not infinitely scalable.
+The pipeline is designed to operate on corpora substantially larger than those typically handled by retrieval systems or hierarchical summarization workflows. However, it is not assumed to be infinitely scalable, and its behavior at scale should be understood as an open empirical question.
 
-The key architectural difference is where scale constraints appear.
+The key architectural difference is where scale constraints are expected to appear.
 
-In many retrieval or agentic workflows, the context bottleneck occurs during the final synthesis step, when the model must integrate all relevant information gathered across the corpus. As the amount of material grows, this can stress the context window and lead to known failure modes such as attention loss or “missing middle” effects - further raising omission risk and challenges with citation anchoring.
+In many retrieval or agentic workflows, the context bottleneck occurs during the final synthesis step, when the model must integrate all relevant information gathered across the corpus. As the amount of material grows, this can stress the context window and lead to known failure modes such as attention loss or “missing middle” effects—further raising omission risk and challenges with citation anchoring.
 
-ReadingMachine addresses this by converting documents into a structured intermediate representation before synthesis:
+ReadingMachine is designed to shift this constraint by converting documents into a structured intermediate representation before synthesis:
 
-documents
-→ chunks
-→ insights
-→ clusters
-→ themes
-→ synthesis
+documents  
+→ chunks  
+→ insights  
+→ clusters  
+→ themes  
+→ synthesis  
 
-Because synthesis occurs at the **theme level rather than the corpus level**, the model never needs to reason over the entire corpus simultaneously (the only stage where broader integration occurs is theme schema generation, which is scaffolded by cluster summaries or prior theme structures and repeated iteratively). Instead, it integrates the insights associated with one thematic area at a time.
+Because synthesis occurs at the **theme level rather than the corpus level**, the model does not need to reason over the entire corpus simultaneously. Instead, it integrates the insights associated with one thematic area at a time. The only stage where broader integration occurs is theme schema generation, which is scaffolded by cluster summaries or prior theme structures and repeated iteratively.
 
-This shifts the scaling constraint from:  
+In theory, this decomposition should allow the system to scale beyond the point at which corpus-level synthesis becomes unstable in other approaches.
 
-entire corpus exceeds context window
+---
 
-to:  
+### Theme-Level Context Pressure and Orphan Handling
 
-a single theme exceeds context window  
+Even with this decomposition, scale constraints are expected to reappear at the level of individual themes.
 
-In practice this allows the system to scale to larger corpora before encountering the same limitations.
+When the number of insights associated with a single theme approaches or exceeds the model’s effective context capacity, the **completeness of theme-level synthesis is expected to degrade**, primarily through the omission of lower-salience insights. This degradation is localized to the synthesis step for that theme rather than the pipeline as a whole.
 
-Two scale constraints are nevertheless anticipated.
+The pipeline is designed to surface these omissions through the **orphan detection mechanism**, after which omitted insights are reinserted and the theme is regenerated.
 
-**Insight density**
+In theory, this creates a feedback loop with two possible outcomes:
 
-As corpora grow, the number of extracted insights may become large enough to introduce noise in embedding space and clustering behavior. At sufficient scale, semantically similar insights may need to be consolidated or deduplicated before thematic analysis.
+1. The omitted insights integrate cleanly into the existing theme, suggesting that the theme structure is sufficient.
+2. The omitted insights disrupt the coherence of the theme, leading to the formation of additional themes and a redistribution of insights, thereby reducing context pressure.
 
-**Theme context limits**
+Under this interpretation, orphan handling functions not only as an omission-recovery mechanism but also as a potential driver of adaptive theme refinement under scale.
 
-Thematic synthesis still requires integrating many insights within the context window of a model. Extremely dense themes may eventually stress this stage of the pipeline.
+---
+
+### Expected Failure Mode at Scale
+
+This process is not expected to scale indefinitely, but degradation is likely to be gradual rather than abrupt.
+
+As theme-level context pressure increases, synthesis quality may decline progressively, with the model prioritizing more central or frequent insights and omitting more marginal ones. Orphan handling is intended to compensate for this by reintroducing omitted insights and prompting restructuring where necessary.
+
+A more pronounced failure mode may occur when the number of omitted insights (orphans) for a given theme becomes large enough that they themselves exceed the model’s ability to reliably integrate them during reinsertion. In this regime:
+
+- orphan reinsertion may become partial  
+- insights may be inconsistently incorporated  
+- themes may stabilize despite incomplete coverage  
+
+At this point, omission risk re-emerges in a less visible form.
+
+Two potential mitigation strategies are proposed, though both introduce trade-offs and require empirical validation:
+
+1. **Batch orphan reinsertion**  
+   Reinserting subsets of orphans iteratively. This may extend scalability but increases computational cost significantly due to repeated large generations.
+
+2. **Hierarchical summarization of insights**  
+   Collapsing semantically similar insights prior to synthesis. This may reduce context pressure but reintroduces early-stage compression and associated judgment calls about similarity thresholds.
+
+Both approaches represent areas for further experimentation rather than established solutions.
+
+---
+
+### Interpretation of Scaling Behavior
+
+Under this architecture, the primary constraint is hypothesized to shift from:
+
+**entire corpus exceeds context window**
+
+to:
+
+**insights associated with a single theme (or its orphan set) exceed context window**
+
+This shift does not eliminate scale limits but may delay their onset by distributing integration across multiple bounded synthesis steps.
+
+In effect, the system replaces a single hard context bottleneck with a series of smaller, theme-level constraints that can be iteratively managed—up to a point.
+
+---
+
+### Reproducibility Under Scale
+
+Reproducibility in this pipeline does not imply identical outputs across runs.
+
+Language models exhibit mild stochasticity even at temperature 0 due to numerical effects, and embedding pipelines introduce small variations. As these differences propagate through the pipeline—during insight extraction, clustering, theme generation, and orphan handling—outputs will vary.
+
+At smaller scales, it is expected that these variations will remain **semantic rather than structural**:
+
+- similar themes  
+- similar organization of insights  
+- differences primarily in phrasing or emphasis  
+
+In this regime, the system can reasonably be considered reproducible at the level of conceptual structure.
+
+At larger scales, it is hypothesized that variability may become **structural**:
+
+- themes may split, merge, or reorganize differently across runs  
+- insight distributions across themes may shift  
+- alternative but internally coherent thematic organizations may emerge  
+
+These outcomes may still represent valid interpretations of the corpus, but they no longer satisfy reproducibility in a strict methodological sense.
+
+---
+
+### Sources of Instability (Hypothesized)
+
+Several factors are expected to contribute to this transition as corpus size and complexity increase:
+
+1. **Embedding and clustering noise**  
+   As the number of insights grows, small variations in embeddings may produce different clustering structures. Since clusters serve as scaffolding for theme generation, this can alter the semantic surface presented to the model.
+
+2. **Theme-level context pressure**  
+   As themes accumulate more insights, synthesis may occur over incomplete subsets of the available information, even with orphan handling, leading to variation across runs.
+
+3. **Corpus heterogeneity**  
+   More heterogeneous corpora are expected to produce less stable clustering and require more iterations to stabilize themes, increasing opportunities for divergence.
+
+These factors may interact, and their relative importance is not yet well characterized.
+
+---
+
+### Practical Implications
+
+The expected behavior of the system suggests different use cases at different scales:
+
+- For **methodological investigation and benchmarking**, smaller corpora are more appropriate, as they are more likely to produce stable and reproducible outputs.
+- For **large-scale synthesis and mapping**, the system may still provide useful structural representations of a corpus, even if exact reproducibility is not achieved.
 
 **Redundancy trade-off**
 
 Because achieving these scale gains requires synthesizing themes independently, the system prioritizes **local completeness** within each theme. Even when previous theme summaries are provided as frozen context, models must balance preserving all relevant information locally with avoiding repetition globally. In practice, models prioritize the local task and this often results in some redundancy across themes in the final synthesis. This is considered acceptable as a tradeoff for lowering omission risk and ensuring marginal claims are persisted in the final output.
-
-**Corpus heterogeneity**
-
-The effects of extreme corpus heterogeneity on clustering stability and theme convergence remain an open empirical question. The current architecture is designed to expose instability (for example, through persistent orphan churn or shifting theme schemas across iterations) rather than conceal it. Future benchmarking will examine how heterogeneity interacts with clustering and synthesis behavior.  
-
-Note, that the architecture has been designed to accommodate future extensions that address some of these scaling issues—for example through insight consolidation, staged synthesis, or hierarchical thematic structures—but these remain areas for further development.
-
-In practice, these constraints are expected to appear **later than the scale limits typically encountered by retrieval-based or hierarchical summarization workflows**, because ReadingMachine delays compression and operates on structured insight representations rather than raw document context.
 
 ---
 
