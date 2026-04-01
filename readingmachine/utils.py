@@ -43,6 +43,7 @@ import pickle
 import os
 import hashlib
 import re
+import uuid
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
@@ -1146,7 +1147,7 @@ def safe_pickle(obj, path, retries=6, base_delay=0.05, backoff=2.0):
     -------
     None
     """
-    temp_path = f"{path}.tmp"
+    temp_path = f"{path}.{uuid.uuid4().hex}.tmp"
     delay = base_delay
 
     for attempt in range(retries):
