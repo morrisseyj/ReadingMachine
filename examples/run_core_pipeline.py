@@ -158,6 +158,8 @@ ingestor.drop_duplicates()
 #
 # Remove any duplicate rows manually.
 #
+# It can also be useful to manually update any missing metadata fields at this stage. Data might be missing due to the import format.
+#
 # After editing the CSV files run:
 
 ingestor.update_state("potential_duplicates.csv")

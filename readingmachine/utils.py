@@ -392,7 +392,7 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
                                 "core.Ingestor(corpus_state = latest_corpus_state, llm_client=llm_client, ai_model='gpt-4o')"),
         "07_full_text_and_chunks": ("You have ingested the full text of your papers, confirmed metadata, and chunked them. You should proceed to generate insights. Initialize the next class as follows:\n"
                                     f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
-                                    "core.InsightsGenerator(corpus_state = latest_corpus_state, llm_client=llm_client)"),
+                                    "core.Insights(corpus_state = latest_corpus_state, llm_client=llm_client, ai_model='gpt-4o', paper_context=paper_context)"),
         "08_insights": ("You have generated insights from your papers. You should proceed to the next step. Initialize the next class as follows:\n"
                         f"latest_corpus_state = state.CorpusState.load(filepath = '{latest_path}')\n"
                         "core.Clustering(corpus_state = latest_corpus_state, llm_client=llm_client, embedding_model='text-embedding-3-small')"),
@@ -1125,30 +1125,53 @@ def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -
         return pd.concat([other, ref], ignore_index=True)
 
 
-def safe_pickle(obj, path):
+def safe_pickle(obj, path, retries=6, base_delay=0.05, backoff=2.0):
     """
-    Safely pickles an object to disk, by saving a temp file and then renaming it to the true path and then clean up the temp
-    This is an atomic save that prevents issues with partial writes. If the write fails only the temp fails, not the backup.
-    
+    Safely pickles an object to disk using atomic replace with retry + exponential backoff.
+
     Parameters
     ----------
     obj : Any
         The object to pickle.
-
     path : str
         The file path to save the pickle.
+    retries : int
+        Number of replace attempts before failing.
+    base_delay : float
+        Initial delay between retries (seconds).
+    backoff : float
+        Multiplier for exponential backoff.
 
     Returns
     -------
     None
     """
-    # Create the tmp path
     temp_path = f"{path}.tmp"
-    # Clean up old temp file if it exists - crash happebed during a write and left a temp file, we want to remove it before writing again
+
+    # Clean up stale temp file
     if os.path.exists(temp_path):
-        os.remove(temp_path)
-    # Write to temp path first
+        try:
+            os.remove(temp_path)
+        except PermissionError:
+            pass  # if even temp is locked, overwrite attempt will fail later
+
+    # Write temp file
     with open(temp_path, "wb") as f:
         pickle.dump(obj, f)
-    # Atomically move temp file to final path
-    os.replace(temp_path, path)
+        f.flush()
+        os.fsync(f.fileno())
+
+    # Retry replace with exponential backoff
+    delay = base_delay
+    for attempt in range(retries):
+        try:
+            os.replace(temp_path, path)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+            delay *= backoff
+
+    # Should never reach here
+    raise RuntimeError("safe_pickle failed unexpectedly")
