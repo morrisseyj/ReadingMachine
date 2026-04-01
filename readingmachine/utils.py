@@ -1147,26 +1147,18 @@ def safe_pickle(obj, path, retries=6, base_delay=0.05, backoff=2.0):
     None
     """
     temp_path = f"{path}.tmp"
-
-    # Clean up stale temp file
-    if os.path.exists(temp_path):
-        try:
-            os.remove(temp_path)
-        except PermissionError:
-            pass  # if even temp is locked, overwrite attempt will fail later
-
-    # Write temp file
-    with open(temp_path, "wb") as f:
-        pickle.dump(obj, f)
-        f.flush()
-        os.fsync(f.fileno())
-
-    # Retry replace with exponential backoff
     delay = base_delay
+
     for attempt in range(retries):
         try:
+            with open(temp_path, "wb") as f:
+                pickle.dump(obj, f)
+                f.flush()
+                os.fsync(f.fileno())
+
             os.replace(temp_path, path)
             return
+
         except PermissionError:
             if attempt == retries - 1:
                 raise
