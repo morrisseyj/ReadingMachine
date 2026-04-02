@@ -698,7 +698,7 @@ class Ingestor:
         # Populate the full text corpus_state object
         full_text = (
             working_insights[["paper_id", "pages"]]
-            .assign(full_text=lambda x: ["".join(pages) for pages in x["pages"]])
+            .assign(full_text=lambda x: [" ".join(pages) for pages in x["pages"]])
             .drop(columns=["pages"]) # Drop pages as they take up memory and are not needed, we have the full text now
         )
         # Set the full text as a corpus_state attribute
@@ -989,6 +989,7 @@ class Ingestor:
 
         return self.corpus_state.insights
     
+    
     def drop_duplicates(self, threshold = 0.9) -> pd.DataFrame:
         """
          Perform the duplicate detection stage of the pipeline and generate a review file.
@@ -1042,6 +1043,7 @@ class Ingestor:
         )
 
         return None
+
     
     # def drop_duplicates(self) -> pd.DataFrame:
     #     """
@@ -1148,7 +1150,7 @@ class Ingestor:
 
         # Align with full text:
         # Get unique valid paper ids from the deduped insights
-        valid_ids = insights_df["paper_id"].unique()
+        valid_ids = set(insights_df["paper_id"])
         # Sanity check to make sure some papers came in
         if len(valid_ids) == 0:
             raise ValueError(f"No records found in {filepath}. Please ensure you have kept at least one record per paper and that the paper_id column is intact.")
@@ -1329,8 +1331,8 @@ class Ingestor:
 
     def chunk_papers(
         self,
-        chunk_size: int = 600,
-        chunk_overlap: int = 120,
+        chunk_size: int = 3500,
+        chunk_overlap: int = 350,
         length_function=len,
         separators: Optional[List[str]] = None,
         is_separator_regex: bool = False
@@ -1353,10 +1355,10 @@ class Ingestor:
 
         Parameters
         ----------
-        chunk_size : int, default=600
+        chunk_size : int, default=3500
             Maximum size of each chunk (in characters or as defined by `length_function`).
 
-        chunk_overlap : int, default=120
+        chunk_overlap : int, default=350
             Number of overlapping characters between consecutive chunks.
 
         length_function : callable, default=len
@@ -1364,7 +1366,7 @@ class Ingestor:
 
         separators : list of str, optional
             Ordered list of separators used for recursive splitting.
-            Defaults to ["\\n\\n", "\\n", " ", ""].
+            Defaults to ["\n\n", "\n", ". ", "! ", "? ", " ", ""].
 
         is_separator_regex : bool, default=False
             Whether separators should be treated as regex patterns.
@@ -1387,8 +1389,31 @@ class Ingestor:
         - The pipeline is designed to reduce token usage and improve LLM efficiency
            without sacrificing semantic coverage.
         """
+
+        def _normalize_text(text: str) -> str:
+
+            if not isinstance(text, str):
+                return text
+
+            # remove soft hyphens
+            text = text.replace('\xad', '')
+
+            # fix broken words
+            text = re.sub(r'(?<=\w)\n(?=\w)', '', text)
+
+            # convert multiple newlines to paragraph markers
+            text = re.sub(r'\n{2,}', '\n\n', text)
+
+            # convert single newlines to space
+            text = re.sub(r'\n', ' ', text)
+
+            # normalize whitespace
+            text = re.sub(r'\s+', ' ', text)
+
+            return text.strip()
+
         if separators is None:
-            separators = ["\n\n", "\n", " ", ""]
+            separators = ["\n\n", "\n", ". ", "! ", "? ", " ", ""]
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
@@ -1398,7 +1423,13 @@ class Ingestor:
             is_separator_regex=is_separator_regex
         )
 
-        full_text_list = self.corpus_state.full_text["full_text"].to_list()
+        full_text_list = (
+            self.corpus_state.full_text["full_text"]
+            .fillna("")
+            .apply(_normalize_text)
+            .to_list()
+        )
+
         chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
         # Create the chunks corpus_state from the full_text corpus_state
         self.corpus_state.full_text["chunk_text"] = chunks_list
