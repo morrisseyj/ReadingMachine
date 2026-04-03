@@ -2362,74 +2362,150 @@ class Clustering:
     
     def embed_insights(self) -> np.ndarray:
         """
-        Generate vector embeddings for insights.
+        Generate vector embeddings for insights with incremental persistence and resume support.
 
-        Each valid insight string is sent to the embedding model and the
-        resulting vector is stored both as a NumPy array and within the
-        `valid_embeddings_df`.
+        This method iterates over all valid insight strings and generates vector
+        embeddings using the configured embedding model. It is designed for
+        long-running jobs and provides fault tolerance through periodic checkpointing
+        and resumable execution.
 
-        Resume support is provided through a pickle file containing
-        previously generated embeddings.
+        Key Features
+        ------------
+        1. Incremental Saving
+        - Embeddings are written to disk every 10 iterations using `utils.safe_pickle`.
+        - This ensures progress is preserved in case of interruption (e.g., API failure,
+            process termination).
+
+        2. Resume Capability
+        - If a pickle file exists, the user can choose to resume or restart.
+        - On resume, previously saved embeddings are loaded and the method continues
+            from the correct index (`start_idx = len(embeddings)`).
+        - The DataFrame is rehydrated so completed rows already contain embeddings.
+
+        3. Deterministic Alignment
+        - Embeddings are generated in the same order as `valid_embeddings_df`.
+        - Each embedding is written directly to its corresponding row using index alignment.
+        - This avoids the need for joins, IDs, or post-processing merges.
+
+        4. Data Integrity
+        - `safe_pickle` ensures atomic writes, preventing file corruption.
+        - Defensive handling supports edge cases such as:
+            - empty or None pickle files
+            - legacy numpy array formats
+
+        Workflow
+        --------
+        - Initialize storage and ensure output column exists.
+        - If a previous run exists:
+            - Load embeddings and determine resume index.
+            - Rehydrate DataFrame with completed embeddings.
+        - Iterate over remaining insights:
+            - Generate embedding via API call.
+            - Append to in-memory list.
+            - Write embedding to DataFrame at the correct index.
+            - Save progress every 10 embeddings.
+        - Finalize by stacking embeddings into a NumPy array and saving once more.
 
         Returns
         -------
         np.ndarray
-            Matrix of embedding vectors for all valid insights.
+            A 2D NumPy array of shape (n_insights, embedding_dims) containing
+            embeddings for all valid insights.
+
+        Side Effects
+        ------------
+        - Updates `self.valid_embeddings_df["full_insight_embedding"]` in place.
+        - Updates `self.insight_embeddings_array`.
+        - Writes intermediate and final embeddings to `self.embeddings_pickle_path`.
+
+        Assumptions
+        -----------
+        - The order of `valid_embeddings_df` remains stable across runs.
+        - The number of saved embeddings corresponds exactly to completed rows.
+        - The embedding model returns consistent vector dimensions.
+
+        Notes
+        -----
+        - This method replaces the need for separate `_save_embeddings` and
+        `_load_embeddings` helpers.
+        - Partial progress is always recoverable up to the last successful checkpoint.
         """
-        # Check if embeddings pickle exists
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(self.embeddings_pickle_path), exist_ok=True)
+
+        embeddings = []
+        start_idx = 0
+
+        # Initialize column for alignment (only once)
+        if "full_insight_embedding" not in self.valid_embeddings_df.columns:
+            self.valid_embeddings_df["full_insight_embedding"] = None
+
+        # --- Resume / recovery handling ---
         if os.path.exists(self.embeddings_pickle_path):
             recover = None
             while recover not in ['r', 'n']:
                 recover = input(
                     f"Embeddings pickle found at '{self.embeddings_pickle_path}'. "
-                    "Do you wish to reload them or regenerate embeddings?\n"
-                    "Hit 'n' to generate new embeddings (this will overwrite existing pickle), or 'r' to reload from file:\n"
+                    "Do you wish to resume or regenerate embeddings?\n"
+                    "Hit 'r' to resume, or 'n' to regenerate (overwrite existing pickle):\n"
                 ).lower()
+
             if recover == 'r':
-                self._load_embeddings()
-                return(self.insight_embeddings_array)
+                print("Loading existing embeddings for resume...")
+                with open(self.embeddings_pickle_path, "rb") as f:
+                    embeddings = pickle.load(f)
+
+                # Defensive handling
+                if embeddings is None:
+                    embeddings = []
+                elif isinstance(embeddings, np.ndarray):
+                    embeddings = embeddings.tolist()
+
+                start_idx = len(embeddings)
+
+                # Rehydrate into dataframe
+                if start_idx > 0:
+                    self.valid_embeddings_df.loc[:start_idx-1, "full_insight_embedding"] = embeddings
+
             else:
                 print("Overwriting existing embeddings pickle...")
-                
-        # Generate embeddings for valid insights only
-        insight_embeddings = []
-        for idx, insight in enumerate(self.valid_embeddings_df["no_author_insight_string"], start=1):
-            print(f"Embedding insight {idx} of {self.valid_embeddings_df.shape[0]}")
+                embeddings = []
+                start_idx = 0
+
+        # --- Generate embeddings ---
+        total = self.valid_embeddings_df.shape[0]
+
+        for idx, insight in enumerate(
+            self.valid_embeddings_df["no_author_insight_string"][start_idx:],
+            start=start_idx
+        ):
+            print(f"Embedding insight {idx + 1} of {total}")
+
             response = self.llm_client.embeddings.create(
                 input=insight,
                 model=self.embedding_model,
                 dimensions=self.embedding_dims
             )
-            insight_embeddings.append(response.data[0].embedding)
 
+            emb = response.data[0].embedding
+            embeddings.append(emb)
 
-        self.insight_embeddings_array = np.vstack(insight_embeddings)
-        self.valid_embeddings_df["full_insight_embedding"] = [emb.tolist() for emb in self.insight_embeddings_array]
+            # Assign embedding to correct row
+            self.valid_embeddings_df.at[idx, "full_insight_embedding"] = emb
 
-        self._save_embeddings()  # safe pickle save
-        return self.insight_embeddings_array
+            # Incremental save every 10 embeddings
+            if (idx + 1) % 10 == 0:
+                utils.safe_pickle(embeddings, self.embeddings_pickle_path)
 
-    def _save_embeddings(self):
-        """
-        Save embeddings safely, creating folder if it does not exist.
-        """
-        os.makedirs(os.path.dirname(self.embeddings_pickle_path), exist_ok=True)
-        # Use the safe_pickle utility to ensure atomic save and prevent corruption
-        utils.safe_pickle(self.insight_embeddings_array, self.embeddings_pickle_path)
-        print(f"Embeddings safely saved to '{self.embeddings_pickle_path}'.")
+        # --- Finalize ---
+        self.insight_embeddings_array = (
+            np.vstack(embeddings) if embeddings else np.array([])
+        )
 
-    def _load_embeddings(self):
-        """
-        Load embeddings safely if the pickle exists.
-        """
-        if not os.path.exists(self.embeddings_pickle_path):
-            raise FileNotFoundError(f"No embeddings pickle found at {self.embeddings_pickle_path}")
-        with open(self.embeddings_pickle_path, "rb") as f:
-            data = pickle.load(f)
-        self.insight_embeddings_array = data
-        print("Linking embeddings back to valid embeddings DataFrame...")
-        self.valid_embeddings_df["full_insight_embedding"] = [emb.tolist() for emb in self.insight_embeddings_array]    
-        print(f"Embeddings loaded from '{self.embeddings_pickle_path}'.")
+        # Final save to ensure completeness
+        utils.safe_pickle(embeddings, self.embeddings_pickle_path)
+
         return self.insight_embeddings_array
 
     def reduce_dimensions(
