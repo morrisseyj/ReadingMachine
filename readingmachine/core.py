@@ -2358,7 +2358,10 @@ class Clustering:
 
         valid = valid[valid["no_author_insight_string"].str.strip() != ""]
 
-        return(valid)
+        # Ensure clean positional index for embedding alignment
+        valid = valid.reset_index(drop=True)
+
+        return valid
     
     def embed_insights(self) -> np.ndarray:
         """
