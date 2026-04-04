@@ -3929,7 +3929,7 @@ class Summarize:
             ].copy()
 
             q_schema_json = q_schema_df[
-                ["theme_id", "theme_label", "instructions"]
+                ["theme_id", "theme_label", "theme_description", "instructions"]
             ].to_json(orient="records", indent=2)
 
             # Pre-build JSON schema (explicit)

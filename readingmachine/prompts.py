@@ -952,65 +952,76 @@ class Prompts:
         """
 
         allowed_ids_str = ", ".join(str(id) for id in allowed_ids)
+
         if other_theme_id is not None:
-            other_theme = f"- **The Residual Override:** If no substantive theme applies, assign the insight to theme_id {other_theme_id}. Do NOT return the string 'other' as the theme_id.\n"
+            other_theme = (
+                f"- **Mandatory Residual Assignment (HARD RULE):** Every insight MUST be assigned at least one theme_id.\n"
+                f"  If an insight does not clearly satisfy any theme, you MUST assign it to theme_id {other_theme_id}.\n"
+                f"  This rule OVERRIDES all other constraints, including exclusion rules and semantic strictness.\n"
+                f"  Returning an empty array, null, or no assignment is strictly forbidden.\n"
+            )
         else:
-           other_theme = ""
+            other_theme = (
+                "- **Mandatory Assignment (HARD RULE):** Every insight MUST be assigned at least one theme_id.\n"
+                "  If no theme clearly applies, assign the closest matching theme_id.\n"
+                "  Returning an empty array, null, or no assignment is strictly forbidden.\n"
+            )
+
         if conflicts_theme_id is not None:
-            conflicts_theme = f"- **Conflict Flagging:** If the insight reflcts substantive discursive conflict and explicitly matches the detection triggers (note no inclusion/exclusion criteria in this case) you should assign it to the theme_id {conflicts_theme_id}. Do NOT return the string 'conflicts' as the theme_id. As above all insights may be tagged to multiple themes.\n"
-        else:       
+            conflicts_theme = (
+                f"- **Conflict Flagging:** If the insight reflects substantive discursive conflict and matches detection triggers,\n"
+                f"  you should assign it to theme_id {conflicts_theme_id}. This can be applied alongside other themes.\n"
+            )
+        else:
             conflicts_theme = ""
 
-        return(
+        return (
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
             "Your task is to map batches of insights to a Thematic Codebook Schema with full coverage.\n\n"
 
             "## THEMATIC SCHEMA STRUCTURE\n"
-            "You will be provided with a JSON 'codebook' representing the thematic pillars. Each theme follows this structure:\n"
+            "You will be provided with a JSON codebook representing the thematic pillars. Each theme follows this structure:\n"
             "{\n"
-            "  'theme_id': '<numeric identifier (e.g., 1, 2, 3)>',\n"
-            "  'theme_description': 'A concise summary of the theme’s core intent and semantic territory',\n"
-            "  'instructions': 'Detailed instructions (either INCLUDE/EXCLUDE logic or DETECTION TRIGGERS)'\n"
+            '  "theme_id": "<numeric identifier>",\n'
+            '  "theme_label": "<short label>",\n'
+            '  "theme_description": "<summary of semantic scope>",\n'
+            '  "instructions": "<INCLUDE/EXCLUDE logic or DETECTION TRIGGERS>"\n'
             "}\n\n"
 
             "## INPUT\n"
             "RESEARCH QUESTION: <question_text>\n"
             "THEMATIC CODEBOOK:\n"
-            "<JSON array of themes, each with theme_id, theme_label, theme_description, and instructions>\n\n"
+            "<JSON array of themes>\n\n"
             "INSIGHTS TO MAP:\n"
             "<insight_id>: <insight_text>\n"
-            "<insight_id>: <insight_text>\n"
             "...\n\n"
-            
+
             "## MAPPING LAWS\n"
-            "-. **Active Best-Match:** Evaluate every insight against the 'theme_description' and 'instructions' of all themes independently. Use 'Conceptual Gravity' to identify all themes where the insight aligns with the core intent and narrative defined in the description.\n"
-            "-. **Strict Exclusions:** If an insight meets an 'EXCLUDE' criterion for a theme, you are strictly forbidden from mapping it to that theme.\n"
-            "-. **Multi-Labeling:** If an insight legitimately satisfies the criteria for multiple themes, you must assign it to ALL relevant theme_ids.\n"
+            "- **Active Best-Match:** Evaluate every insight against ALL themes using theme_description and instructions.\n"
+            "- **Strict Exclusions:** If an insight meets an EXCLUDE criterion for a theme, do not assign that theme.\n"
+            "- **Multi-Labeling:** Assign ALL themes that validly apply.\n"
             f"{other_theme}"
             f"{conflicts_theme}"
-            "-. **Semantic Integrity:** Do not rely on simple keyword matching. Map based on the underlying logic and conceptual boundaries defined in the instructions.\n\n"
+            "- **Semantic Integrity:** Use conceptual meaning, not keyword matching.\n"
+            "- **Bias Toward Assignment:** When uncertain, prefer assigning the closest valid theme_id rather than leaving an insight unmapped.\n\n"
 
             "## OUTPUT CONTRACT (STRICT JSON ONLY)\n"
-            "Return ONLY a JSON object. No preamble, no commentary, no conversational filler. Structure:\n"
+            "Return ONLY a JSON object. No commentary.\n"
             "{\n"
             '  "mapped_data": [\n'
             '    { "insight_id": "string", "theme_id": ["string"] }\n'
-            '  ]\n'
+            "  ]\n"
             "}\n\n"
 
-            "RULES FOR theme_ids:\n"
-            "- **Always return an array**, even if there is only one theme (e.g., ['1']).\n"
-            "- If multiple themes apply, include all relevant IDs in the array (e.g., ['1', '2', '3']).\n"
-            "- You MUST use only the numeric theme_id values provided in the THEMATIC CODEBOOK.\n"
-            "- You MUST return the theme_id exactly as provided.\n"
+            "## RULES FOR theme_ids\n"
+            "- Always return an array (e.g., ['1']).\n"
+            "- Use ONLY provided theme_id values.\n"
             "- Do NOT return theme_label.\n"
             "- Do NOT return text such as 'other' or 'conflicts'.\n"
             "- Do NOT invent new IDs.\n"
-            "- Any ID not present in the codebook is invalid.\n"
-            "- Never return a null, a single string, or an empty array.\n"
-
-            f"The only valid theme_id values are: [{allowed_ids_str}].\n\n"
+            "- Never return null, a single string, or an empty array.\n"
+            f"- Valid theme_id values: [{allowed_ids_str}].\n\n"
         )
 
 
