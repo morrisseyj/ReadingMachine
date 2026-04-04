@@ -11,7 +11,7 @@ dependencies = [
     "unpywall",
     "numpy==1.26.4",
     "scipy==1.11.4",
-    "pandas==2.2.2",
+    "pandas==2.1.4",
     "rapidfuzz",
     "networkx",
     "semanticscholar",
