@@ -95,19 +95,19 @@ This folder contains the following materials:
 
 
 - output/
-The ReadingMachine output(s) being evaluated, including the full structured synthesis.
+    The ReadingMachine output(s) being evaluated, including the full structured synthesis.
 
 
 - EVAL_INSTRUCTIONS.md
-A copy of the evaluation framing and instructions presented to reviewers.
+    A copy of the evaluation framing and instructions presented to reviewers.
 
 
 - EVALUATION_SUMMARY.md
-Periodically updated aggregation of evaluation results, including:
+    Periodically updated aggregation of evaluation results, including:
 
-- response counts per evaluation dimension
-- distributions of scores
-- selected attributed reviewer comments
+    - response counts per evaluation dimension
+    - distributions of scores
+    - selected attributed reviewer comments
 
 Additional supporting materials (e.g. review schema, aggregation notes) may be added over time for transparency.
 
