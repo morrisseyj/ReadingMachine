@@ -94,15 +94,15 @@ They are not used to rank or score the system competitively.
 This folder contains the following materials:
 
 
-- output/
+- output/  
     The ReadingMachine output(s) being evaluated, including the full structured synthesis.
 
 
-- EVAL_INSTRUCTIONS.md
+- EVAL_INSTRUCTIONS.md  
     A copy of the evaluation framing and instructions presented to reviewers.
 
 
-- EVALUATION_SUMMARY.md
+- EVALUATION_SUMMARY.md  
     Periodically updated aggregation of evaluation results, including:
 
     - response counts per evaluation dimension
