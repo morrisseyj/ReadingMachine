@@ -4,6 +4,8 @@ This folder contains materials related to the open evaluation of ReadingMachine 
 
 The evaluation focuses on the fidelity, coherence, and integrity of ReadingMachine’s structured corpus reading, assessed through an open, attributed review process. Reviews are submitted via an external form and aggregated transparently in this repository.
 
+---
+
 ## Folder Structure
 
 ### output/
@@ -27,6 +29,7 @@ Contains aggregated results from submitted reviews, including:
 - selected attributed reviewer comments
 
 Results are reported by dimension rather than collapsed into a single score.
+---
 
 ## Submitting a Review
 
@@ -35,6 +38,8 @@ Reviews are submitted via a structured, non‑anonymous Google Form:
 👉 [LINK TO GOOGLE FORM]
 
 Partial completion is expected and valid; reviewers are encouraged to assess only those aspects they feel qualified to evaluate.
+
+---
 
 ## Notes
 
