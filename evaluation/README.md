@@ -1,121 +1,43 @@
-# Evaluation of ReadingMachine Outputs
+# /evaluation — Open Evaluation Materials
 
 This folder contains materials related to the open evaluation of ReadingMachine outputs.
 
-The aim of this evaluation is to assess the epistemic fidelity of structured corpus reading at scale: whether ReadingMachine produces a faithful, coherent, and usable mapping of what a corpus contains, prior to any downstream reasoning or interpretation.
+The evaluation focuses on the fidelity, coherence, and integrity of ReadingMachine’s structured corpus reading, assessed through an open, attributed review process. Reviews are submitted via an external form and aggregated transparently in this repository.
 
-This evaluation is intentionally not a review of writing quality, persuasiveness, or correctness of conclusions.
+## Folder Structure
 
-## What This Evaluation Is (and Is Not)
+### output/
 
-### What it is
+Contains the ReadingMachine output(s) being evaluated, including the full structured synthesis generated from the corpus.
 
-The evaluation assesses whether ReadingMachine:
+Each output corresponds to a specific run, corpus, and configuration of the system.
 
-- Covers major thematic strands present in the corpus
-- Represents arguments and disagreements recognizably and without distortion
-- Avoids hallucination or misattribution of sources
-- Produces conceptually coherent themes aligned with the research questions
-- Preserves conflict and minority positions where they exist
-- Produces an output that is usable as a basis for downstream analysis
+### EVAL_INSTRUCTIONS.md
 
-In short, it asks whether the system has read the corpus faithfully.
+Describes what reviewers are being asked to evaluate, how the evaluation should be interpreted, and what is out of scope (e.g. prose quality, argumentative persuasiveness).
 
-### What it is not
+Prospective reviewers should read this file before submitting a review.
 
-This evaluation does not assess:
+### EVALUATION_SUMMARY.md
 
-- Prose style, tone, or readability
-- Whether reviewers agree with arguments presented
-- Whether conclusions are normatively or politically correct
-- Whether the output reflects a reviewer’s preferred framing
+Contains aggregated results from submitted reviews, including:
 
-Reviewers are explicitly not asked to judge the output as an argument or essay.
+- the number of reviewers assessing each dimension
+- distributions of responses (including “not assessed”)
+- selected attributed reviewer comments
 
-## Open, Attributed Review Model
+Results are reported by dimension rather than collapsed into a single score.
 
-Evaluation is conducted as an open, attributed review process.
+## Submitting a Review
 
-Reviews are not anonymous
+Reviews are submitted via a structured, non‑anonymous Google Form:
 
-- Reviewers self‑identify their name, affiliation, and domain expertise
-- Attribution is used to prevent misuse and to contextualize feedback, not to police opinion
+👉 [LINK TO GOOGLE FORM]
 
-Participation is voluntary, and disagreement among reviewers is expected and informative.
+Partial completion is expected and valid; reviewers are encouraged to assess only those aspects they feel qualified to evaluate.
 
-## Partial Completion Is Expected
+## Notes
 
-Reviewers are not expected to complete the entire evaluation form.
-
-Instead:
-
-- Each evaluation dimension can be assessed independently
-- Reviewers are encouraged to answer only those questions they feel qualified to assess
-- “Not assessed” is a valid and meaningful response for every dimension
-
-Because no reviewer is expected to know the full corpus exhaustively, *completeness is evaluated within the reviewer’s domain knowledge*, not against an impossible standard of total recall.
-
-## How to Submit a Review
-
-Reviews are submitted via a structured Google Form:
-
-👉 LINK_TO_GOOGLE_FORM
-
-The form is designed to be accessible to researchers who do not work in GitHub while remaining technically precise and methodologically explicit.
-
-## How Evaluation Results Are Used
-
-### Aggregation
-
-Evaluation results are aggregated by dimension, not collapsed into a single score.
-
-For each dimension (e.g. hallucination risk, thematic coherence):
-
-- We report how many reviewers assessed that dimension
-- We report the distribution of responses
-- We explicitly report the number of reviewers who marked “Not assessed”
-
-This approach reflects the fact that reviewers engage with different parts of the output at different levels of depth.
-
-### Interpretation
-
-Disagreement, uncertainty, and partial assessment are treated as signal, not noise.
-
-Aggregated results are intended to:
-
-- Surface recurring strengths and failure modes
-- Indicate areas of synthesis stress or conceptual strain
-- Inform further development of the methodology
-
-They are not used to rank or score the system competitively.
-
-## Contents of This Folder
-
-This folder contains the following materials:
-
-
-- output/  
-    The ReadingMachine output(s) being evaluated, including the full structured synthesis.
-
-
-- EVAL_INSTRUCTIONS.md  
-    A copy of the evaluation framing and instructions presented to reviewers.
-
-
-- EVALUATION_SUMMARY.md  
-    Periodically updated aggregation of evaluation results, including:
-
-    - response counts per evaluation dimension
-    - distributions of scores
-    - selected attributed reviewer comments
-
-Additional supporting materials (e.g. review schema, aggregation notes) may be added over time for transparency.
-
-## Relationship to the ReadingMachine Project
-
-This evaluation process is integral to ReadingMachine’s methodological claims.
-ReadingMachine is not presented as producing definitive syntheses or authoritative conclusions. It is presented as a structured reading system whose outputs must themselves be inspectable, contestable, and evaluable.
-Open, bounded, attributed evaluation is therefore treated as part of the method, not as an afterthought.
-
-## Questions or Contributions
-If you have questions about the evaluation process, or if you wish to engage more deeply with the methodology, please see the main project README or open an issue in the repository.
+- This folder is updated periodically as new reviews are received.
+- Aggregated results reflect reviewer judgments of the output as a corpus reading, not as an argument or essay.
+- Reviewer identity and self‑described expertise are used to contextualize feedback, not to weight or gate submissions.
