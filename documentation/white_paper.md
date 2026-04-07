@@ -1,5 +1,7 @@
 # ReadingMachine: A Computational Methodology for Structured Corpus Reading and Large-Scale Synthesis
 
+A version of this paper was also published on Arxive - 
+
 ## Abstract
 
 The volume of written material produced across modern institutions now far exceeds the capacity of human analysts to read, interpret, and synthesize it comprehensively. Existing computational approaches—such as retrieval-augmented generation, hierarchical summarization, and agentic research workflows—scale access to information but introduce persistent risks of silent omission, early information loss, and opaque analytical paths. As a result, high-stakes synthesis tasks in research, policy, law, and organizational analysis remain constrained by partial coverage and limited inspectability.
