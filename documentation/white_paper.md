@@ -2,45 +2,6 @@
 
 A version of this paper was also published on Arxive - [details]
 
-## Foreword
-
-This document was produced by the [ReadingMachine](https://github.com/morrisseyj/ReadingMachine/) framework. ReadingMachine is designed to generate a high-coverage, structured, traceable mapping of a defined document corpus, organized around a specified set of research questions. The output should be read as a **corpus reading**, not as an argument, position paper, or normative assessment. The system does not determine what is important, correct, or true. It represents what is present in the corpus under the specified research questions.
-
-ReadingMachine operates as a **tightly bounded reader**. It does not independently determine research questions, define the scope of inquiry, or evaluate the importance or correctness of claims. Reasoning steps—such as the formulation of motivating questions, the definition of the corpus, and the interpretive goals of the analysis—lie with the user. The role of ReadingMachine is to execute a structured reading of the material it is given, according to those externally specified parameters.
-
-For this reason, it is important to state explicitly the research questions that motivated this reading and the process by which the corpus was constructed. These elements define the analytical boundaries within which ReadingMachine operates and, correspondingly, the scope of what this output can be expected to represent.
-
-Readers interested in the underlying methodology, design assumptions, and known trade‑offs should consult the accompanying [whitepaper](https://github.com/morrisseyj/ReadingMachine/blob/main/documentation/white_paper.md).
-
-### Research Questions
-
-The research questions guiding this reading were developed by Oxfam through formal research processes, including the development of a Terms of Reference. They are reproduced here for transparency:
-
-- What drivers account for the resurgence of industrial policy in both highly industrialized and industrializing countries?
-- How have definitions and approaches to industrial policy shifted from the post‑World War II period to the present, particularly with respect to sustainability, equality, and human rights?
-- What challenges and constraints do less‑industrialized countries face in implementing effective industrial policy?
-- What recommendations can be made to industrialized countries to reduce harm to less‑industrialized countries?
-- What reforms to transnational institutions could expand policy space for less‑industrialized countries?
-
-### Corpus Construction
-
-The corpus underlying this output was constructed using the [`getlit`](https://github.com/morrisseyj/ReadingMachine/blob/main/readingmachine/tools/getlit.py) module of ReadingMachine. Corpus construction involved a combination of automated retrieval and human judgment, following these steps:
-
-1. Generation of search terms for each research question using an LLM
-2. Execution of those searches across OpenAlex and Crossref
-3. Initial ranking and selection of results by relevance
-4. Supplementary identification of salient grey literature using OpenAI’s `o3‑deep‑research` model
-5. Automated deduplication with manual checks
-6. Final check of the proposed corpus for obviously missing canonical works, supported by OpenAI’s `o3‑deep‑research` model
-7. Manual removal of clearly low‑salience or out‑of‑scope titles
-8. Acquisition of full texts where institutional access permitted
-
-This process was intended to balance breadth, relevance, and feasibility, while maintaining explicit boundaries around what constitutes “the corpus” for this analysis.
-
-The final corpus used in this run is available here: **[link to corpus repository]**.
-
----
-
 ## Abstract
 
 The volume of written material produced across modern institutions now far exceeds the capacity of human analysts to read, interpret, and synthesize it comprehensively. Existing computational approaches—such as retrieval-augmented generation, hierarchical summarization, and agentic research workflows—scale access to information but introduce persistent risks of silent omission, early information loss, and opaque analytical paths. As a result, high-stakes synthesis tasks in research, policy, law, and organizational analysis remain constrained by partial coverage and limited inspectability.
