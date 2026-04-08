@@ -10,7 +10,7 @@ This paper introduces ReadingMachine, a computational methodology for structured
 
 We describe the system architecture, analytical assumptions, and trade-offs, and demonstrate its behavior through a large-scale application to a heterogeneous corpus of 176 documents on industrial policy, producing over 16,000 atomic insights and a structured thematic mapping. We report system costs, runtime, qualitative characteristics of the output, and observed failure modes, including challenges related to synthesis under scale and omission detection. While formal comparative evaluation remains future work, the results illustrate how structured reading produces outputs that are substantively and epistemically distinct from conventional AI-based summarization.
 
-ReadingMachine is released as an open-source, experimental framework intended to support systematic qualitative synthesis and to enable downstream, explicitly constrained reasoning applied to stable corpus representations. The paper positions structured corpus reading as a distinct mode of knowledge production, complementary to retrieval-based and agentic AI systems.
+ReadingMachine is released as an open-source, experimental framework intended to support systematic qualitative synthesis and to enable downstream, explicitly constrained reasoning applied to stable corpus representations. The paper positions structured corpus reading as a distinct mode of knowledge production, complementary to retrieval-based and agentic AI systems. The results presented below should be understood as a demonstration of system behavior at scale, not as a validated assessment of performance. Collaboration on assessing performance is actively encouraged.
 
 ## 1. Introduction
 
@@ -30,7 +30,7 @@ This reframing has several implications. First, the marginal cost of reading—b
 
 This white paper introduces ReadingMachine as both a technical framework and a methodological intervention. It outlines the architectural design of the system, the analytical assumptions it encodes, and the trade-offs it makes in shifting from selective, human-limited synthesis toward structured, inspectable corpus mapping. More broadly, it situates the approach within an information landscape where the central challenge is no longer producing knowledge, but ensuring that it can be systematically read, organized, and understood at scale.
 
-ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations.
+ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations. The properties described in this paper—such as improved coverage, omission detection, and traceability—should be understood as design objectives and observed behaviors in a single large-scale run, rather than as formally validated performance characteristics.
 
 ## 2. The Problem
 
