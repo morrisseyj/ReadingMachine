@@ -576,25 +576,34 @@ class Prompts:
             "<rq_id>: <rq_text>\n"
             "<rq_id>: <rq_text>\n"
             "...\n\n"
+            "CHUNK METADATA:\n"
+            "Paper Author(s): <author names>\n"
+            "Paper Date: <publication year>\n\n"
             "TEXT CHUNK:\n"
-            "<text chunk, including citations like (Author Date)>\n\n"
+            "<text chunk>\n\n"
             "Instructions:\n"
             "1) For each research question, extract any explicit arguments/findings/claims in the text that answer or bear directly on that question.\n"
             "2) Each extracted item must be concise (one sentence or short phrase) and preserve wording as much as possible.\n"
             "3) Each insight will later be synthezied, by an LLM, according to clusters. To ensure coherence in the synthesis, ensure that each insight is also a coherent stand-alone idea.\n"
-            "4) Each extracted item MUST end with the citation exactly as it appears in the chunk (e.g., '(Author Date)').\n"
-            "5) If citing material referenced by the authors identified cite as (Author Date in Author Date), include the full citation as it appears in the text (e.g., '(Smith 2020 in Jones 2023)').\n"
-            "6) Output MUST be valid JSON only, matching this schema:\n\n"
+            "4) Each extracted item MUST end with a citation in the form (Source in Paper).\n"
+                "- The 'Paper' must ALWAYS be the metadata citation: (Author Date).\n"
+                "- If the claim in the text chunk includes a citation, preserve it as the Source and nest it inside the metadata citation:\n"
+                "  Example: \"... (Jones 2020 in Smith 2024)\"\n"
+                "- If the claim does not include a citation, use only the metadata citation:\n"
+                "  Example: \"... (Smith 2024)\"\n"
+                "- If the text already uses a nested citation format (e.g., 'Jones 2020 in Brown 2022'), preserve it fully and then nest within the paper citation:\n"
+                "  Example: \"... (Jones 2020 in Brown 2022 in Smith 2024)\"\n"
+            "5) Output MUST be valid JSON only, matching this schema:\n\n"
             "{\n"
             '  "results": {\n'
-            '    "<rq_id>": ["<claim ... (Author Date)>", "<claim ... (Author Date)>"],\n'
-            '    "<rq_id>": ["<claim ... (Author Date)>"]\n'
+            '    "<rq_id>": ["<claim ... (Author Date or Source in Author Date)>", "<claim ... (Author Date or Source in Author Date)>"],\n'
+            '    "<rq_id>": ["<claim ... (Author Date or Source in Author Date)>"]\n'
             "  }\n"
             "}\n\n"
-            "5) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate claims within the same question.\n"
-            "6) You can have multiple claims for the same research question, but each claim must be distinct and explicitly supported by a citation in the text chunk.\n"
-            "7) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return an empty results object: {\"results\": {}}.\n"
-            "8) Do not output markdown, explanations, or any text outside the JSON."
+            "6) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate claims within the same question.\n"
+            "7) You can have multiple claims for the same research question, but each claim must be distinct and explicitly supported by the text chunk.\n"
+            "8) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return an empty results object: {\"results\": {}}.\n"
+            "9) Do not output markdown, explanations, or any text outside the JSON."
             )
 
 

@@ -1258,76 +1258,76 @@ class Ingestor:
         boilerplate = df[counts <= 10].reset_index(drop=True)
         return boilerplate
 
-    @staticmethod
-    def _drop_extreme_table_chunks(df):
-        """
-        Remove chunks that are highly likely to represent tabular or non-narrative content.
+    # @staticmethod
+    # def _drop_extreme_table_chunks(df):
+    #     """
+    #     Remove chunks that are highly likely to represent tabular or non-narrative content.
 
-        This function filters out chunks dominated by numeric or structurally
-        fragmented content (e.g., table rows, data grids) while preserving
-        narrative text. The filtering logic is conservative and designed to
-        minimize loss of meaningful prose.
+    #     This function filters out chunks dominated by numeric or structurally
+    #     fragmented content (e.g., table rows, data grids) while preserving
+    #     narrative text. The filtering logic is conservative and designed to
+    #     minimize loss of meaningful prose.
 
-        A chunk is removed if it:
-        - Contains a high proportion of numeric tokens (digit_ratio > 0.5), OR
-        - Is short and lacks lexical richness (few longer words), AND does not
-        resemble a sentence.
+    #     A chunk is removed if it:
+    #     - Contains a high proportion of numeric tokens (digit_ratio > 0.5), OR
+    #     - Is short and lacks lexical richness (few longer words), AND does not
+    #     resemble a sentence.
 
-        Chunks are retained if they exhibit sentence-like structure (e.g.,
-        contain punctuation or sufficient lexical complexity), even if they
-        partially resemble table content.
+    #     Chunks are retained if they exhibit sentence-like structure (e.g.,
+    #     contain punctuation or sufficient lexical complexity), even if they
+    #     partially resemble table content.
 
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Chunk-level DataFrame. Must contain:
-            - 'chunk_text'
+    #     Parameters
+    #     ----------
+    #     df : pd.DataFrame
+    #         Chunk-level DataFrame. Must contain:
+    #         - 'chunk_text'
 
-        Returns
-        -------
-        pd.DataFrame
-            Filtered DataFrame with extreme table-like chunks removed.
+    #     Returns
+    #     -------
+    #     pd.DataFrame
+    #         Filtered DataFrame with extreme table-like chunks removed.
 
-        Notes
-        -----
-        - This function prioritizes recall of narrative text over aggressive filtering.
-        - Designed to handle structured PDF extractions (e.g., MuPDF output).
-        - Filtering is heuristic-based and language-agnostic.
-        - Applied after deduplication and boilerplate removal for efficiency.
-        """
+    #     Notes
+    #     -----
+    #     - This function prioritizes recall of narrative text over aggressive filtering.
+    #     - Designed to handle structured PDF extractions (e.g., MuPDF output).
+    #     - Filtering is heuristic-based and language-agnostic.
+    #     - Applied after deduplication and boilerplate removal for efficiency.
+    #     """
 
-        def is_extreme_table(text):
-            words = text.split()
+    #     def is_extreme_table(text):
+    #         words = text.split()
 
-            digit_ratio = sum(any(c.isdigit() for c in w) for w in words) / max(len(words), 1)
+    #         digit_ratio = sum(any(c.isdigit() for c in w) for w in words) / max(len(words), 1)
 
-            # Strong signal: mostly numeric
-            if digit_ratio > 0.5:
-                return True
+    #         # Strong signal: mostly numeric
+    #         if digit_ratio > 0.5:
+    #             return True
     
-            # Weak signal: short + low lexical richness
-            if len(words) < 15:
-                long_words = sum(len(w) > 4 for w in words)
-                if long_words < 3:
-                    return True
+    #         # Weak signal: short + low lexical richness
+    #         if len(words) < 15:
+    #             long_words = sum(len(w) > 4 for w in words)
+    #             if long_words < 3:
+    #                 return True
             
-            return False
+    #         return False
 
-        def has_sentence_structure(text):
-            return (
-                "." in text or
-                len([w for w in text.split() if len(w) > 4]) > 5
-                )
+    #     def has_sentence_structure(text):
+    #         return (
+    #             "." in text or
+    #             len([w for w in text.split() if len(w) > 4]) > 5
+    #             )
 
-        working_df = df.copy()
-        texts = working_df["chunk_text"]
+    #     working_df = df.copy()
+    #     texts = working_df["chunk_text"]
 
-        has_sentence = texts.apply(has_sentence_structure)
-        is_table = texts.apply(is_extreme_table)
+    #     has_sentence = texts.apply(has_sentence_structure)
+    #     is_table = texts.apply(is_extreme_table)
 
-        working_df = working_df[has_sentence | ~is_table]
+    #     working_df = working_df[has_sentence | ~is_table]
 
-        return working_df
+    #     return working_df
 
     def chunk_papers(
         self,
@@ -1355,10 +1355,10 @@ class Ingestor:
 
         Parameters
         ----------
-        chunk_size : int, default=3500
+        chunk_size : int, default=3000
             Maximum size of each chunk (in characters or as defined by `length_function`).
 
-        chunk_overlap : int, default=350
+        chunk_overlap : int, default=300
             Number of overlapping characters between consecutive chunks.
 
         length_function : callable, default=len
@@ -1366,7 +1366,7 @@ class Ingestor:
 
         separators : list of str, optional
             Ordered list of separators used for recursive splitting.
-            Defaults to ["\n\n", "\n", ". ", "! ", "? ", " ", ""].
+            Defaults to ["\\n\\n", "\\n", " ", ""].
 
         is_separator_regex : bool, default=False
             Whether separators should be treated as regex patterns.
@@ -1401,27 +1401,94 @@ class Ingestor:
             # fix broken words
             text = re.sub(r'(?<=\w)\n(?=\w)', '', text)
 
-            # convert multiple newlines to paragraph markers
-            text = re.sub(r'\n{2,}', '\n\n', text)
+            # preserve paragraph breaks
+            text = re.sub(r'\n{2,}', '<<PARA>>', text)
 
-            # convert single newlines to space
+            # flatten remaining newlines
             text = re.sub(r'\n', ' ', text)
 
+            # restore paragraphs
+            text = text.replace('<<PARA>>', '\n\n')
+            
             # normalize whitespace
             text = re.sub(r'\s+', ' ', text)
 
             return text.strip()
 
-        if separators is None:
-            separators = ["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+        
+        def greedy_chunk_text(
+            text: str,
+            chunk_size: int = 3500,
+            chunk_overlap: int = 350
+        ) -> list[str]:
+            """
+            Greedy text chunker with prioritized backward splitting.
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=length_function,
-            separators=separators,
-            is_separator_regex=is_separator_regex
-        )
+            Strategy:
+            - Take up to `chunk_size`
+            - Walk backward to nearest:
+                1. "\n\n"
+                2. "."
+                3. " "
+            - If none found, hard cut
+
+            Ensures:
+            - No chunk exceeds chunk_size
+            - Chunks are as large as possible
+            - Overlap is preserved
+
+            Parameters
+            ----------
+            text : str
+            chunk_size : int
+            chunk_overlap : int
+
+            Returns
+            -------
+            List[str]
+            """
+
+            chunks = []
+            start = 0
+            text_length = len(text)
+
+            while start < text_length:
+                # Tentative end
+                end = min(start + chunk_size, text_length)
+
+                if end == text_length:
+                    chunks.append(text[start:].strip())
+                    break
+
+                window = text[start:end]
+
+                # Priority 1: double newline
+                split_idx = window.rfind("\n\n")
+
+                # Priority 2: sentence end
+                if split_idx == -1:
+                    split_idx = window.rfind(".")
+
+                # Priority 3: space
+                if split_idx == -1:
+                    split_idx = window.rfind(" ")
+
+                # If nothing found, force cut
+                if split_idx == -1 or split_idx < int(0.3 * len(window)):
+                    split_idx = len(window)
+
+                # Adjust end
+                end = start + split_idx
+
+                chunk = text[start:end].strip()
+                if chunk:
+                    chunks.append(chunk)
+
+                # Move start with overlap
+                start = max(end - chunk_overlap, 0)
+
+            return chunks
+
 
         full_text_list = (
             self.corpus_state.full_text["full_text"]
@@ -1430,7 +1497,10 @@ class Ingestor:
             .to_list()
         )
 
-        chunks_list: List[List[str]] = [text_splitter.split_text(text) for text in full_text_list]
+        chunks_list = [
+            greedy_chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+            for text in full_text_list
+            ]
         # Create the chunks corpus_state from the full_text corpus_state
         self.corpus_state.full_text["chunk_text"] = chunks_list
         self.corpus_state.chunks = self.corpus_state.full_text[["paper_id", "chunk_text"]].explode("chunk_text").reset_index(drop=True).copy()
@@ -1446,7 +1516,7 @@ class Ingestor:
         # Now call the cleaning functions
         temp_chunks = self._drop_duplicate_chunks(temp_chunks)
         temp_chunks = self._drop_boilerplate(temp_chunks)
-        temp_chunks = self._drop_extreme_table_chunks(temp_chunks)
+        # temp_chunks = self._drop_extreme_table_chunks(temp_chunks)
 
         self.corpus_state.chunks = temp_chunks.reset_index(drop=True).copy()
 
@@ -1553,8 +1623,6 @@ class Insights:
 
         self.corpus_state.enforce_canonical_question_text()
 
-    
-
     def _generate_chunk_insights(self, insights: List = None) -> pd.DataFrame:
         """
         Generate research-question–level insights for each text chunk using the LLM.
@@ -1658,20 +1726,21 @@ class Insights:
             # Generate the citation accounting for NA values in authors and date
             authors = row["paper_author"]
             if isinstance(authors, (list, np.ndarray)):
-                citation = " ".join(authors)
+                authors = " ".join(authors)
             elif pd.isna(authors):
-                citation = ""
+                authors = ""
             else:
-                citation = str(authors)
+                authors = str(authors)
             date = row["paper_date"] if not pd.isna(row["paper_date"]) else ""
-            citation = f"{citation} {date}"
-           
 
             # Build prompts
             sys_prompt: str = Prompts().gen_chunk_insights(paper_context=self.paper_context)
             user_prompt: str = (
                 f"RESEARCH QUESTIONS:\n{rqs_ids_str}\n\n"
-                f"TEXT CHUNK:\n{chunk_text} - {citation}\n"
+                f"CHUNK METADATA:\n"
+                f"Paper Author(s): {authors}\n"
+                f"Paper Date: {date}\n\n"
+                f"TEXT CHUNK:\n{chunk_text}\n"
             )
 
             fall_back = {
