@@ -70,48 +70,48 @@ ReadingMachine decomposes this process into a more granular and structured seque
 
 Thus the qualitative research workflow is implemented computationally via the following pipeline (each step is described in detail below):
 
-[Generate Research Questions]
-		↓
-[Ingest Papers]
-		↓
-[Chunk Papers]
-		↓
-[Generate Insights]
-		↓
-[Cluster Insights]
-		↓
-[Summarize Clusters]
-		↓
-[Generate Theme Schema]
-		↓
-[Map Insights to Themes]
-		↓
-[Summarize Themes]
-		↓
-[Identify Orphans]
-		↓
-[Reinsert Orphans]
-		↓
-┌───────────────────────────────┐
-│ Iteration Loop 				│
-│ (Re-theme if needed) 			│
-│						 		│
-│ Generate Theme Schema 		│
-│ 		↓ 						│
-│ Map Insights to Themes 		│
-│ 		↓ 						│
-│ Summarize Themes 				│
-│ 		↓ 						│
-│ Identify + Reinsert Orphans 	│
-└───────↑───────────────────────┘
-		│
-		↓
-[Address Redundancy (Optional)]
-		↓
-[Generate Title, Executive Summary,
-Question Summaries (Optional)]
-		↓
-[Render Output]
+[Generate Research Questions]  
+		↓  
+[Ingest Papers]  
+		↓  
+[Chunk Papers]  
+		↓  
+[Generate Insights]  
+		↓  
+[Cluster Insights]  
+		↓  
+[Summarize Clusters]  
+		↓  
+[Generate Theme Schema]  
+		↓  
+[Map Insights to Themes]  
+		↓  
+[Summarize Themes]  
+		↓  
+[Identify Orphans]  
+		↓  
+[Reinsert Orphans]  
+		↓  
+┌───────────────────────────────┐  
+│ Iteration Loop 				│  
+│ (Re-theme if needed) 			│  
+│						 		│  
+│ Generate Theme Schema 		│  
+│ 		↓ 						│  
+│ Map Insights to Themes 		│  
+│ 		↓ 						│  
+│ Summarize Themes 				│  
+│ 		↓ 						│  
+│ Identify + Reinsert Orphans 	│  
+└───────↑───────────────────────┘  
+		│  
+		↓  
+[Address Redundancy (Optional)]  
+		↓  
+[Generate Title, Executive Summary,  
+Question Summaries (Optional)]  
+		↓  
+[Render Output]  
 
 
 Because the pipeline consists of a sequence of computational calls to language models, its behavior is determined by the analytical specification encoded within it. This includes the definition of insights, extraction instructions, clustering parameters, and theme construction rules. These components are fixed, inspectable, and version-controlled. As with any formal method, they shape the resulting synthesis. ReadingMachine makes these assumptions explicit and available for inspection, rather than embedding them implicitly within a single opaque step. The full pipeline is described below.
