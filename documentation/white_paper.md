@@ -124,7 +124,7 @@ Prior to processing the corpus, the user defines a set of research questions tha
 
 Documents are ingested into the system, with the current implementation supporting PDF and HTML formats. During ingestion, basic metadata (e.g., title, author, year) is extracted using a language model.
 
-The corpus is then divided into smaller semantic units through a chunking process. Chunking prioritizes boundaries that preserve meaning—typically at the sentence or paragraph level—so that subsequent reading tasks operate on coherent segments of text. This ensures that insight extraction is grounded in bounded, interpretable inputs.
+The corpus is then divided into smaller semantic units through a chunking process. Chunking uses a greedy, size-constrained strategy to produce segments of approximately fixed length (e.g., ~3500 characters), ensuring consistent coverage of the source text. Within each segment, the splitter preferentially backtracks to the nearest paragraph break, sentence boundary, or whitespace to avoid arbitrary truncation where possible. However, preserving strict size constraints takes priority over perfect semantic boundaries.
 
 ### 3.3 Generate Insights
 
@@ -132,7 +132,7 @@ Each chunk is processed alongside the full set of research questions. The langua
 
 Insights are formally defined in the prompt as:
 
-> “any explicit arguments/findings/claims in the text that answer or bear directly on [the] question… Each [insight] must be concise (one sentence or short phrase) and preserve wording as much as possible."
+> “any explicit claims, arguments, findings, or statements in the text that bear on [the] question[s]… An explicit claim includes: stated findings or conclusions, causal statements (e.g. X leads to Y), explanations of mechanisms or processes, descriptive statements that clearly assert a relationship, condition or effect. They are not restricted to formal conclusions [as] many valid claims appear as descriptive or explanatory statements. Each [insight] must be concise (one sentence or short phrase) and preserve wording as much as possible."
 
 To complement this chunk-level pass, the system performs a second, document-level pass. In this stage, the full document (or the largest portion that fits within the model’s context window) is processed with each research question individually. The model is provided with the previously extracted chunk-level insights and instructed to identify additional insights without repetition.
 
