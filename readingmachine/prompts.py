@@ -651,47 +651,71 @@ class Prompts:
 
         return (
             "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
-            'Your task is to extract **meta-insights (including: claims/arguments/findings etc.)** — higher-level, traceable arguments or conclusions that span across multiple chunks or sections of a piece of text.\n'
-            "Do NOT add new information or general knowledge. Only extract what is explicitly stated in the text.\n\n"
-            "Note this process is a complement to chunk-level insight extraction pass (already conducted). "
-            "While chunk-level insights focus on claims explicitly supported by citations within individual chunks, your task is to identify broader insights that emerge from synthesizing information across the entire paper. "
-            "These meta-insights should therefore complement (not repeat) the insights already extracted at the chunk level.\n"
+            "Your task is to extract **meta-insights (including: claims/arguments/findings etc.)** — higher-level, traceable arguments or conclusions that span across multiple parts of a text.\n"
+            "Do NOT add new information or general knowledge. Only extract what is supported by the text.\n\n"
             
-            f'{paper_context}'
+            "Note: this process complements chunk-level insight extraction (already conducted).\n"
+            "Chunk-level insights capture localized claims. Your role is to identify broader insights that ONLY become visible when combining information across multiple parts of the document.\n"
+            "Meta-insights must therefore complement — not repeat — chunk-level insights.\n\n"
+            
+            f"{paper_context}\n\n"
 
-            'INPOUT FORMAT:\n\n'
-            'SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n'
-            '<question_id>: <question_text>\n\n'
-            'PAPER METADATA:\n'
-            '<paper_metadata - author, date, title>\n'
-            'PAPER TEXT:\n'
-            '<paper_content>\n\n'
-            'EXISTING CHUNK INSIGHTS:\n'
-            '<chunk_insight_1>\n<chunk_insight_2>\n...\n<chunk_insight_n>\n\n'
-            'OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n'
-            '<question_id1>: <question_text1>\n<question_id2>: <question_text2>\n...\n\n'
-            '---\n\n'
-            
-            'OUTPUT REQUIREMENTS:\n'
-            'Return a **valid JSON object** matching this exact schema:\n\n'
-            '```json\n'
-            '{\n'
+            "INPUT FORMAT:\n\n"
+            "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n"
+            "<question_id>: <question_text>\n\n"
+            "PAPER METADATA:\n"
+            "<paper_metadata - author, date, title>\n\n"
+            "PAPER TEXT:\n"
+            "<paper_content>\n\n"
+            "EXISTING CHUNK INSIGHTS:\n"
+            "<chunk_insight_1>\n<chunk_insight_2>\n...\n<chunk_insight_n>\n\n"
+            "OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n"
+            "<question_id1>: <question_text1>\n<question_id2>: <question_text2>\n...\n\n"
+            "---\n\n"
+
+            "OUTPUT REQUIREMENTS:\n"
+            "Return a valid JSON object matching this exact schema:\n\n"
+            "{\n"
             '  "results": {\n'
-            '    "meta_insight": ["<claim ... (Author Date)>", "<claim ... (Author Date)>"],\n'
-            '}\n'
-            '```\n\n'
-            'ADDITIONAL INSTRUCTIONS:\n'
-            '- The value of "meta_insight" **must always be a JSON array (list)** — even if only one insight.\n'
-            '- Return an empty dictionary for results {} if no new meta-insights are found i.e. "results: {}".\n'
-            '- Derive meta-insights that pertain ONLY to the specified research question.\n'
-            '- Use the "OTHER RESEARCH QUESTIONS IN THE REVIEW" section for broader context to ground your understanding of what a relevant insight to the current research question might be, but ensure the insights you return are focused on the specific research question only.\n'
-            '- Each extracted item must be concise (one sentence or short phrase) and preserve wording as much as possible.\n'
-            '- Each insight will later be synthezied, by an LLM, according to clusters. To ensure coherence in the synthesis, ensure that each insight is also a coherent stand-alone idea.\n'
-            '- Each extracted item MUST end with the citation, derived from the metadata (e.g., "(Author Date)").\n'
-            '- If citing material referenced by the authors identified cite as (Author Date in Author Date), include the full citation as it appears in the text (e.g., "(Smith 2020 in Jones 2023)").\n'
-            '- Note that if full text exceeds the context window it will be broken into parts. You should treat the text you recieve as the entire content even if it is only a portion of the full paper. Focus on extracting meta-insights from the text you receive, without assuming access to the full paper.\n'
-            '- Do not repeat insights already found in chunks.\n'
-            '- Do not output explanations, markdown, or any text outside the JSON object.'
+            '    "meta_insight": ["<claim ... (Author Date)>"]\n'
+            "  }\n"
+            "}\n\n"
+
+            "ADDITIONAL INSTRUCTIONS:\n"
+            "- The value of \"meta_insight\" must always be a JSON array (list), even if only one insight.\n"
+            "- Return an empty results object {\"results\": {}} if no valid meta-insights are found.\n"
+            "- Derive meta-insights that pertain ONLY to the specified research question.\n"
+            "- Use other research questions only as context, not as targets.\n\n"
+
+            "CRITICAL CONSTRAINT (DEFINES META-INSIGHTS):\n"
+            "- A meta-insight MUST require combining information from multiple parts of the text (e.g., multiple paragraphs, sections, or arguments).\n"
+            "- If an insight could reasonably be extracted from a single sentence, paragraph, or localized passage, DO NOT include it.\n\n"
+
+            "NOVELTY REQUIREMENT:\n"
+            "- Do NOT restate, paraphrase, or slightly generalize existing chunk insights.\n"
+            "- A meta-insight must introduce a substantively new claim that only becomes visible when considering multiple parts of the document together.\n\n"
+
+            "WHAT COUNTS AS A VALID META-INSIGHT:\n"
+            "- cross-cutting patterns or relationships\n"
+            "- connections between different mechanisms or arguments\n"
+            "- higher-level explanations that integrate multiple claims\n"
+            "- document-level conclusions that depend on multiple sections\n\n"
+
+            "WHAT TO EXCLUDE:\n"
+            "- single-claim restatements\n"
+            "- paraphrases of chunk insights\n"
+            "- localized findings expressed more generally\n\n"
+
+            "FORMATTING:\n"
+            "- Each extracted item must be concise (one sentence or short phrase).\n"
+            "- Each insight must stand alone as a coherent idea.\n"
+            "- Each extracted item MUST end with the citation (Author Date).\n\n"
+
+            "CONTEXT NOTE:\n"
+            "- If the full text exceeds the context window, you may only see part of the document.\n"
+            "- Treat the provided text as the full context available and extract meta-insights accordingly.\n\n"
+
+            "Do not output explanations, markdown, or any text outside the JSON object."
         )
     
     ####
