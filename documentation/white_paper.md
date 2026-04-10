@@ -158,7 +158,7 @@ This design introduces some redundancy across the overall report, as similar ins
 
 Clusters group insights by semantic similarity, providing a useful approximation of structure within the corpus. However, semantic proximity does not necessarily correspond to conceptual organization. To move from semantic groupings to analytically meaningful categories, the system generates themes through a two-stage process.
 
-First, each cluster of insights is summarized. Clusters are processed in an order determined by the shortest path between cluster centroids in the embedding space. This ordering places semantically similar clusters adjacent to one another. As each cluster is summarized, previously generated summaries are provided as frozen context for subsequent steps. All clusters, including outliers, are included in this process.
+First, each cluster of insights is summarized. Clusters are processed in an order determined by the shortest path between cluster centroids in the embedding space. This ordering places semantically similar clusters adjacent to one another. As each cluster is summarized, the last five generated summaries are provided as frozen context for subsequent steps. This allows for local coherence without risking anchoring on inital clusters summaries (which could happen if global context was frozen). All clusters, including outliers, are included in this process.
 
 The result is a sequence of cluster summaries that forms a structured narrative of the corpus, organized by semantic proximity and with reduced repetition. This narrative serves as the input for theme generation, allowing the model to operate over an ordered representation of the corpus rather than a disorganized set of individual insights.
 

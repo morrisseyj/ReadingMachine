@@ -20,6 +20,8 @@ The research questions guiding this reading were developed by Oxfam through form
 - What recommendations can be made to industrialized countries to reduce harm to less‑industrialized countries?
 - What reforms to transnational institutions could expand policy space for less‑industrialized countries?
 
+Within the output the section on each question is written as a stand-alone section. This is done as it is common for readers to only want to engage with a single section of an output like this. The cost of this approach is that there can be some redundancy across questions. 
+
 ### Corpus Construction
 
 The corpus underlying this output was constructed using the [`getlit`](https://github.com/morrisseyj/ReadingMachine/blob/main/readingmachine/tools/getlit.py) module of ReadingMachine. Corpus construction involved a combination of automated retrieval and human judgment, following these steps:
