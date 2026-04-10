@@ -4539,7 +4539,7 @@ class Summarize:
 
         def flag_row(row):
             # Treat missing summaries as not flagged
-            if pd.isna(row["current_length"]):
+            if pd.isna(row["current_length"]) or row["current_length"] == 0:
                 return 0
 
             # Do not flag if theme is already at hard ceiling
@@ -4800,7 +4800,8 @@ class Summarize:
             else:
                 # If the user wants to expand, we re run the theme populator on the flagged themes with increased allocation and update populated themes with the longer theme summaries
                 # First get the schema map for the flagged themes and expand the allocated length by 20%
-                df_len_flagged["allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
+                df_len_flagged = df_len_flagged.copy()
+                df_len_flagged.loc[:, "allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
                 # Then get the ids and the corresponding insights
                 length_check_theme_ids = df_len_flagged["theme_id"].tolist()
                 rerun_mapped_df = self.summary_state.mapped_theme_list[-1][self.summary_state.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
@@ -4828,14 +4829,21 @@ class Summarize:
                 rerun_populated_themes_df = self._run_theme_pop(rerun_schema_df, rerun_mapped_df, paper_len)
                 rerun_len_ok, df_len_flagged = self._check_length_and_flag(rerun_populated_themes_df, max_prop)
                 # If this produced any themes for which the length is now ok we replace the odl summaries in populated_theme_list with these updates
-                if rerun_len_ok.shape[0] > 0:
-                    # Since theme_id is globally unique i can just replace on it
-                    # get the theme_ids that are now ok
-                    corrected_theme_ids = rerun_len_ok["theme_id"].tolist()
-                    # Drop those themes from the populated_theme_df
-                    populated_themes_df = populated_themes_df[~populated_themes_df["theme_id"].isin(corrected_theme_ids)]
-                    # Concat with the rerun_len_ok_themes
-                    populated_themes_df = pd.concat([populated_themes_df, rerun_len_ok], ignore_index=True)
+                # Always replace all rerun themes (both ok + still flagged)
+                rerun_all = pd.concat([rerun_len_ok, df_len_flagged], ignore_index=True)
+
+                rerun_theme_ids = rerun_all["theme_id"].tolist()
+
+                # Drop old versions
+                populated_themes_df = populated_themes_df[
+                    ~populated_themes_df["theme_id"].isin(rerun_theme_ids)
+                ]
+
+                # Add updated versions
+                populated_themes_df = pd.concat(
+                    [populated_themes_df, rerun_all],
+                    ignore_index=True
+                )
                     
         # Make sure the final df of populated themes is in the same order as the theme schema for easier comparison and so that it can be exported to the narrative in the correct order
         populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
