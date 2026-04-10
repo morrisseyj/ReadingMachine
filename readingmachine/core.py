@@ -5156,69 +5156,163 @@ class Summarize:
         return(orphans_df)
     
     def _integrate_orphans(
-        self, 
-        orphans_df: pd.DataFrame
-        ) -> pd.DataFrame:
+            self,
+            orphans_df: pd.DataFrame
+            ) -> pd.DataFrame:
         """
-        Reintegrate orphan insights into theme summaries.
+        Reintegrate orphan insights into theme summaries using capacity-bounded batching.
 
-        This method updates thematic summaries by incorporating insights that
-        were identified as missing during the orphan audit. Each theme is
-        processed independently.
+        This method updates each theme summary by incorporating insights that were
+        identified as missing during the orphan detection stage. Orphan insights are
+        processed in large, capacity-aware batches to ensure that all assigned insights
+        are eventually represented, while avoiding model degradation or failure due to
+        excessive input size.
 
-        For themes containing orphan insights, the LLM receives:
+        For each theme:
 
-            - the original theme summary
-            - the theme description
-            - the orphan insights
+            1. The current summary and associated orphan insights are retrieved.
+            2. Orphan insights are divided into batches sized to fit within a safe
+            model input budget, accounting for prompt overhead and expected
+            summary expansion.
+            3. The model iteratively rewrites the summary, incorporating each batch
+            in turn until all orphan insights have been processed.
 
-        The model is then asked to update the summary so that the missing
-        insights are reflected in the narrative.
+        This approach preserves full coverage (no orphan insights are dropped) while
+        minimizing the number of LLM calls by maximizing batch size within safe limits.
 
         Parameters
         ----------
         orphans_df : pd.DataFrame
-            DataFrame containing insights identified as missing from theme
-            summaries.
+            DataFrame containing orphan insights with at least:
+                - insight_id
+                - theme_id
+                - question_id
 
         Returns
         -------
         pd.DataFrame
-            Updated theme summaries with orphan insights incorporated.
+            DataFrame of updated theme summaries where all orphan insights have been
+            reintegrated. Each row corresponds to a theme and includes:
+
+                - thematic_summary
+                - question_id
+                - theme_id
+                - theme_label
+                - theme_description
 
         Notes
         -----
-        Themes without orphan insights are left unchanged.
+        - This method enforces completeness at the theme level: all assigned insights
+        are reintroduced prior to any subsequent re-theming step.
+        - Batching is deterministic and capacity-driven, not heuristic or sampled.
+        - The model input limit used here reflects practical integration capacity,
+        not the theoretical maximum context window.
+        - Themes without orphan insights are returned unchanged.
         """
 
+        # Prepare output holder for updated theme summaries
         updated_summary_df_lst = []
-        
-        # --- Added Counter Logic ---
+
+        # Setup counter for logging progress across themes
         populated_themes = self.summary_state.populated_theme_list[-1]
         total_themes = len(populated_themes)
         count = 1
-        # ---------------------------
 
-        # Iterate over your populated themes (one row per theme)
+        # ---- Capacity parameters (tune once) ----
+        MODEL_INPUT_WORD_LIMIT = 25000   # practical integration limit (well below 128k hard cap)
+        PROMPT_OVERHEAD_WORDS = 800      # reserve space for instructions, schema, formatting
+        SAFETY_RATIO = 0.7               # avoid edge-of-window degradation / instability
+        EXPANSION_FACTOR = 1.3           # summary tends to grow when integrating new content
+        # ----------------------------------------
+
+        # Packs as many insights as possible into a single batch without exceeding capacity
+        # This maximizes efficiency (few passes) while avoiding model overload
+        def pack_batch(insights, available_words):
+            batch = []
+            running = 0
+            for text in insights:
+                w = len(text.split())
+                # Stop before exceeding available capacity (hard boundary)
+                if running + w > available_words:
+                    break
+                batch.append(text)
+                running += w
+            return batch
+
+        # Iterate over each theme (one row per theme summary)
         for _, row in populated_themes.iterrows():
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
-            question_text = self.corpus_state.questions[self.corpus_state.questions["question_id"] == question_id]["question_text"].iloc[0] # Get the question text from the corpus_state questions df using the question id in the row
+            
+            # Retrieve research question text for prompt context
+            question_text = self.corpus_state.questions[
+                self.corpus_state.questions["question_id"] == question_id
+            ]["question_text"].iloc[0]
+
             theme_description = row["theme_description"]
-            thematic_summary = row["thematic_summary"] # Stuck to your name here
+            thematic_summary = row["thematic_summary"]
             
-            # Check if this specific theme has orphans in the orphan_df
-            theme_orphans = orphans_df[(orphans_df["theme_id"] == theme_id) & (orphans_df["question_id"] == question_id)]
-            
+            # Get orphan insight IDs for this theme + question
+            theme_orphans = orphans_df[
+                (orphans_df["theme_id"] == theme_id) &
+                (orphans_df["question_id"] == question_id)
+            ]
+
             if not theme_orphans.empty:
+
                 print(f"Integrating orphans for theme {count} of {total_themes} (Theme ID: {theme_id})...")
-                
-                # Fetch the actual text for the orphans from self.corpus_state.insights
-                orphan_data = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(theme_orphans["insight_id"])]
-                orphan_insights_for_theme_str = "\n".join([f"- {r['insight']}" for _, r in orphan_data.iterrows()])
-                
-                if thematic_summary != "" and thematic_summary is not None:
+
+                # Resolve orphan IDs → actual insight text
+                orphan_data = self.corpus_state.insights[
+                    self.corpus_state.insights["insight_id"].isin(theme_orphans["insight_id"])
+                ]
+
+                # Convert to list for batching
+                orphan_texts = [r["insight"] for _, r in orphan_data.iterrows()]
+
+                # ---- iterative large-batch integration ----
+                # We process all orphans, but in a few large capacity-safe batches
+                remaining = orphan_texts.copy()
+                updated_summary = thematic_summary
+
+                # Setup per theme batch counter
+                batch_count = 0
+                total_orphans = len(remaining)
+
+                while remaining:
+
+                    # Estimate current summary size (drives remaining capacity)
+                    summary_words = len(updated_summary.split())
+
+                    # Inflate estimate to account for expansion during rewrite
+                    effective_summary_words = int(summary_words * EXPANSION_FACTOR)
+
+                    # Apply safety margin to avoid degraded attention near limits
+                    usable_words = int(MODEL_INPUT_WORD_LIMIT * SAFETY_RATIO)
+
+                    # Remaining capacity available for orphan insertion
+                    available_words = usable_words - effective_summary_words - PROMPT_OVERHEAD_WORDS
+
+                    # If summary is already large, force minimal progress instead of failing
+                    if available_words <= 0:
+                        available_words = 500  # ensures loop continues
+
+                    # Pack the largest possible batch of orphans into available space
+                    batch = pack_batch(remaining, available_words)
+
+                    # Edge case: single very long insight → force it through
+                    if not batch:
+                        batch = [remaining[0]]
+
+                    # increment batch counter
+                    batch_count += 1
+                    total_batches_all_themes += 1
+
+                    # Format batch for prompt (bullet list preserves separability)
+                    orphan_batch_str = "\n".join([f"- {i}" for i in batch])
+
+                    # Build LLM prompt
                     sys_prompt = Prompts().integrate_orphans()
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
@@ -5226,11 +5320,15 @@ class Summarize:
                         "THEME DESCRIPTION:\n"
                         f"{theme_description}\n"
                         "ORIGINAL SUMMARY:\n"
-                        f"{thematic_summary}\n"
+                        f"{updated_summary}\n"
                         "ORPHAN INSIGHTS:\n"
-                        f"{orphan_insights_for_theme_str}\n\n"
+                        f"{orphan_batch_str}\n\n"
                     )
-                    fall_back = {"updated_summary": thematic_summary}
+
+                    # Fallback ensures no regression if model fails
+                    fall_back = {"updated_summary": updated_summary}
+
+                    # Enforce strict structured output
                     json_schema = {
                         "name": "orphan_integrator",
                         "strict": True,
@@ -5243,6 +5341,8 @@ class Summarize:
                             "additionalProperties": False
                         }
                     }
+
+                    # Call LLM to integrate current batch into summary
                     response = utils.call_chat_completion(
                         sys_prompt=sys_prompt,
                         user_prompt=user_prompt,
@@ -5252,33 +5352,45 @@ class Summarize:
                         return_json=True,
                         json_schema=json_schema
                     )
-                    
-                    # Create the result row using your schema
-                    updated_row = pd.DataFrame([{
-                        "thematic_summary": response.get("updated_summary", thematic_summary),
-                        "question_id": question_id,
-                        "theme_id": int(theme_id),
-                        "theme_label": theme_label,
-                        "theme_description": theme_description,
-                        "question_text": question_text
-                    }])
-                else:
-                    updated_row = pd.DataFrame([row])
+
+                    # Update working summary with integrated content
+                    updated_summary = response.get("updated_summary", updated_summary)
+
+                    # Remove processed insights from remaining obligation set
+                    remaining = remaining[len(batch):]
+
+                avg_batch_size = total_orphans / batch_count if batch_count > 0 else 0
+                print(
+                    f"Theme {theme_id}: {total_orphans} orphans integrated in "
+                    f"{batch_count} batches (avg {avg_batch_size:.1f} insights/batch)"
+                )
+
+                # Store final fully integrated summary for this theme
+                updated_row = pd.DataFrame([{
+                    "thematic_summary": updated_summary,
+                    "question_id": question_id,
+                    "theme_id": int(theme_id),
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "question_text": question_text
+                }])
+
             else:
-                # If no orphans for this theme, just use the original row
+                # No orphans → summary already complete
                 print(f"No orphans found for theme {count} of {total_themes}. Skipping integration.")
                 updated_row = pd.DataFrame([row])
 
             updated_summary_df_lst.append(updated_row)
-            count += 1 # Increment counter
-                
-        # Final result contains one row per theme with orphans integrated
-        theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
-        # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative in the correct order
-        theme_no_orphans["theme_id"] = theme_no_orphans["theme_id"].astype(int) # Before sorting defensively make sure this is int
-        theme_no_orphans = theme_no_orphans.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+            count += 1
 
-        return(theme_no_orphans)
+        # Reassemble full dataframe and restore canonical ordering
+        theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
+        theme_no_orphans["theme_id"] = theme_no_orphans["theme_id"].astype(int)
+        theme_no_orphans = theme_no_orphans.sort_values(
+            by=["question_id", "theme_id"]
+        ).reset_index(drop=True)
+
+        return theme_no_orphans
 
     def _get_orphans_and_updated_summary(
             self, 
