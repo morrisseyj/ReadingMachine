@@ -4569,16 +4569,32 @@ class Summarize:
         """
         Populate themes by synthesizing insights assigned to each theme.
 
-        This method generates narrative summaries for each theme by
-        synthesizing the insights mapped to that theme. Each theme is
-        processed independently using the LLM.
+        This method generates narrative summaries for each theme by synthesizing
+        the insights mapped to that theme. Each theme is processed independently
+        using the LLM.
 
         The function:
 
             1. Estimates target theme lengths if not already present.
             2. Retrieves the insights mapped to each theme.
-            3. Builds prompts tailored to the theme type.
-            4. Calls the LLM to synthesize a thematic summary.
+            3. Applies structure-preserving sampling when themes exceed a size threshold.
+            4. Builds prompts tailored to the theme type.
+            5. Calls the LLM to synthesize a thematic summary.
+
+        Sampling behavior
+        -----------------
+        When the number of insights mapped to a theme exceeds a threshold,
+        a subset of insights is selected using cluster-aware sampling.
+
+        This ensures that:
+
+            - All major semantic clusters are represented
+            - Initial theme structure is preserved
+            - Input size remains within model integration capacity
+
+        Importantly, sampling does NOT remove insights from the pipeline.
+        Any omitted insights will be surfaced during orphan detection and
+        reintroduced in later stages, ensuring full coverage prior to re-theming.
 
         Special theme types are handled differently:
 
@@ -4617,10 +4633,35 @@ class Summarize:
 
         Notes
         -----
-        Themes that have no mapped insights (e.g. empty "Other" or "Conflict"
-        categories) are retained with empty summaries to preserve schema
-        consistency.
+        - Sampling reduces initial synthesis pressure but preserves structure.
+        - Full insight coverage is enforced later via orphan handling.
+        - Themes with no mapped insights are retained with empty summaries.
         """
+
+        def _sample_insights_by_cluster(insights_df, max_total=400, max_per_cluster=50):
+            """
+            Sample insights in a structure-preserving way.
+
+            Ensures each cluster is represented while capping total size.
+            """
+            if "cluster_id" not in insights_df.columns:
+                # Fallback: no clustering available → simple truncation
+                return insights_df.head(max_total)
+
+            grouped = insights_df.groupby("cluster_id")
+            n_clusters = grouped.ngroups
+
+            # Target per cluster (soft)
+            per_cluster = max(1, min(max_per_cluster, max_total // max(n_clusters, 1)))
+
+            sampled = (
+                grouped
+                .apply(lambda x: x.head(per_cluster))
+                .reset_index(drop=True)
+            )
+
+            # Final cap in case rounding overshoots
+            return sampled.head(max_total)
 
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
@@ -4654,7 +4695,30 @@ class Summarize:
                 (mapped_themes_df["theme_id"] == theme_id)
             ]["insight_id"].tolist()
             # Get the insight text from those insight ids
-            insights = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
+
+            insights_df = self.corpus_state.insights[
+                self.corpus_state.insights["insight_id"].isin(insight_ids)
+            ].copy()
+
+            # --- NEW: sampling step ---
+            SAMPLE_THRESHOLD = 500
+            MAX_SAMPLE = 400
+
+            original_count = len(insights_df)
+
+            if original_count > SAMPLE_THRESHOLD:
+                insights_df = _sample_insights_by_cluster(
+                    insights_df,
+                    max_total=MAX_SAMPLE
+                )
+
+                print(
+                    f"Theme {theme_id}: sampled {len(insights_df)} of {original_count} insights "
+                    f"across {insights_df['cluster_id'].nunique() if 'cluster_id' in insights_df else 'N/A'} clusters"
+                )
+
+            insights = insights_df["insight"].tolist()
+
             # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
             if len(insights) == 0:
                 no_insight_df = pd.DataFrame([{
@@ -4667,6 +4731,7 @@ class Summarize:
                 }])
                 populated_themes.append(no_insight_df)
                 continue
+            
             insights_str = "\n".join(insights)
 
             # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
