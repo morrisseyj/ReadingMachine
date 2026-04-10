@@ -1,8 +1,8 @@
-**Tutorial for ReadingMachine**
+# Tutorial for ReadingMachine
 
-**A Computational Methodology for Structured Corpus Reading and Large- Scale Synthesis**
+## A Computational Methodology for Structured Corpus Reading and Large- Scale Synthesis**
 
-**Introduction**
+## Introduction
 
 Most fields today produce far more text than any individual—or even a team—can realistically read. Whether you’re working in research, policy, or organizational analysis, the bottleneck is no longer access to information. It’s making sense of it.
 
@@ -10,9 +10,20 @@ The default response is still human-led review: reading papers, taking notes, sy
 
 ReadingMachine takes a different approach. It treats large language models not as systems that “reason over” a corpus, but as tools for performing bounded reading tasks at scale. Instead of trying to produce a synthesis in one step, it breaks reading into smaller operations—extracting insights, organizing them, and then building up a structured view of the corpus. The goal is not just to summarize, but to do so in a way that preserves structure and reduces omission.
 
-ReadingMachine is an experimental, open-source method (https://github.com/morrisseyj/ReadingMachine/). This tutorial walks through how to run the pipeline step by step, explaining what each part of the code is doing along the way. It complements the GitHub README, the examples documentation, and the accompanying white paper.
+After running ReadingMachine over a large corpus you end up with:
+1. Thousands of atomic insights (claims extracted from text)
+2. Groups of related claims organized into clusters
+3. A set of themes representing the conceptual structure of the corpus
+4. A structured synthesis (that looks distinct from other LLM summarizers and Q&A tools) because its organized into themes that:
+    - preserves disagreement
+    - retains granular claims
+    - maps arguments across documents
 
-**Overview**
+You can find an example of the final output of a 176 document corpus run, here: https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/INDUSTRIAL_POLICY.md 
+
+ReadingMachine is an experimental, open-source method (https://github.com/morrisseyj/ReadingMachine/). This tutorial walks through how to run the pipeline step by step, explaining what each part of the code is doing along the way. It complements, the [examples documentation in the repo](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/README.md), and the [tool's white paper](https://github.com/morrisseyj/ReadingMachine/blob/main/documentation/white_paper.md).
+
+## Overview
 
 Conceptually, the methodology formalizes a familiar qualitative research workflow into a computational pipeline, with large language models performing bounded reading and synthesis tasks. In abstract form, this workflow can be understood as:
 
@@ -64,7 +75,7 @@ ReadingMachine decomposes this process into a more granular and structured seque
 
 The specific steps to run the pipeline are as follows (the below draws heavily on the example pipeline run contained [here](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/run_core_pipeline.py)). 
 
-**What you should expect**
+## What you should expect
 
 Running the full pipeline will:
 
@@ -73,14 +84,28 @@ Running the full pipeline will:
 - generate intermediate files at each stage
 - produce a structured synthesis in /outputs
 
+## When to use ReadingMachine
 
-**1. Setup**
+**Use ReadingMachine when:**
+
+- you have a defined corpus
+- you need structured understanding, not quick answers
+- omission risk matters
+- you are doing synthesis (literature, policy, qualitative data)
+
+**Do NOT use this when:**
+
+- you want fast answers
+- your corpus is small
+- your task is primarily interpretive or argumentative
+
+## 1. Setup
 
 Assuming you have python on your system, with git installed.
 
 First we need to set up our environment and prepare our data
 
-*1.1. Clone the github repo:*
+### 1.1. Clone the github repo:
 
 This will copy the module's code from the github repo to your local machine.
 
@@ -88,11 +113,11 @@ This will copy the module's code from the github repo to your local machine.
 git clone https://github.com/morrisseyj/ReadingMachine
 ```
 
-*1.2. Install uv*
+### 1.2. Install uv
 
 Dependency management is done via uv to handle conflicts. It is strongly recommended you use the uv.lock file to set up the environment. So install uv with instructions from [here](https://docs.astral.sh/uv/getting-started/installation/)
 
-*1.3. Set up the environment*
+### 1.3. Set up the environment
 
 This makes sure all the dependencies are installed without conflicts in a virtual environment.
 
@@ -103,11 +128,11 @@ uv sync
 
 You will need to access this virtual environment and inialize a python instance there in order to execute python code. The steps for doing this depend on where you running the code and how your IDE operates.
 
-*1.4. Upload your corpus*
+### 1.4. Upload your corpus
 
 ReadingMachine can read any corpus (though its capacities across different types of corpuses are still being determined). You should therefore put the documents that you want to read in `/ReadingMachine/data/corpus/`. If you have research questions and want to retrieve literature to answer them there is a [getlit.py](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/run_getlit_pipeline.py) tool that can support that process. For this tutorial a list of open access publications relevant to the example research questions used below is available [here](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/toy_corpus.md).
 
-*1.5. Create your secrets*
+### 1.5. Create your secrets
 
 You need an OpenAI API key to execute the pipeline (currently only OpenAI access is enabled, future development involves adding other services). This step safely stores your key outside of your codebase.
 
@@ -117,7 +142,7 @@ Create a file `.env`. Populate this with:
 OPENAI_API_KEY=<your_api_key_here>
 ```
 
-*1.6. Load the modules you will use for the core pipeline*
+### 1.6. Load the modules you will use for the core pipeline
 
 Now we move to a python script, with most code now executing in a single python instance (should be loaded from your virtual environment).
 
@@ -131,7 +156,7 @@ import os
 import pandas as pd
 
 ```
-*1.7. Load your secrets from .env and set up your LLM client object*
+### 1.7. Load your secrets from .env and set up your LLM client object
 
 Next we load the environment variables which gives us access to an OpenAI llm_client instance that we can use to call OpenAIs language and embedding models.
 
@@ -147,7 +172,7 @@ llm_client = OpenAI(api_key=OPENAI_API_KEY)
 
 ```
 
-*1.8. Articulate your research questions*
+### 1.8. Articulate your research questions
 
 Your research questions drive the entire process. They should be clear, focused and answerable, and well distinguished from one another. The tool cannot compensate well for poorly framed research questions. The research questions will be used to extract the insights on top of which the entire synthesis is built.
 
@@ -161,7 +186,7 @@ questions = [
 	"How has the role of remote work changed over time?"
 ]
 ```
-*1.9. Briefly describe the context for the paper*
+### 1.9. Briefly describe the context for the paper
 
 To try and contextualize the insight generation step further we also provide the paper context – essentially why are you posing the particular research questions. This is effectively the topline rationale for the reading you want to do. This rationale is passed to the LLM when asking it to identify relevant insights. 
 
@@ -177,7 +202,7 @@ paper_context = (
 
 ```
 
-*1.10. Prepare the data for ingestion into the pipeline*
+### 1.10. Prepare the data for ingestion into the pipeline
 
 With our environment set up and our data ready, we are almost ready to begin to use the ReadingMachine modules. 
 
@@ -202,7 +227,7 @@ insights_df = questions_df.copy()
 
 ```
 
-**Sidenote: How to resume a run**
+## Sidenote: How to resume a run
 
 This pipeline can involve long running times especially if the corpus is large. It is quite possible that you may have to close your python instance during a run. The tool includes multiple supports for resume - from continuously saving expensive language model calls, to saving the overall pipeline state after the last method of each class is called. As such if you re-run elements of the pipeline you will see prompts asking if you would like to reload or re-run analysis steps. 
 
@@ -215,7 +240,7 @@ utils.restart_pipeline()
 
 This will print the most recent complete class, and give you instructions on how to 1) load the last complete state and 2) instantiate the next class in the pipeline. You simply need asign this instantiaion call to a variable to proceed. The corpus_state saves after all the required methods in the class have been run. The summary_state (see below) saves at the completion of each summarize step.
 
-**2 Start the pipeline: Ingestor class**
+## 2 Start the pipeline: Ingestor class**
 
 Ingestor class is responsible for ingesting papers, pulling metadata, dedpulicating papers and chunking the papers. First we initialize the class.
 
@@ -226,7 +251,7 @@ ingestor = core.Ingestor(
     ai_model="gpt-4o"
 )
 
-*2.1 Ingest papers*
+### 2.1 Ingest papers*
 
 Then we pull all the papers into the system. Currently .html and .pdf are supported filetypes
 ```
@@ -234,32 +259,32 @@ ingestor.ingest_papers()
 
 ```
 
-*2.2 Update metadata for the papers*
+### 2.2 Update metadata for the papers*
 For traceability metadata is a first class concern for ReadingMachine. This process uses an LLM to look at the raw content of the documents and retrieve metadata.
 ```
 ingestor.update_metadata()
 ```
 
-*2.3 Drop duplicates*
+### 2.3 Drop duplicates*
 We drop duplicate papers as maintaining them is expensive in terms of tokens and can cause insights to show up more than once compromising the synthesis weighting.
 
 ```
 ingestor.drop_duplicates()
 ```
 
-*2.4 Manual duplicate check* 
+### 2.4 Manual duplicate check* 
 The above step involves dropping exact duplicates and identifying possible duplicates. The user has to manually inspect a file and delete duplicates. The file is here: `~/ReadingMachine/data/fuzzy_check/ingest/duplicate_check.csv`
 
 Manually amend the file so that one unique versions of each document remains. This is also a good time to manually complete any meta data that the model failed to generate. 
 
-*2.5 Update the state*
+### 2.5 Update the state*
 Now we update the state to reflect the deduplicated and metadata complete file.
 
 ```
 ingestor.update_state("duplicate_check.csv")
 ```
 
-*2.6 Chunk documents*
+### 2.6 Chunk documents*
 The final step of this class is chunking the documents so that they can be passed to the LLM for insight retrieval.
 
 ```
@@ -274,7 +299,7 @@ At the end of this class the corpus_state has four components:
 
 We move now to generating the insights
 
-**3. Generate insights**
+## 3. Generate insights
 
 This class handles insight extraction. First we instantiate the class - passing the final corpus_state attribte from the Ingestor class to the Insights class.
 
@@ -287,7 +312,7 @@ insights_generator = core.Insights(
 )
 ```
 
-*3.1 Generate chunk insights*
+### 3.1 Generate chunk insights
 
 This step extracts atomic insights from each chunk, forming the core unit of analysis used throughout the pipeline.
 
@@ -295,7 +320,7 @@ This step extracts atomic insights from each chunk, forming the core unit of ana
 insights_generator.get_chunk_insights()
 ```
 
-*3.2 Generate meta insights*
+## 3.2 Generate meta insights
 
 We also need to pass the questions and the whole document (or as large a chunks as will fit in the context window) to the LLM to extract insights that might span long sections and been missed in our chunk pass.
 
@@ -303,7 +328,7 @@ We also need to pass the questions and the whole document (or as large a chunks 
 insights_generator.get_meta_insights()
 ```
 
-**4. Cluster insights**
+## 4. Cluster insights
 
 Next we move to clustering the insights. This class handles embeddnig generation, dimensionality reduction and clustering. Instantiate the class as follows:
 
@@ -315,7 +340,7 @@ cluster = core.Clustering(
 )
 ```
 
-*4.1. Generate the embeddings*
+### 4.1. Generate the embeddings
 
 First we generate vector representations of the insights ("embeddings") so that we can cluster them.
 
@@ -323,11 +348,11 @@ First we generate vector representations of the insights ("embeddings") so that 
 cluster.embed_insights()
 ```
 
-*4.2 Reduce dimensions*
+### 4.2 Reduce dimensions
 
 Next we have to reduce dimensions to compensate for sparsity effects in high dimensional data. We use UMAP for this, but first we have to select our UMAP parameters. 
 
-<u>4.2.1. UMAP parameter sweep</u>
+#### 4.2.1. UMAP parameter sweep
 
 ReadingMachine includes a parameter sweep function to identify the best configuration. 
 
@@ -344,7 +369,7 @@ You want to select parameters that maximize the silhoette score. 1 is the maximu
 
 Note this parameter sweep uses research questions as a proxy for estimating the silhoette score. If you have two very multiple research questions that are very similar, this will worsen silhoette scores. You can exclude any rresearch questions from the sweep by passing the parameter: `rq_exclude = [<question_id>]` to the .tune_umap_params() method.
 
-<u>4.2.2. Apply UMAP</u>
+#### 4.2.2. Apply UMAP
 
 With the parameters selected we now reduce the dimensions.
 
@@ -358,11 +383,11 @@ cluster.reduce_dimensions(
 )
 ```
 
-*4.3. Clustering*
+### 4.3. Clustering*
 
 Now we can cluster on the reduced dimensional embeddings. We use HDBSCAN for this. Again we have to select parameters and the tool includes another pramater sweep capability.
 
-<u>4.3.1. HDBSCAN parameter sweeep</u>
+#### 4.3.1. HDBSCAN parameter sweeep
 
 ```
 cluster.tune_hdbscan_params(
@@ -380,7 +405,7 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 You want to select parameter combinations that both minimize the db score and minimize outliers. Note however that unlike other ML approaches, outliers here are not discarded (they will be worked into themes) so it minimizing them should likely recieve less emphasis than is normal in other approaches. 
 
-<u>4.3.2. Cluster with HDBSCAN</u>
+#### 4.3.2. Cluster with HDBSCAN
 
 With the parameters selected we now cluster with HDBSCAN
 
@@ -394,7 +419,7 @@ cluster.generate_clusters({
 })
 ```
 
-*4.4. Optimizing clusters*
+### 4.4. Optimizing clusters
 
 You can now optionally collapse very small clusters into outliers by selecting a cutoff. 
 Note even if you don't want to reduce the clusters you should run `cluster.clean_clusters()` to trigger the state of the current class to save. 
@@ -407,7 +432,7 @@ cluster.clean_clusters(final_cluster_count = <int of the number of clusters you 
 
 ```
 
-**5. Summarize the data**
+## 5. Summarize the data
 
 At this point in the pipeline you have all the papers, all the chunks and all the insights, with the insights organized into clusters. We now go about organizing and summarizing these insights into the final syntheis. 
 
@@ -424,7 +449,7 @@ summarize = core.Summarize(
 
 Note that while the state that was managing the first two classes was the corpus_state attribute, the Summarize class modifies the summary_state attribute. Saves happen here after every summary mehod gets called.
 
-*5.1. Summarize the clusters*
+### 5.1. Summarize the clusters
 
 The first step is to have an LLM summarize all the clusters of insights.
 
@@ -432,7 +457,7 @@ The first step is to have an LLM summarize all the clusters of insights.
 summarize.summarize_clusters()
 ```
 
-*5.2. Generate theme schema*
+### 5.2. Generate theme schema
 
 Then we have the LLM look at these summaries and build a better conceptual mapping of the dominant themes, expressed as a theme schema - a set of theme labels, theme descriptions and rules for whether to include or exclude an insight. 
 
@@ -440,7 +465,7 @@ Then we have the LLM look at these summaries and build a better conceptual mappi
 summarize.gen_theme_schema()
 ```
 
-*5.3. Map insights to themes*
+### 5.3. Map insights to themes
 
 Now we pass the theme schema and batches of the insights to the LLM and ask it to allocate each insight to a theme id. 
 
@@ -448,7 +473,7 @@ Now we pass the theme schema and batches of the insights to the LLM and ask it t
 summarize.map_insights_to_themes()
 ```
 
-*5.4. Populate the themes*
+### 5.4. Populate the themes
 
 With the insights organized into themes we can ask the LLM to summarize each theme using only the insights allocated to it. 
 
@@ -456,7 +481,7 @@ With the insights organized into themes we can ask the LLM to summarize each the
 summarize.populate_themes()
 ```
 
-*5.5. Address orphans*
+### 5.5. Address orphans
 
 Now we check the theme summaries to make sure all the insights that were allocated to a theme actually got incorporated. For any insights that are identified as missing we force them into the themes. This two step process happens in a single call. 
 
@@ -464,11 +489,11 @@ Now we check the theme summaries to make sure all the insights that were allocat
 summarize.address_orphans()
 ```
 
-**6. Iterate themes and finalize**
+## 6. Iterate themes and finalize
 
 Now we have a set of themes containing summaries of the insights allocated to them, along with reinserted orphans. However since the themes were generated on top of compressed cluster summaries the schema may not have accounted for minority insights or edge cases. In those cases the forced orphan reinsertion may destabilize theme boundaries, or break their internal conceptual cohernece. Iteration on themes is a means to restore this coherence. To achieve this practically we pass the current set of summarized themes back to the `gen_theme_schema()` method that will try to generate an improved schema accounting for all the insights that are now reflected in the summaries.
 
-*6.1. Iterate themes*
+### 6.1. Iterate themes
 
 So we regenerate the schema, re-map the insights, re-populate the themes, and address orphans again:
 
@@ -482,7 +507,7 @@ summarize.address_orphans()
 
 You can run this iteration as many times as you like but for now running it twice is suggested. 
 
-*6.2. Address redundancy*
+### 6.2. Address redundancy
 
 The final step in this class is optional. You can create an updated output that tries to reduce redundacies across themes within each research question. This risks losing insights, but makes the output more readable. 
 
@@ -490,7 +515,7 @@ The final step in this class is optional. You can create an updated output that 
 summarize.address_redundancy()
 ```
 
-**7. Render**
+## 7. Render
 
 The final stage of the pipeline involves the Render class that will optionally generate cosmetic features: title, exec summary, question summaries and a stylistic re-write. All are optional. It also renders the final synthesis. Initialize the class using the corpus_state and summary_state from the complete Summarize class. 
 
@@ -503,7 +528,7 @@ renderer = render.Render(
 )
 ```
 
-*7.1. Generate optional cosmetic elements*
+### 7.1. Generate optional cosmetic elements
 
 Here we just pass content from the summarized themes and ask the LLM to generate different cosmetic elements: stylistic rewrite, title and exec summary and question summaries.  
 
@@ -513,7 +538,7 @@ renderer.gen_exec_summary()
 renderer.gen_question_summaries()
 ```
 
-*7.2. Knit cosmetic elements into the themes*
+### 7.2. Knit cosmetic elements into the themes
 
 Penultimately we incorporate whatever cosmetic elements you have chosen to create, into the data holding the theme summaries.
 
@@ -521,7 +546,7 @@ Penultimately we incorporate whatever cosmetic elements you have chosen to creat
 renderer.integrate_cosmetic_changes()
 ```
 
-*7.3. Export the results*
+### 7.3. Export the results
 
 Finally we render the output. You can render to any of "docx", "md" or "pdf". Set `use_stylized = True` to use the stylized re-write or `False` to use whatever was finally generated by the Summarize class (i.e. whether you ran the redundancy pass or not) 
 
@@ -531,7 +556,7 @@ renderer.render_output("md", use_stylized=True)
 
 You can now inspect your results at ~/ReadingMachine/outputs
 
-**8. Trace claims**
+## 8. Trace claims
 
 Because the tool summarizes themes directly from insights on every pass, we can trace all claims in the paper back to the original insight and chunk. A convenience methodd in the Render class enables this:
 
