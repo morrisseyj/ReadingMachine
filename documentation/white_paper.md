@@ -134,6 +134,10 @@ Insights are formally defined in the prompt as:
 
 > “any explicit claims, arguments, findings, or statements in the text that bear on [the] question[s]… An explicit claim includes: stated findings or conclusions, causal statements (e.g. X leads to Y), explanations of mechanisms or processes, descriptive statements that clearly assert a relationship, condition or effect. They are not restricted to formal conclusions [as] many valid claims appear as descriptive or explanatory statements. Each [insight] must be concise (one sentence or short phrase) and preserve wording as much as possible."
 
+Insights are distinguished from meta-insights as follows in the prompt:
+
+> "[meta-insighs are] higher-level, traceable arguments or conclusions that span across multiple parts of a text ... Chunk-level insights capture localized claims. [meta-]insights ... ONLY become visible when combining information across multiple parts of the document. [meta-insights] must introduce a substantively new claim that only becomes visible when considering multiple parts of the document together"
+
 To complement this chunk-level pass, the system performs a second, document-level pass. In this stage, the full document (or the largest portion that fits within the model’s context window) is processed with each research question individually. The model is provided with the previously extracted chunk-level insights and instructed to identify additional insights without repetition.
 
 This dual approach captures both localized claims and broader arguments that span multiple sections of a document, reducing the likelihood that cross-cutting ideas are missed during chunk-level processing.
@@ -275,7 +279,7 @@ Core system metrics include:
 
 The system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation results in a descriptive representation of the literature, rather than a synthesized position.
 
-The themes generated appear substantively meaningful and aligned with known structures in the industrial policy literature. No themes appear obviously distorted or artificial. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and maintains coherence across research questions.
+The themes generated appear substantively meaningful and aligned with known structures in the industrial policy literature. No themes appear obviously distorted or artificial. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and maintains coherence across research questions. Notably the re-theming process appears to consolidate conceptual structure across iterations. The reduction in theme count between passes suggests that initial semantic groupings are being refined into more coherent conceptual categories, which are undergoing effective consolodation with repass.
 
 Granular claims are preserved throughout the output. The system does not collapse all content into high-level abstractions; instead, specific and detailed claims are retained within thematic summaries.
 
@@ -285,15 +289,19 @@ No obvious hallucinations were identified during internal review, though this ha
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects the density of the underlying literature, rather than a failure of the system. In contrast, human-led reviews often impose balance across sections, even where this distorts the distribution of available evidence.
 
-#### System Behavior
-
-The meta-insight generation step was the most computationally expensive stage of the pipeline, accounting for approximately $150–$200 of the total cost and producing roughly two-thirds of all insights. This is notable, as the meta pass was originally conceived as a supplement to chunk-level extraction.
-
-One hypothesis is that this behavior reflects context saturation. The meta-insight step involves passing large portions of each document, along with existing insights, into a near-full context window. Under these conditions, the model may struggle to track previously extracted insights, leading to redundancy. However, even under this constraint, the meta pass produces a substantial volume of additional insights, suggesting it is capturing information not retrieved during chunk-level processing. It might also be the case that chunking behavior is failing (due to ingestion quirks), causing chunk-level extraction to drastically underperform. This behavior warrants further investigation.
-
-The re-theming process appears to consolidate conceptual structure across iterations. The reduction in theme count between passes suggests that initial semantic groupings are being refined into more coherent conceptual categories.
-
 ### 4.6 Failure Modes and Issues
+
+#### Large proportion of meta-insights
+
+The meta-insight generation step was the most computationally expensive stage of the pipeline, accounting for approximately $213 of the total cost and producing roughly two-thirds of all insights. This is notable, as the meta pass was originally conceived as a supplement to chunk-level extraction, anticipated to add only those arguments that appear across long sections.
+
+Given the quantity of meta-insights, it is likely that the meta-insight prompt is too lax - it was explicitely decided not to spend time tuning prompts before publishing this architecture. Tightening this prompt would likely however it might not be trivial to write the chunk-insight prompt and meta-insight prompt to act in concert. 
+
+Additionally, the number of meta-insights raises a potential challenge regarding reproducibility. Due to meta-insights being derived from full context windows, it is likely that they are less stable than chunk level insights. This instability across runs threatens reproducibility - as differences in insights propagate through clustering,theming etc. (see limitations section below). This is plausibly manageable if meta-insights are marginal to the overall insight count, but if they are significant - even when the prompt is correctly scoped, for example if one was mapping relationships in fiction - then reproducibility could diminish substantailly. 
+
+A further hypothesis is that the large number of meta-insights reflects that the model may struggling to track previously extracted insights as context window pressure is high. This likely leads to redundancy with existing chunk level arguments being recaptured.  and recombined, with "real" meta insighs being added on top. 
+
+It is likley that both issues are at play: the prompt is too lax and existing chunk insights are not being effectively tracked. The result is that meta-insights possibly include: previously derived chunk level insights, recombinations of multiple chunk insighs, and "real" meta-isights (i.e. those claims that are articulated across multiple chunks). The result is likely significant redundancy. From the quality of the output the synthesis steps appear to be resolving the redundancy issues. That said, such redundancy increases compute costs (see below) and likely undermine reproducibility. Tuning this prompt should be a priority for the work. 
 
 #### High orphan counts
 
