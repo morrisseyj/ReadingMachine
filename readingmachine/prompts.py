@@ -1239,7 +1239,7 @@ class Prompts:
 
     
 
-    def identify_orphans(self):
+     def identify_orphans(self):
         """
         Generate the system prompt for identifying orphan insights.
 
@@ -1287,8 +1287,8 @@ class Prompts:
             '# DEFINITION OF "REFLECTED"\n'
             'An insight is considered reflected if:\n'
             '- Its core claim, finding, or argument is clearly represented in the summary, even if expressed at a higher level of abstraction.\n'
-            '- It meaningfully contributes to a synthesized claim in the summary.\n'
-            '- It is incorporated as part of a broader grouping of similar insights without loss of its substantive meaning.\n\n'
+            '- It meaningfully contributes to a synthesized claim in the summary, even if not individually distinguishable.\n'
+            '- It is incorporated as part of a broader grouping of similar insights, where the shared mechanism, relationship, or implication is clearly represented.\n\n'
 
             'An insight is NOT reflected if:\n'
             '- The specific claim, finding, or argument is absent from the summary.\n'
@@ -1297,7 +1297,8 @@ class Prompts:
 
             '# IMPORTANT\n'
             '- Reflection requires substantive representation, not mere topic overlap.\n'
-            '- Do not infer inclusion unless the summary clearly captures the insight’s conceptual contribution.\n\n'
+            '- You may infer inclusion when a generalized or synthesized claim clearly captures the core mechanism or implication of the insight, even if not all details are explicitly stated.\n'
+            '- However, do not mark an insight as reflected if its specific contribution is plausibly omitted under the abstraction.\n\n'   
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
