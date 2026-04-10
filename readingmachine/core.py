@@ -5283,6 +5283,8 @@ class Summarize:
         total_themes = len(populated_themes)
         count = 1
 
+        total_batches_all_themes = 0
+
         # ---- Capacity parameters (tune once) ----
         MODEL_INPUT_WORD_LIMIT = 25000   # practical integration limit (well below 128k hard cap)
         PROMPT_OVERHEAD_WORDS = 800      # reserve space for instructions, schema, formatting
