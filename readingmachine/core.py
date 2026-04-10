@@ -3396,7 +3396,7 @@ class Summarize:
         return shortest_paths
     
 
-    def summarize_clusters(self):
+    def summarize_clusters(self, frozen_summary_window = 5):
         """
         Generate summaries for each cluster of insights across all research questions.
 
@@ -3411,8 +3411,24 @@ class Summarize:
         contextual information when generating summaries.
 
         During summarization, previously generated cluster summaries are passed to
-        the model as frozen context. This allows the model to maintain consistency
-        across summaries while preventing earlier summaries from being modified.
+        the model as frozen context. This context is:
+
+            • scoped at the **research question level** (no cross-question context is used)
+            • restricted to a **bounded sliding window** of the most recent summaries
+            (e.g., last N clusters, where N = `frozen_summary_window`)
+
+        This design provides local semantic continuity while avoiding global path
+        dependence. It ensures that:
+
+            • summaries remain coherent with nearby clusters
+            • early clusters do not disproportionately shape later ones
+            • small variations in ordering or phrasing do not propagate across the
+            entire sequence
+
+        Unlike earlier implementations that accumulated all prior summaries, this
+        approach treats cluster summarization as a locally conditioned process rather
+        than a single evolving narrative. Global structure is instead resolved at the
+        theme-generation stage.
 
         If cluster summaries already exist on disk, the user is prompted to either:
 
@@ -3510,10 +3526,15 @@ class Summarize:
                     raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
 
                 # Build system prompt from predefined method
-                sys_prompt: str = Prompts().summarize_clusters()
+                sys_prompt: str = Prompts().summarize_clusters(frozen_summary_window=frozen_summary_window)
 
                 # Get the summaries frozen so far if there are any
-                frozen_summaries = pd.DataFrame(summaries_dict_lst)["summary"].tolist() if summaries_dict_lst else []
+                # Get only the last N summaries (local window) for frozen context
+                frozen_summaries = (
+                    [d["summary"] for d in summaries_dict_lst 
+                    if d["question_id"] == rq_id][-frozen_summary_window:]
+                    if summaries_dict_lst else []
+                )
 
                 frozen_summaries_str = "\n".join(frozen_summaries) if frozen_summaries else ""
                 insights_str = "\n".join(insights)

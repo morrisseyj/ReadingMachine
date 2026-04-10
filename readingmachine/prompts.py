@@ -704,7 +704,7 @@ class Prompts:
     # CORE PROMPTS - SUMMARIZE
     ####
 
-    def summarize_clusters(self):
+    def summarize_clusters(self, frozen_summary_window):
         """
         Generate the system prompt for cluster-level summarization.
 
@@ -750,7 +750,9 @@ class Prompts:
             "You will receive:\n"
             "- The specific research question the insights pertain to.\n"
             "- Other research questions providing broader context for the overall literature review.\n"
-            "- The preceding cluster summaries for context (not to be included in your output). These may be empty; if empty, there is no preceding text.\n"
+            "- A limited set of preceding cluster summaries (for context only; not to be included in your output). "
+            f"These represent a small, recent window of clusters (typically {frozen_summary_window}) ordered by semantic proximity, not the full corpus. "
+            f"They may be empty or less than {frozen_summary_window}; if empty/less than {frozen_summary_window}, there is no/limited preceding text.\n"
             "- The cluster number for the insights (all clusters are uniquely labelled, with -1 indicating outliers or 'other').\n"
             "- All insights for this cluster, each with source citations.\n\n"
 
@@ -758,15 +760,16 @@ class Prompts:
             "- When summarizing the insights, focus primarily on answering the specific research question.\n"
             "- There may be duplicate (or close duplicate claims) across insights. Do not weight identical claims more heavily, unless they are supported by distinct citations. Otherwise, treat duplicates as a single point.\n"
             "- Use other research questions for context and to identify conceptual or thematic connections, but ensure your primary focus remains on the specific research question.\n"
-            "- Use the cluster summaries already created as context to increase overall coherence and to help identify cross-cutting themes across clusters. "
-            "Explicitly note thematic linkages or contrasts when they help to situate the current cluster within the broader literature. "
-            "However, only include information drawn from the current clusters insights in your actual summary. "
+            "- Use the provided preceding cluster summaries as **local context only** to improve coherence and identify nearby thematic linkages. "
+            "Do not treat them as a complete representation of earlier clusters or the full corpus. "
+            "Use them to align terminology and note local continuities or contrasts where helpful. "
+            "However, only include information drawn from the current cluster's insights in your actual summary. "
             "Do not restate, paraphrase, or edit text from the preceding summaries.\n"
             "- If there are no preceding summaries, write the summary as if it is the first in the sequence. Introduce the topic clearly and independently.\n"
             "- Provide a clear topline summary of the cluster first, then detail individual points. "
             'Example phrasing: "This cluster focuses on ... The findings describe several relevant points. First ... The second links with themes mentioned earlier ... Additionally ..."\n'
-            "- When preceding cluster summaries exist, use transitions to maintain narrative coherence. "
-            'Example phrasing: "Building on themes discussed previously ... In contrast to earlier findings ..."\n'
+            "- When preceding cluster summaries exist, you may use transitions to maintain **local narrative coherence**, but avoid implying global continuity across the entire corpus. "
+            'Example phrasing: "Building on nearby themes ... In contrast to related findings ..."\n'
             "- Preserve all citations exactly as they appear. If multiple insights support a single claim, list all relevant citations together.\n"
             "- For clusters containing outliers or very small groups (i.e., cluster -1), reflect this in the tone of the summary. "
             'Example: "The remaining unclassified literature identifies several noteworthy points ..."\n'
