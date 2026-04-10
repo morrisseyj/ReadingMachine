@@ -80,7 +80,7 @@ The specific steps to run the pipeline are as follows (the below draws heavily o
 Running the full pipeline will:
 
 - take time (minutes to hours depending on corpus size)
-- incur API costs
+- incur API costs ($5 - $300+ depending on sorpus size)
 - generate intermediate files at each stage
 - produce a structured synthesis in /outputs
 
