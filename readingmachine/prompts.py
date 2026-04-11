@@ -728,7 +728,7 @@ class Prompts:
     # CORE PROMPTS - SUMMARIZE
     ####
 
-    def summarize_clusters(self, frozen_summary_window):
+    def summarize_clusters(self, frozen_summary_window, max_output_words = 2800):
         """
         Generate the system prompt for cluster-level summarization.
 
@@ -784,33 +784,28 @@ class Prompts:
             "- When summarizing the insights, focus primarily on answering the specific research question.\n"
             "- There may be duplicate (or close duplicate claims) across insights. Do not weight identical claims more heavily, unless they are supported by distinct citations. Otherwise, treat duplicates as a single point.\n"
             "- Use other research questions for context and to identify conceptual or thematic connections, but ensure your primary focus remains on the specific research question.\n"
-            "- Use the provided preceding cluster summaries as **local context only** to improve coherence and identify nearby thematic linkages. "
+            "- Use the provided preceding cluster summaries as local context only to improve coherence and identify nearby thematic linkages. "
             "Do not treat them as a complete representation of earlier clusters or the full corpus. "
-            "Use them to align terminology and note local continuities or contrasts where helpful. "
-            "However, only include information drawn from the current cluster's insights in your actual summary. "
-            "Do not restate, paraphrase, or edit text from the preceding summaries.\n"
-            "- If there are no preceding summaries, write the summary as if it is the first in the sequence. Introduce the topic clearly and independently.\n"
-            "- Provide a clear topline summary of the cluster first, then detail individual points. "
-            'Example phrasing: "This cluster focuses on ... The findings describe several relevant points. First ... The second links with themes mentioned earlier ... Additionally ..."\n'
-            "- When preceding cluster summaries exist, you may use transitions to maintain **local narrative coherence**, but avoid implying global continuity across the entire corpus. "
-            'Example phrasing: "Building on nearby themes ... In contrast to related findings ..."\n'
-            "- Preserve all citations exactly as they appear. If multiple insights support a single claim, list all relevant citations together.\n"
-            "- For clusters containing outliers or very small groups (i.e., cluster -1), reflect this in the tone of the summary. "
-            'Example: "The remaining unclassified literature identifies several noteworthy points ..."\n'
+            "Only include information drawn from the current cluster's insights in your summary.\n"
+            "- If there are no preceding summaries, write the summary as if it is the first in the sequence.\n"
+            "- Provide a clear topline summary of the cluster first, then detail individual points.\n"
+            "- Maintain local narrative coherence where appropriate, but do not imply global continuity across the corpus.\n"
+            "- Preserve all citations exactly as they appear.\n"
+            "- For clusters containing outliers or small groups (cluster -1), reflect this in the tone.\n"
             "- Ensure the summary is coherent, logically structured, and written in an academic literature-review tone.\n\n"
 
             "INPUT FORMAT:\n"
             "Research question id: <question_id>\n"
             "Research question text: <question_text>\n"
-            "PRECEDING CLUSTER SUMMARIES (for context only; may be empty):\n"
+            "PRECEDING CLUSTER SUMMARIES:\n"
             "<cluster_summary_1>\n<cluster_summary_2>\n...<cluster_summary_n>\n"
             "Cluster: <cluster_no>\n"
             "INSIGHTS:\n"
             "<insight_1>\n<insight_2>\n...<insight_n>\n"
             "OTHER RESEARCH QUESTIONS:\n"
-            "<question_id: question_text>\n<question_id: question_text>\n...<question_id: question_text>\n\n"
+            "<question_id: question_text>\n...<question_id: question_text>\n\n"
 
-            "OUTPUT FORMAT (strict valid JSON, with ONLY the following schema, one dict per call, no extra text):\n"
+            "OUTPUT FORMAT (STRICT JSON ONLY):\n"
             "{\n"
             '    "question_id": "<question_id>",\n'
             '    "question_text": "<question_text>",\n'
@@ -818,16 +813,34 @@ class Prompts:
             '    "summary": "<summary>"\n'
             "}\n\n"
 
-            "INSTRUCTIONS:\n"
-            "- Output strictly valid JSON only (no commentary, preamble, or code block formatting).\n"
-            "- Each value must be a primitive type (string or integer), not an array or list.\n"
-            "- Do not include square brackets [] in the output JSON unless explicitly part of the text of the summary.\n"
-            "- Your output should not exceed approximately 2800 words. "
-            "If all insights can be effectively summarized without losing detail in fewer words, produce a shorter summary. "
-            "Preserve as much granularity of insight as possible within the limit; compress phrasing, not substance.\n"
-            "- Maintain fidelity to the content of the insights and citations while improving readability and coherence.\n"
-            "- Write in a style that is analytical, evidence-based, and citation-faithful.\n"
-            "- Do not include meta-commentary, instructions, or extraneous formatting in your response.\n"
+            "CONSTRAINTS (STRICT PRIORITY ORDER):\n"
+
+            f"1. LENGTH (HARD LIMIT)\n"
+            f"- The summary MUST NOT exceed {max_output_words} words.\n"
+            "- This is a strict upper bound and must be respected.\n\n"
+
+            "2. COVERAGE (HARD)\n"
+            "- All insights must be represented in the summary.\n"
+            "- Each insight must contribute to the synthesized output either directly or through accurate abstraction.\n\n"
+
+            "3. GRANULARITY (PRESERVE WHERE POSSIBLE)\n"
+            "- Preserve distinct claims, mechanisms, and relationships wherever possible.\n"
+            "- Do NOT collapse substantively different insights into vague generalizations.\n\n"
+
+            "4. WHEN CONSTRAINTS CONFLICT\n"
+            "- You MUST prioritize staying within the length limit.\n"
+            "- Then ensure all insights are represented.\n"
+            "- If necessary to satisfy the length constraint:\n"
+            "  • combine clearly similar insights\n"
+            "  • abstract repeated mechanisms or findings\n"
+            "  • compress phrasing while preserving meaning\n"
+            "- Do NOT omit unique or substantively different claims.\n\n"
+
+            "OUTPUT RULES:\n"
+            "- Return strictly valid JSON.\n"
+            "- Do not include commentary, explanations, or formatting outside the JSON.\n"
+            "- Ensure the JSON is complete and properly closed.\n"
+            "- Write in an analytical, evidence-based, citation-faithful style.\n"
         )
     
     

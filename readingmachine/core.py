@@ -3588,8 +3588,9 @@ class Summarize:
                     ai_model=self.ai_model,
                     return_json=True,
                     json_schema=json_schema,
-                    fall_back=fall_back
-                )
+                    fall_back=fall_back, 
+                    max_tokens=4000
+                    )
 
                 summaries_dict_lst.append(response)
 
