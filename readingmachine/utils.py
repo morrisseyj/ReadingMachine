@@ -28,6 +28,7 @@ they exist solely to support reliable execution of the pipeline.
 """
 
 from .state import CorpusState
+import config
 
 import pandas as pd
 import numpy as np
@@ -44,6 +45,7 @@ import os
 import hashlib
 import re
 import uuid
+import random
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
@@ -1187,3 +1189,61 @@ def safe_pickle(obj, path, retries=6, base_delay=0.05, backoff=2.0):
 
     # Should never reach here
     raise RuntimeError("safe_pickle failed unexpectedly")
+
+def sample_to_word_limit(
+    texts,
+    max_words: int = 70000,
+    seed: int = config.seed
+):
+    """
+    Randomly sample a list of text items so that the total word count
+    does not exceed a specified limit.
+
+    This function shuffles the input list and selects a prefix whose
+    cumulative word count remains within `max_words`. It is designed
+    to enforce input size constraints for LLM calls while preserving
+    a representative random subset of the original data.
+
+    Parameters
+    ----------
+    texts : List[str]
+        List of text items (e.g. insights) to sample from.
+
+    max_words : int
+        Maximum total word count allowed across the selected texts.
+
+    seed : Optional[int], default=None
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    List[str]
+        Subset of input texts whose combined word count does not
+        exceed `max_words`.
+
+    Notes
+    -----
+    - Sampling is uniform over permutations (via shuffle).
+    - Order is not preserved.
+    - This is preferable to count-based sampling when model constraints
+      depend on total input size rather than number of items.
+    """
+
+    random.seed(seed)
+
+    shuffled = texts.copy()
+    random.shuffle(shuffled)
+
+    selected = []
+    running_words = 0
+
+    for text in shuffled:
+        w = len(text.split())
+
+        if running_words + w > max_words:
+            break
+
+        selected.append(text)
+        running_words += w
+
+    return selected
