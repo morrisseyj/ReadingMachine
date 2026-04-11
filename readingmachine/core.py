@@ -4584,23 +4584,18 @@ class Summarize:
         Sampling behavior
         -----------------
         When the number of insights mapped to a theme exceeds a threshold,
-        a subset of insights is selected using cluster-aware sampling.
+        a subset of insights is selected using random sampling from the
+        mapped insight set.
 
         This ensures that:
 
-            - All major semantic clusters are represented
-            - Initial theme structure is preserved
+            - Sampling reflects the actual distribution of insights assigned to the theme
+            - No external structural assumptions (e.g. clustering) are imposed during synthesis
             - Input size remains within model integration capacity
 
         Importantly, sampling does NOT remove insights from the pipeline.
         Any omitted insights will be surfaced during orphan detection and
         reintroduced in later stages, ensuring full coverage prior to re-theming.
-
-        Special theme types are handled differently:
-
-            - "conflicts": emphasizes incompatible claims
-            - "other": captures minority insights
-            - "general": standard synthesis
 
         Parameters
         ----------
@@ -4638,31 +4633,7 @@ class Summarize:
         - Themes with no mapped insights are retained with empty summaries.
         """
 
-        def _sample_insights_by_cluster(insights_df, max_total=400, max_per_cluster=50):
-            """
-            Sample insights in a structure-preserving way.
-
-            Ensures each cluster is represented while capping total size.
-            """
-            if "cluster_id" not in insights_df.columns:
-                # Fallback: no clustering available → simple truncation
-                return insights_df.head(max_total)
-
-            grouped = insights_df.groupby("cluster_id")
-            n_clusters = grouped.ngroups
-
-            # Target per cluster (soft)
-            per_cluster = max(1, min(max_per_cluster, max_total // max(n_clusters, 1)))
-
-            sampled = (
-                grouped
-                .apply(lambda x: x.head(per_cluster))
-                .reset_index(drop=True)
-            )
-
-            # Final cap in case rounding overshoots
-            return sampled.head(max_total)
-
+    
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
@@ -4707,14 +4678,13 @@ class Summarize:
             original_count = len(insights_df)
 
             if original_count > SAMPLE_THRESHOLD:
-                insights_df = _sample_insights_by_cluster(
-                    insights_df,
-                    max_total=MAX_SAMPLE
-                )
+                insights_df = insights_df.sample(
+                n=min(MAX_SAMPLE, original_count),
+                random_state=config.seed
+            )
 
                 print(
-                    f"Theme {theme_id}: sampled {len(insights_df)} of {original_count} insights "
-                    f"across {insights_df['cluster_id'].nunique() if 'cluster_id' in insights_df else 'N/A'} clusters"
+                    f"Theme {theme_id}: sampled {len(insights_df)} of {original_count} insights (random sampling)"
                 )
 
             insights = insights_df["insight"].tolist()
