@@ -5629,14 +5629,42 @@ class Summarize:
                         self.summary_state.orphan_list.append(orphans_df)
                     
                     # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
-                    os.remove(self.orphan_pickle_resume_path)
+                    # Have to wrap in this try - except as windows keeps hold of the file for reasons that are not clear.
+                    try:
+                        os.remove(self.orphan_pickle_resume_path)
+                    except PermissionError:
+                        while True:
+                            confirm = input(
+                                "\nCould not automatically delete resume file.\n"
+                                "This is a known Windows file system issue.\n\n"
+                                f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
+                                "This file will trigger resume mode on the next run if not removed.\n\n"
+                                "Enter 'c' to continue:\n"
+                            ).lower().strip()
+
+                            if confirm == "c":
+                                break
+
                     self.summary_state.save()
                     return(self.summary_state.orphan_list[-1])
  
             else:
                 print("Starting new orphan identification process and deleting the in progress pickle...")
-                os.remove(self.orphan_pickle_resume_path)
+                # Again have to wrap in try except because of windows file system issues
+                try:
+                    os.remove(self.orphan_pickle_resume_path)
+                except PermissionError:
+                    while True:
+                        confirm = input(
+                            "\nCould not automatically delete resume file.\n"
+                            "This is a known Windows file system issue.\n\n"
+                            f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
+                            "This file will trigger resume mode on the next run if not removed.\n\n"
+                            "Enter 'c' to continue:\n"
+                        ).lower().strip()
 
+                        if confirm == "c":
+                            break
 
         # #####
         # FORCE FLAG LOGIC
@@ -5700,7 +5728,7 @@ class Summarize:
         if os.path.exists(self.orphan_pickle_resume_path):
             try:
                 os.remove(self.orphan_pickle_resume_path)
-            except PermissionError: #Windows would not release the file for some reason so this is a manual instruction if it fails
+            except PermissionError:
                 while True:
                     confirm = input(
                         "\nCould not automatically delete resume file.\n"
