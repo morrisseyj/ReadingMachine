@@ -28,7 +28,7 @@ they exist solely to support reliable execution of the pipeline.
 """
 
 from .state import CorpusState
-import config
+from . import config
 
 import pandas as pd
 import numpy as np
