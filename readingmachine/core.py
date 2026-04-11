@@ -3521,6 +3521,21 @@ class Summarize:
                     lambda x: x if isinstance(x, str) else (
                         x[0] if isinstance(x, list) and len(x) == 1 and isinstance(x[0], str) else None
                     )).tolist()
+
+                # --- Sampling step for large clusters ---
+                MAX_WORDS = 70000
+
+                if sum(len(i.split()) for i in insights) > MAX_WORDS:
+                    insights = utils.sample_to_word_limit(
+                        insights,
+                        max_words=MAX_WORDS,
+                        seed=config.seed
+                    )
+
+                    print(
+                        f"Cluster {cluster} (RQ {rq_id}): sampled {len(insights)} insights to fit word budget"
+                    )
+                #------
                 
                 if any(i is None for i in insights):
                     raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
@@ -4671,20 +4686,21 @@ class Summarize:
                 self.corpus_state.insights["insight_id"].isin(insight_ids)
             ].copy()
 
-            # --- NEW: sampling step ---
-            SAMPLE_THRESHOLD = 500
-            MAX_SAMPLE = 400
+            # --- sample when words in insights exceeds 70000 step ---
+            MAX_WORDS = 70000
 
-            original_count = len(insights_df)
+            insights = insights_df["insight"].tolist()
 
-            if original_count > SAMPLE_THRESHOLD:
-                insights_df = insights_df.sample(
-                n=min(MAX_SAMPLE, original_count),
-                random_state=config.seed
-            )
+            # if total number of words in the insights exceeds the max, then sample
+            if sum(len(i.split()) for i in insights) > MAX_WORDS:
+                insights = utils.sample_to_word_limit(
+                    insights,
+                    max_words=MAX_WORDS,
+                    seed=config.seed
+                )
 
                 print(
-                    f"Theme {theme_id}: sampled {len(insights_df)} of {original_count} insights (random sampling)"
+                    f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
                 )
 
             insights = insights_df["insight"].tolist()
@@ -5350,7 +5366,7 @@ class Summarize:
                     orphan_batch_str = "\n".join([f"- {i}" for i in batch])
 
                     # Build LLM prompt
-                    sys_prompt = Prompts().integrate_orphans(max_length=2800)
+                    sys_prompt = Prompts().integrate_orphans(max_length = 2800)
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
                         f"THEME LABEL: {theme_label}\n"
