@@ -132,19 +132,30 @@ def validate_format(
         )
     
 
-def call_chat_completion(llm_client, 
-                         ai_model, 
-                         sys_prompt, 
-                         user_prompt, 
-                         fall_back: Dict[str, Any], 
-                         return_json: bool, 
-                         json_schema = None):
+def call_chat_completion(
+    llm_client, 
+    ai_model, 
+    sys_prompt, 
+    user_prompt, 
+    fall_back: Dict[str, Any], 
+    return_json: bool, 
+    json_schema=None,
+    max_tokens: int | None = None
+):
     """
     Standardized wrapper for chat completion calls.
 
     This function provides a consistent interface for interacting with
-    chat completion models throughout the codebase. It handles both
-    structured JSON responses and plain text outputs.
+    chat completion models throughout the codebase. It supports both
+    structured JSON responses and plain text outputs, and optionally
+    allows control over the maximum number of tokens generated.
+
+    The function centralizes:
+
+        • prompt construction
+        • response format handling (JSON vs text)
+        • error handling and fallback behavior
+        • optional output length control via max_tokens
 
     Parameters
     ----------
@@ -162,20 +173,39 @@ def call_chat_completion(llm_client,
 
     fall_back : Dict[str, Any]
         Default value returned if the LLM call fails or returns
-        invalid output.
+        invalid output (only used when return_json=True).
 
     return_json : bool
         If True, the function attempts to parse the model response
-        as JSON.
+        as JSON and return a dictionary. If False, raw text is returned.
 
-    json_schema : Optional[dict]
+    json_schema : Optional[dict], default=None
         Optional JSON schema used to enforce structured responses.
+        If provided, the model is constrained to return output matching
+        this schema.
+
+    max_tokens : Optional[int], default=None
+        Maximum number of tokens the model is allowed to generate.
+        If None, the API default is used. This parameter should be used
+        when strict output length control is required (e.g. to prevent
+        truncation or enforce bounded summaries).
 
     Returns
     -------
     Union[str, Dict[str, Any]]
         Parsed JSON object if `return_json=True`, otherwise the raw
-        text response.
+        text response string.
+
+    Notes
+    -----
+    - If `return_json=True` and the model output cannot be parsed as valid JSON,
+    the function returns `fall_back`.
+    - If `return_json=False`, failures return an empty string.
+    - Setting `max_tokens` does not reduce the model's input capacity; it only
+    constrains output length and helps prevent incomplete or truncated responses.
+    - For tasks requiring strict output bounds (e.g. orphan integration),
+    it is recommended to set `max_tokens` slightly above the expected
+    output length to allow for formatting overhead.
     """
 
     messages = [
@@ -183,49 +213,38 @@ def call_chat_completion(llm_client,
         {"role": "user", "content": user_prompt}
     ]
 
-    if return_json:
-        try:
-            if json_schema is not None:
-                response = llm_client.chat.completions.create(
-                    model=ai_model,
-                    messages=messages,
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": json_schema
-                    },
-                    temperature=0
-                )
-            else:
-                response = llm_client.chat.completions.create(
-                    model=ai_model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                    temperature=0
-                )
-        except Exception as e:
-            print(f"Call to OpenAI failed. Error: {e}")
-            return fall_back
+    kwargs = {
+        "model": ai_model,
+        "messages": messages,
+        "temperature": 0
+    }
 
+    if return_json:
+        if json_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": json_schema
+            }
+        else:
+            kwargs["response_format"] = {"type": "json_object"}
+
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+
+    try:
+        response = llm_client.chat.completions.create(**kwargs)
+    except Exception as e:
+        print(f"Call to OpenAI failed. Error: {e}")
+        return fall_back if return_json else ""
+
+    if return_json:
         try:
             parsed = json.loads(response.choices[0].message.content.strip())
             return parsed
         except Exception as e:
             print(f"LLM failed to return valid JSON: {e}")
             return fall_back
-
     else:
-        # -------- TEXT MODE --------
-        try:
-            response = llm_client.chat.completions.create(
-                model=ai_model,
-                messages=messages, 
-                temperature=0
-            )
-        except Exception as e:
-            print(f"Call to OpenAI failed. Error: {e}")
-            return ""
-
-        # just return raw text
         return response.choices[0].message.content
 
 def call_reasoning_model(

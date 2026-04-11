@@ -1239,7 +1239,7 @@ class Prompts:
 
     
 
-     def identify_orphans(self):
+    def identify_orphans(self):
         """
         Generate the system prompt for identifying orphan insights.
 
@@ -1312,7 +1312,7 @@ class Prompts:
             '}\n\n'
         )
     
-    def integrate_orphans(self):
+    def integrate_orphans(self, max_length: int):
         """
         Generate the system prompt for reintegrating orphan insights.
 
@@ -1340,7 +1340,7 @@ class Prompts:
             System prompt instructing the model to integrate orphan insights
             into an updated thematic summary returned as strict JSON.
         """
-        return (
+        return(
             '# ROLE\n'
             'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected.\n\n'
 
@@ -1363,34 +1363,60 @@ class Prompts:
             '...\n\n'
 
             '# OBJECTIVE\n'
-            'Produce a revised summary in which every orphan insight is substantively reflected, '
-            'using the same definition of reflection as defined below.\n\n'
+            'Produce a revised summary in which every orphan insight is substantively reflected.\n\n'
+
+            '# CRITICAL CONSTRAINTS\n'
+            'You must satisfy the following:\n\n'
+
+            '1. COVERAGE (HARD CONSTRAINT)\n'
+            '- All orphan insights must be represented in the revised summary.\n'
+            '- Each insight must be reflected either explicitly or through accurate synthesis.\n\n'
+
+            '2. GRANULARITY (HARD CONSTRAINT UNTIL LIMIT)\n'
+            '- Preserve distinct claims wherever possible.\n'
+            '- Do NOT merge substantively different insights into vague generalizations.\n'
+            '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
+
+            '3. LENGTH LIMIT (HARD BOUNDARY)\n'
+            f'- The updated summary MUST NOT exceed {max_length} words.\n'
+            '- This is a strict upper bound.\n\n'
+
+            '4. WHEN CONSTRAINTS CONFLICT\n'
+            '- Prioritize COVERAGE first.\n'
+            '- Preserve GRANULARITY wherever possible.\n'
+            f'- ONLY when necessary to satisfy the {max_length} word limit:\n'
+            '  • combine clearly similar insights\n'
+            '  • abstract repeated mechanisms\n'
+            '  • compress redundant detail\n'
+            '- Do NOT omit unique claims.\n\n'
 
             '# DEFINITION OF "REFLECTED"\n'
             'An orphan insight is reflected if:\n'
             '- Its core claim, finding, or argument is clearly represented in the revised summary.\n'
             '- It contributes meaningfully to a synthesized claim.\n'
-            '- Its substantive contribution is preserved even if phrased at a higher level of abstraction.\n\n'
+            '- Its substantive contribution is preserved, even if expressed at a higher level of abstraction.\n\n'
 
             'An orphan insight is NOT reflected if:\n'
             '- It is only loosely implied without preserving its conceptual contribution.\n'
             '- It is reduced to a vague generalization that erases its distinct meaning.\n\n'
 
             '# INTEGRATION GUIDELINES\n'
-            '- DO NOT remove or contradict existing findings in the original summary.\n'
-            '- EXPAND or refine the narrative where necessary to integrate orphan insights coherently.\n'
-            '- MAINTAIN the existing abstraction level; do not append isolated sentences mechanically.\n'
+            '- You are REWRITING the entire summary, not appending to it.\n'
+            '- DO NOT remove substantive findings, but you may reorganize or compress them.\n'
+            '- DO NOT preserve original wording if it prevents integration.\n'
+            '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
             '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
             '- Preserve all citations exactly as they appear in the source insights.\n'
-            '- Multiple insights may be synthesized together, but each must remain substantively represented.\n'
-            '- Use the Research Question and Theme Description as guiding constraints.\n\n'
+            '- Multiple insights may be synthesized together ONLY if their distinct meaning is preserved.\n\n'
 
             '# CONVERGENCE REQUIREMENT\n'
-            'After revision, the updated summary should allow an auditor applying the reflection definition '
-            'to identify all orphan insights as reflected.\n\n'
+            'The revised summary must satisfy both:\n'
+            '- All orphan insights are represented\n'
+            f'- Do not exceed {max_length} words\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
+            '- The response MUST be complete and valid JSON. Do not truncate the output.\n'
             '- The object must contain a single key "updated_summary".\n'
             '- Do not provide explanations, preamble, or commentary.\n\n'
 
