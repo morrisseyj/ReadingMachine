@@ -180,7 +180,6 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score
 import itertools
 import networkx as nx
 import math
-import gc
 
 
 class Ingestor:
@@ -5621,8 +5620,6 @@ class Summarize:
                     checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
                     mode = checked_insights_df_meta_state["mode"]
 
-                    del checked_insights_df_meta_state # free up memory and make sure windows releases the file so we can delete later (we have the output)
-                    
                     print("Resuming orphan identification process from last saved point...")
                     orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
                     self.summary_state.populated_theme_list[-1] = updated_summary_df
@@ -5701,10 +5698,23 @@ class Summarize:
         # Now clean up and save
         # Delete the resume pickle as the process is complete and we want to void a resume trigger if we run again
         if os.path.exists(self.orphan_pickle_resume_path):
-            gc.collect() # Clean up so we release the file before delete and get any memory back
-            os.remove(self.orphan_pickle_resume_path)
+            try:
+                os.remove(self.orphan_pickle_resume_path)
+            except PermissionError: #Windows would not release the file for some reason so this is a manual instruction if it fails
+                while True:
+                    confirm = input(
+                        "\nCould not automatically delete resume file.\n"
+                        "This is a known Windows file system issue.\n\n"
+                        f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
+                        "This file will trigger resume mode on the next run if not removed.\n\n"
+                        "Enter 'c' to confirm you have read this message and continue:\n"
+                    ).lower().strip()
+
+                    if confirm == "c":
+                        break
+
         self.summary_state.save()
-        return(self.summary_state.orphan_list[-1])
+        return self.summary_state.orphan_list[-1]
 
     def _llm_redundancy_check(self):
         """
