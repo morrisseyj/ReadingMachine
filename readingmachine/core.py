@@ -2744,37 +2744,55 @@ class Clustering:
         print(self.umap_param_tuning_results)
 
     @staticmethod
-    def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom"):
+    def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom", min_samples = None, max_cluster_size = None):
         """
         Perform density-based clustering using HDBSCAN.
+
+        This method applies HDBSCAN to a matrix of embedding vectors to identify
+        clusters of similar points based on local density. Clustering is performed
+        independently for each input matrix and does not assume any global structure.
 
         Parameters
         ----------
         embedding_matrix : np.ndarray
-            Matrix of reduced embedding vectors.
+            Matrix of embedding vectors to be clustered. Each row represents an observation.
 
-        min_cluster_size : int
-            Minimum cluster size parameter for HDBSCAN.
+        min_cluster_size : int, default=5
+            Minimum number of points required to form a cluster. Controls the smallest
+            allowable cluster size.
 
-        metric : str
-            Distance metric used for clustering.
+        metric : str, default="euclidean"
+            Distance metric used to compute pairwise distances between points.
 
-        cluster_selection_method : str
-            Strategy used by HDBSCAN to select clusters.
+        cluster_selection_method : str, default="eom"
+            Method used by HDBSCAN to extract flat clusters from the hierarchy.
+            "eom" (excess of mass) is required when using `max_cluster_size`.
+
+        min_samples : int or None, default=None
+            Controls how conservative the clustering is with respect to noise.
+            Higher values result in more points being labeled as outliers.
+            If None, defaults internally to `min_cluster_size`.
+
+        max_cluster_size : int or None, default=None
+            Upper bound on cluster size. Ensures that no cluster exceeds a specified size,
+            which is useful for downstream constraints (e.g., context window limits).
 
         Returns
         -------
         tuple
             cluster_labels : np.ndarray
-                Cluster assignment for each insight.
+                Cluster assignment for each observation. Outliers are labeled as -1.
 
             cluster_probs : np.ndarray
-                Probability estimate for cluster membership.
+                Soft clustering probabilities indicating the strength of membership
+                for each point in its assigned cluster.
         """
-        clusterer = HDBSCAN(
+        clusterer = sklearn.cluster.HDBSCAN(
             min_cluster_size=min_cluster_size,
             metric=metric,
-            cluster_selection_method=cluster_selection_method
+            cluster_selection_method=cluster_selection_method, 
+            min_samples=min_samples,
+            max_cluster_size=max_cluster_size
         )
 
         cluster_labels = clusterer.fit_predict(embedding_matrix)
@@ -2787,11 +2805,11 @@ class Clustering:
         """
         Compute the Davies–Bouldin score for a clustering configuration.
 
-        The Davies–Bouldin index measures cluster compactness and
-        separation. Lower scores indicate better clustering structure.
+        The Davies-Bouldin index measures cluster compactness and separation.
+        Lower values indicate better-defined clusters.
 
-        Outlier points assigned cluster label `-1` are excluded from the
-        calculation because they do not belong to any cluster.
+        Outliers (points labeled -1) are excluded from the calculation, as they
+        do not belong to any cluster.
 
         Parameters
         ----------
@@ -2805,17 +2823,18 @@ class Clustering:
         -------
         tuple
             db_score : float or pd.NA
-                Davies–Bouldin score for the clustering configuration.
-                Returns NA if fewer than two clusters exist.
+                Davies-Bouldin score computed on clustered points only.
+                Returns NA if fewer than two clusters are present.
 
             num_outliers : int
-                Number of points assigned to the outlier cluster (-1).
+                Number of points labeled as outliers (-1).
 
         Notes
         -----
-        The Davies–Bouldin score is used here as a diagnostic measure
-        during parameter tuning rather than as a definitive evaluation
-        of clustering quality.
+        This metric is used as a diagnostic signal during parameter tuning.
+        Because HDBSCAN can produce non-convex clusters, the Davies–Bouldin
+        score should be interpreted as a heuristic rather than a definitive
+        measure of clustering quality.
         """
 
 
@@ -2828,31 +2847,88 @@ class Clustering:
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
         return db_score, num_outliers
 
+    def _estimate_max_cluster_sizes(self, context_window_constraint=90000):
+        """
+        Estimate maximum allowable cluster sizes for each research question.
+
+        This method computes a per-question upper bound on cluster size based on
+        a context window constraint. The goal is to ensure that the total text
+        associated with a cluster can fit within a downstream processing limit
+        (e.g., LLM context window).
+
+        The estimate is derived by:
+        1. Computing the average length of insights (in words) for each question.
+        2. Estimating how many such insights can fit within the context window.
+        3. Applying a conservative scaling factor to avoid overflow.
+
+        Parameters
+        ----------
+        context_window_constraint : int, default=90000
+            Maximum number of tokens (or words) that can be processed downstream.
+
+        Returns
+        -------
+        dict
+            Mapping from `question_id` to estimated maximum cluster size (int).
+        """
+        # Get a clean set of insights
+        valid_insights = self.valid_embeddings_df[self.valid_embeddings_df["insight"].notna()]
+
+        # Calculate the average insight lengh in words for each research question
+        avg_insight_len_by_rq = {}
+        avg_insight_len_by_rq.fromkeys(valid_insights["question_id"].unique())
+        for rq in valid_insights["question_id"].unique():
+            rq_insights_list = valid_insights[valid_insights["question_id"] == rq]["insights"].tolist()
+            rq_avg_insight_len = np.mean([len(insight.split()) for insight in rq_insights_list])
+            avg_insight_len_by_rq[rq] = rq_avg_insight_len
+
+        
+        # Calculate the max cluser size for each research question based on the average insight length and the context window constraint
+        max_cluster_size_by_rq = {}
+        for rq, avg_len in avg_insight_len_by_rq.items():
+                # Estimate the number of insights that would fit in the context window based on the average insight length
+                estimated_insights_in_window = context_window_constraint / (avg_len * 1.5)  # Use a multiplier to be conservative
+                max_cluster_size_by_rq[rq] = int(estimated_insights_in_window)
+
+        return max_cluster_size_by_rq
+
+
     def tune_hdbscan_params(
         self,
         min_cluster_sizes: list[int] = [5, 10, 15, 20],
         metrics: list[str] = ["euclidean", "manhattan"],
-        cluster_selection_methods: list[str] = ["eom", "leaf"]
+        # cluster_selection_methods: list[str] = ["eom", "leaf"]
+        min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05]
         ) -> None:
 
         """
         Perform grid search over HDBSCAN clustering parameters.
 
-        This method evaluates combinations of HDBSCAN parameters across
-        each research question separately. For each configuration, the
-        clustering is performed and evaluated using the Davies–Bouldin
-        index and the number of outlier points.
+        This method evaluates combinations of clustering parameters independently
+        for each research question. For each configuration, clustering is performed
+        and evaluated using:
+
+        - Davies–Bouldin score (cluster quality)
+        - Number and fraction of outliers (coverage)
+
+        Parameter combinations are generated using a grid over:
+        - `min_cluster_size`
+        - distance metric
+        - `min_samples`, derived as a proportion of `min_cluster_size`
+
+        Invalid configurations are filtered out, and results are ranked for
+        human inspection.
 
         Parameters
         ----------
-        min_cluster_sizes : list[int]
+        min_cluster_sizes : list[int], default=[5, 10, 15, 20]
             Candidate values for the HDBSCAN `min_cluster_size` parameter.
 
-        metrics : list[str]
-            Distance metrics to evaluate during clustering.
+        metrics : list[str], default=["euclidean", "manhattan"]
+            Distance metrics to evaluate.
 
-        cluster_selection_methods : list[str]
-            Cluster selection strategies supported by HDBSCAN.
+        min_sample_ratios : list[float], default=[0.5, 0.25, 0.1, 0.05]
+            Ratios used to derive `min_samples` as a proportion of `min_cluster_size`.
 
         Returns
         -------
@@ -2860,22 +2936,35 @@ class Clustering:
 
         Side Effects
         ------------
-        Results are stored in the attribute `self.hdbscan_tuning_results`
-        as a DataFrame containing the tested parameter combinations and
-        their associated evaluation scores.
+        Results are stored in `self.hdbscan_tuning_results` as a DataFrame containing:
+        - parameter combinations
+        - clustering metrics
+        - outlier statistics
 
         Notes
         -----
-        Clustering is evaluated independently for each research question
-        so that insights associated with different questions do not
-        influence each other's cluster structure.
-
-        The tuning process is intended as a diagnostic tool for selecting
-        reasonable clustering parameters rather than as a strict
-        optimization step.
-        
+        - Clustering is performed independently per research question.
+        - Configurations where the number of outliers exceeds the allowed
+        maximum cluster size are discarded.
+        - Results are sorted to prioritize:
+            1. Lower outlier fraction
+            2. Lower Davies–Bouldin score
+        - This method is intended for human-in-the-loop parameter selection,
+        not automated optimization.    
         """
-        param_grid = list(itertools.product(min_cluster_sizes, metrics, cluster_selection_methods))
+        
+        #Calculate the max cluster sizes
+        max_cluster_size_by_rq = self._estimate_max_cluster_sizes()
+
+        # Pass sample size values to get the full grid of search options
+        param_grid = (
+            pd.DataFrame(itertools.product(min_cluster_sizes, metrics, min_sample_ratios), 
+                         columns=["min_cluster_size", "metric", "min_sample_ratio"])
+            .assign(min_samples=lambda df: (df["min_cluster_size"] * df["min_sample_ratio"]).round().astype(int))
+            .query("min_samples >= 2 & min_samples <= min_cluster_size")  # Ensure min_samples is less than min_cluster_size and greater than 2 (required)
+            .drop_duplicates(subset=["min_cluster_size", "metric", "min_samples"])
+        )
+
         rqs = self.valid_embeddings_df["question_id"].unique()
         total_runs = len(param_grid) * len(rqs)
         data = [self.rq_valid_embeddings_dfs[rq] for rq in rqs]
@@ -2883,49 +2972,88 @@ class Clustering:
         for idx, (d, rq) in enumerate(zip(data, rqs)):
             print(f"Tuning HDBSCAN for {rq}...(run {idx + 1} of {total_runs})")
             embeddings_matrix = np.vstack(d["reduced_insight_embedding"].to_list())
-            for min_cluster_size, metric, cluster_selection_method in param_grid:
-
-                cluster_labels, _ = self.cluster(embeddings_matrix, min_cluster_size=min_cluster_size, metric=metric, cluster_selection_method=cluster_selection_method)
+            for row in param_grid.itertuples(index = False):
+                cluster_labels, _ = self.cluster(
+                    embeddings_matrix,
+                    min_cluster_size=row.min_cluster_size,
+                    metric=row.metric,
+                    min_samples=row.min_samples,
+                    max_cluster_size = max_cluster_size_by_rq[rq]
+                    )
+                
                 db_score, num_outliers = self.calc_davies_bouldain_score(embeddings_matrix, cluster_labels)
+
                 results.append({
                     "question_id": rq,
-                    "min_cluster_size": min_cluster_size,
-                    "metric": metric,
-                    "cluster_selection_method": cluster_selection_method,
+                    "min_cluster_size": row.min_cluster_size,
+                    "metric": row.metric,
+                    "cluster_selection_method": "eom", # We only run over eom because that allows for max_cluster_size to be passed
+                    "min_sample_ratio": row.min_sample_ratio,
+                    "min_samples": row.min_samples,
+                    "max_cluster_size": max_cluster_size_by_rq[rq],
                     "db_score": db_score,
-                    "num_outliers": num_outliers
+                    "num_outliers": num_outliers,
+                    "outlier_fraction": num_outliers / len(cluster_labels) if len(cluster_labels) > 0 else 0,
+                    "total_clusters": len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
                     })
 
         results_df = pd.DataFrame(results)
-        self.hdbscan_tuning_results = results_df.sort_values(["question_id","db_score"], ascending=True)
+
+        valid_results_df = (
+            results_df
+            .dropna(subset=["db_score"])
+            .query("num_outliers < max_cluster_size")
+            .reset_index(drop=True)
+            .sort_values(["question_id", "outlier_fraction", "db_score"], ascending=[True, True, True])
+            .assign(outlier_fraction = lambda x: x["outlier_fraction"].round(3))
+            .assign(db_score = lambda x: x["db_score"].round(3))
+        )
+
+        self.hdbscan_tuning_results = valid_results_df
         print(self.hdbscan_tuning_results)
 
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
-        Assign clusters to insights.
+        Assign clusters to insights using pre-selected HDBSCAN parameters.
 
-        Clustering is performed separately for each research question
-        so that insights addressing different questions do not influence
-        each other's cluster formation.
+        Clustering is performed independently for each research question to
+        prevent cross-question interference. Each question is clustered using
+        its corresponding parameter configuration.
 
-        Cluster labels are normalized so that:
-
+        Cluster labels are normalized within each research question so that:
             cluster 1 = largest cluster
             cluster 2 = second largest
             ...
 
+        Cluster labels are globally unique across all questions via an offset,
+        but their numeric values should not be interpreted across questions.
         Outliers are assigned label -1.
 
         Parameters
         ----------
         clustering_param_dict : dict
-            Dictionary mapping research questions to HDBSCAN parameters.
+            Dictionary mapping `question_id` to HDBSCAN parameter dictionaries.
+            Each entry should include:
+                - min_cluster_size
+                - metric
+                - min_samples
+                - max_cluster_size
 
         Returns
         -------
         pd.DataFrame
-            Updated insights table containing cluster labels,
-            cluster probabilities, and embedding vectors.
+            Updated insights table containing:
+                - cluster labels
+                - cluster probabilities
+                - embedding vectors
+
+        Notes
+        -----
+        - If parameters are missing for some questions, the user is prompted to
+        confirm use of default values.
+        - Cluster labels are meaningful only within each research question.
+        - The output is merged back into the main insights table, replacing any
+        previously computed clustering results.
         """
         
         rqs = self.valid_embeddings_df["question_id"].unique()
@@ -2940,7 +3068,7 @@ class Clustering:
                 if use_default == 'n':
                     raise KeyboardInterrupt("Please rerun and provide clustering parameters for each research question.")
                 else:
-                    params = [clustering_param_dict.get(rq, {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"}) for rq in rqs]
+                    params = [clustering_param_dict.get(rq, {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5, "max_cluster_size": 1000}) for rq in rqs]
         else:
             params = [clustering_param_dict[rq] for rq in rqs]
         
@@ -2954,7 +3082,9 @@ class Clustering:
                 embedding_matrix=embeddings_matrix,
                 min_cluster_size=param["min_cluster_size"],
                 metric=param["metric"],
-                cluster_selection_method=param["cluster_selection_method"]
+                cluster_selection_method="eom", 
+                min_samples=param["min_samples"],
+                max_cluster_size=param["max_cluster_size"]
             )
 
             d["cluster"] = cluster_labels
