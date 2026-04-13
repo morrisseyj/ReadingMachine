@@ -2446,68 +2446,78 @@ class Clustering:
         1. Incremental Saving
         - Embeddings are written to disk every 10 iterations using `utils.safe_pickle`.
         - This ensures progress is preserved in case of interruption (e.g., API failure,
-            process termination).
+        process termination).
+        - At most 10 embeddings are lost in the event of failure.
 
-        2. Resume Capability
+        2. Resume Capability (Key-Based)
         - If a pickle file exists, the user can choose to resume or restart.
-        - On resume, previously saved embeddings are loaded and the method continues
-            from the correct index (`start_idx = len(embeddings)`).
-        - The DataFrame is rehydrated so completed rows already contain embeddings.
+        - On resume, previously saved embeddings are loaded as a DataFrame keyed by
+        `insight_id`.
+        - The method identifies remaining work by excluding already processed
+        `insight_id`s, rather than relying on positional indexing.
+        - This makes the process robust to row reordering, reloads, and partial runs.
 
-        3. Deterministic Alignment
-        - Embeddings are generated in the same order as `valid_embeddings_df`.
-        - Each embedding is written directly to its corresponding row using index alignment.
-        - This avoids the need for joins, IDs, or post-processing merges.
+        3. Idempotent Execution
+        - The embedding process is idempotent: re-running the method will not duplicate
+        work or corrupt results.
+        - Existing embeddings are preserved and reused automatically.
 
         4. Data Integrity
         - `safe_pickle` ensures atomic writes, preventing file corruption.
-        - Defensive handling supports edge cases such as:
-            - empty or None pickle files
-            - legacy numpy array formats
+        - Duplicate embeddings are removed using `insight_id` as the unique key.
+        - The embedding model is assumed to return consistent vector dimensions.
 
         Workflow
         --------
         - Initialize storage and ensure output column exists.
         - If a previous run exists:
-            - Load embeddings and determine resume index.
-            - Rehydrate DataFrame with completed embeddings.
+            - Load embeddings into a DataFrame (`insight_id`, `full_insight_embedding`).
+            - Identify insights that still require embeddings.
         - Iterate over remaining insights:
             - Generate embedding via API call.
-            - Append to in-memory list.
-            - Write embedding to DataFrame at the correct index.
-            - Save progress every 10 embeddings.
-        - Finalize by stacking embeddings into a NumPy array and saving once more.
+            - Append to in-memory buffer (`new_rows`).
+            - Every 10 embeddings:
+                - Merge buffer into the main DataFrame.
+                - Persist to disk.
+        - After completion:
+            - Flush any remaining buffered embeddings.
+            - Persist final DataFrame.
+            - Merge embeddings back into `valid_embeddings_df` using `insight_id`.
 
         Returns
         -------
-        np.ndarray
-            A 2D NumPy array of shape (n_insights, embedding_dims) containing
-            embeddings for all valid insights.
+        pd.DataFrame
+            DataFrame containing:
+                - `insight_id`
+                - `full_insight_embedding`
 
         Side Effects
         ------------
-        - Updates `self.valid_embeddings_df["full_insight_embedding"]` in place.
-        - Updates `self.insight_embeddings_array`.
+        - Updates `self.insight_embeddings_df` with all computed embeddings.
+        - Updates `self.valid_embeddings_df` to include the embedding column.
         - Writes intermediate and final embeddings to `self.embeddings_pickle_path`.
 
         Assumptions
         -----------
-        - The order of `valid_embeddings_df` remains stable across runs.
-        - The number of saved embeddings corresponds exactly to completed rows.
-        - The embedding model returns consistent vector dimensions.
+        - `insight_id` is a stable, unique string identifier for each insight.
+        - The text used for embedding (`no_author_insight_string`) is deterministic.
+        - The embedding model returns consistent vector dimensions across calls.
 
         Notes
         -----
-        - This method replaces the need for separate `_save_embeddings` and
-        `_load_embeddings` helpers.
-        - Partial progress is always recoverable up to the last successful checkpoint.
+        - This method no longer relies on positional alignment between rows and embeddings.
+        - Embeddings are stored and recovered using a key-based mapping (`insight_id`),
+        ensuring robustness across reloads and data transformations.
+        - This replaces earlier index-based approaches, which were fragile under
+        DataFrame reconstruction.
         """
 
         # Ensure directory exists
         os.makedirs(os.path.dirname(self.embeddings_pickle_path), exist_ok=True)
-
-        embeddings = []
-        start_idx = 0
+       
+       # Create empty df to populate with embeddings and insight_id
+        processed_embeddings_df = pd.DataFrame(columns = ["insight_id", "full_insight_embedding"])
+        
 
         # Initialize column for alignment (only once)
         if "full_insight_embedding" not in self.valid_embeddings_df.columns:
@@ -2525,60 +2535,83 @@ class Clustering:
 
             if recover == 'r':
                 print("Loading existing embeddings for resume...")
+                # If recovering load the embeddings and overwrite the initially created procesed_embeddings_df
                 with open(self.embeddings_pickle_path, "rb") as f:
-                    embeddings = pickle.load(f)
+                    processed_embeddings_df = pickle.load(f)
 
                 # Defensive handling
-                if embeddings is None:
-                    embeddings = []
-                elif isinstance(embeddings, np.ndarray):
-                    embeddings = embeddings.tolist()
+                if processed_embeddings_df is None:
+                    processed_embeddings_df = pd.DataFrame(columns = ["insight_id", "full_insight_embedding"])
 
-                start_idx = len(embeddings)
-
-                # Rehydrate into dataframe
-                if start_idx > 0:
-                    self.valid_embeddings_df.loc[:start_idx-1, "full_insight_embedding"] = embeddings
+                # Calculate the embeddings to process  by dropping the already processed ones
+                embeddings_to_process_df = self.valid_embeddings_df[~self.valid_embeddings_df["insight_id"].isin(processed_embeddings_df["insight_id"])]
 
             else:
                 print("Overwriting existing embeddings pickle...")
-                embeddings = []
-                start_idx = 0
+                # If not resuming processed_embeddings_df is empty to embeddings to process is just the valid_embeddings_df
+                embeddings_to_process_df = self.valid_embeddings_df[~self.valid_embeddings_df["insight_id"].isin(processed_embeddings_df["insight_id"])]
+
+        else:
+                # If no pickle exists then we process all the valid embeddings and the processed_embeddings_df is empty
+                embeddings_to_process_df = self.valid_embeddings_df.copy()
 
         # --- Generate embeddings ---
         total = self.valid_embeddings_df.shape[0]
+        count = processed_embeddings_df.shape[0]
 
-        for idx, insight in enumerate(
-            self.valid_embeddings_df["no_author_insight_string"][start_idx:],
-            start=start_idx
-        ):
-            print(f"Embedding insight {idx + 1} of {total}")
+        new_rows = []
+        for idx, row in embeddings_to_process_df.iterrows():
+            count += 1
+
+            print(f"Embedding insight {count} of {total}")
 
             response = self.llm_client.embeddings.create(
-                input=insight,
+                input=row["no_author_insight_string"],
                 model=self.embedding_model,
                 dimensions=self.embedding_dims
             )
 
             emb = response.data[0].embedding
-            embeddings.append(emb)
-
-            # Assign embedding to correct row
-            self.valid_embeddings_df.at[idx, "full_insight_embedding"] = emb
+            current_embedding_dict = {
+                "insight_id": row["insight_id"],
+                "full_insight_embedding": emb
+            }
+            new_rows.append(current_embedding_dict)
 
             # Incremental save every 10 embeddings
-            if (idx + 1) % 10 == 0:
-                utils.safe_pickle(embeddings, self.embeddings_pickle_path)
+            if (count) % 10 == 0:
+                processed_embeddings_df = (
+                    pd.concat([processed_embeddings_df,
+                               pd.DataFrame(new_rows)],
+                               ignore_index=True)
+                    .drop_duplicates(subset=["insight_id"])
+                )
+                utils.safe_pickle(processed_embeddings_df, self.embeddings_pickle_path)
+                new_rows = []
 
-        # --- Finalize ---
-        self.insight_embeddings_array = (
-            np.vstack(embeddings) if embeddings else np.array([])
+
+        # Final save to ensure completeness - last rows get covered
+        if new_rows:
+            processed_embeddings_df = (
+                pd.concat([processed_embeddings_df,
+                           pd.DataFrame(new_rows)],
+                           ignore_index=True)
+                .drop_duplicates(subset=["insight_id"])
+            )
+        utils.safe_pickle(processed_embeddings_df, self.embeddings_pickle_path)
+        
+        # Set attributes for downstream use
+        self.insight_embeddings_df = processed_embeddings_df
+        # If this is a recompute of embeddings we want to drop the old embeddings from the valid_embeddings_df so that we don't get _x and _y columns 
+        if "full_insight_embedding" in self.valid_embeddings_df.columns:
+            self.valid_embeddings_df = self.valid_embeddings_df.drop(columns=["full_insight_embedding"])
+        # Then we merge 
+        self.valid_embeddings_df = (
+            self.valid_embeddings_df
+            .merge(self.insight_embeddings_df, on="insight_id", how="left")
         )
 
-        # Final save to ensure completeness
-        utils.safe_pickle(embeddings, self.embeddings_pickle_path)
-
-        return self.insight_embeddings_array
+        return self.insight_embeddings_df
 
     def reduce_dimensions(
         self, 
