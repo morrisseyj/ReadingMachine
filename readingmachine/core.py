@@ -2493,8 +2493,8 @@ class Clustering:
 
         Side Effects
         ------------
-        - Updates `self.insight_embeddings_df` with all computed embeddings.
         - Updates `self.valid_embeddings_df` to include the embedding column.
+        - Creates self.insight_embeddings_array as a NumPy array of the full insight embeddings for downstream use.
         - Writes intermediate and final embeddings to `self.embeddings_pickle_path`.
 
         Assumptions
@@ -2600,18 +2600,21 @@ class Clustering:
             )
         utils.safe_pickle(processed_embeddings_df, self.embeddings_pickle_path)
         
-        # Set attributes for downstream use
-        self.insight_embeddings_df = processed_embeddings_df
+        # Set attributes for downstream use---
+        # First update valid_embedding df
         # If this is a recompute of embeddings we want to drop the old embeddings from the valid_embeddings_df so that we don't get _x and _y columns 
         if "full_insight_embedding" in self.valid_embeddings_df.columns:
             self.valid_embeddings_df = self.valid_embeddings_df.drop(columns=["full_insight_embedding"])
         # Then we merge 
         self.valid_embeddings_df = (
             self.valid_embeddings_df
-            .merge(self.insight_embeddings_df, on="insight_id", how="left")
+            .merge(processed_embeddings_df, on="insight_id", how="left")
         )
+        # Then valid_embeddings_array 
+        self.insight_embeddings_array = np.vstack(self.valid_embeddings_df["full_insight_embedding"])
+        # -----
 
-        return self.insight_embeddings_df
+        return processed_embeddings_df
 
     def reduce_dimensions(
         self, 
