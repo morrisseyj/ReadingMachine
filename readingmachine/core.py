@@ -2823,7 +2823,7 @@ class Clustering:
                 Soft clustering probabilities indicating the strength of membership
                 for each point in its assigned cluster.
         """
-        clusterer = sklearn.cluster.HDBSCAN(
+        clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
             metric=metric,
             cluster_selection_method=cluster_selection_method, 
@@ -2914,7 +2914,7 @@ class Clustering:
         avg_insight_len_by_rq = {}
         avg_insight_len_by_rq.fromkeys(valid_insights["question_id"].unique())
         for rq in valid_insights["question_id"].unique():
-            rq_insights_list = valid_insights[valid_insights["question_id"] == rq]["insights"].tolist()
+            rq_insights_list = valid_insights[valid_insights["question_id"] == rq]["insight"].tolist()
             rq_avg_insight_len = np.mean([len(insight.split()) for insight in rq_insights_list])
             avg_insight_len_by_rq[rq] = rq_avg_insight_len
 
@@ -2933,7 +2933,6 @@ class Clustering:
         self,
         min_cluster_sizes: list[int] = [5, 10, 15, 20],
         metrics: list[str] = ["euclidean", "manhattan"],
-        # cluster_selection_methods: list[str] = ["eom", "leaf"]
         min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05]
         ) -> None:
 
@@ -3038,8 +3037,6 @@ class Clustering:
         valid_results_df = (
             results_df
             .dropna(subset=["db_score"])
-            .query("num_outliers < max_cluster_size")
-            .reset_index(drop=True)
             .sort_values(["question_id", "outlier_fraction", "db_score"], ascending=[True, True, True])
             .assign(outlier_fraction = lambda x: x["outlier_fraction"].round(3))
             .assign(db_score = lambda x: x["db_score"].round(3))
@@ -3048,32 +3045,82 @@ class Clustering:
         self.hdbscan_tuning_results = valid_results_df
         print(self.hdbscan_tuning_results)
 
+    def kmeans_cluster(self, 
+                       embeddings_array: np.ndarray,
+                       n_clusters: int, 
+                       random_state:int = config.seed) -> np.ndarray:
+        
+        """
+        Cluster a set of embeddings using KMeans.
+
+        This method applies KMeans clustering to a subset of embeddings, typically
+        used to partition outlier points produced by HDBSCAN when they exceed the
+        maximum allowed cluster size.
+
+        Parameters
+        ----------
+        embeddings_array : np.ndarray
+            2D array of shape (n_samples, n_features) containing the embeddings
+            to be clustered.
+
+        n_clusters : int
+            Number of clusters to form. Typically computed as:
+                ceil(n_outliers / max_cluster_size)
+            to ensure resulting clusters respect size constraints.
+
+        random_state : int, default=config.seed
+            Random seed for reproducibility.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (n_samples,) containing cluster labels in the range
+            [0, n_clusters - 1].
+
+        Notes
+        -----
+        - This method is used as a fallback when HDBSCAN produces too many outliers.
+        - Returned labels are later transformed into negative values to distinguish
+        them from HDBSCAN clusters.
+        
+        """
+
+        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+        cluster_labels = kmeans.fit_predict(embeddings_array)
+        return cluster_labels
+
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
-        Assign clusters to insights using pre-selected HDBSCAN parameters.
+        Assign clusters to insights using HDBSCAN with size-constrained fallback.
 
-        Clustering is performed independently for each research question to
-        prevent cross-question interference. Each question is clustered using
-        its corresponding parameter configuration.
+        Clustering is performed independently for each research question using
+        HDBSCAN with the "eom" selection method and a specified maximum cluster
+        size constraint. This produces density-based clusters along with a set
+        of outliers.
 
-        Cluster labels are normalized within each research question so that:
+        If the number of outliers exceeds the allowed maximum cluster size,
+        KMeans is applied to partition the outliers into smaller groups, ensuring
+        that all resulting groups (including those derived from outliers) respect
+        the size constraint.
+
+        Cluster labels are then normalized within each research question so that:
             cluster 1 = largest cluster
             cluster 2 = second largest
             ...
 
-        Cluster labels are globally unique across all questions via an offset,
-        but their numeric values should not be interpreted across questions.
-        Outliers are assigned label -1.
+        Cluster labels are made globally unique across all research questions
+        using an offset, but their numeric values should not be interpreted
+        across questions.
 
         Parameters
         ----------
         clustering_param_dict : dict
             Dictionary mapping `question_id` to HDBSCAN parameter dictionaries.
             Each entry should include:
-                - min_cluster_size
-                - metric
-                - min_samples
-                - max_cluster_size
+                - min_cluster_size : int
+                - metric : str
+                - min_samples : int
+                - max_cluster_size : int
 
         Returns
         -------
@@ -3085,11 +3132,20 @@ class Clustering:
 
         Notes
         -----
-        - If parameters are missing for some questions, the user is prompted to
-        confirm use of default values.
-        - Cluster labels are meaningful only within each research question.
-        - The output is merged back into the main insights table, replacing any
-        previously computed clustering results.
+        - Clustering is performed independently per research question.
+        - HDBSCAN is used to identify dense clusters under a size constraint.
+        - Outliers (label = -1) are retained unless they exceed the maximum
+        cluster size, in which case they are partitioned using KMeans.
+        - KMeans-derived clusters are assigned negative labels to distinguish
+        them from HDBSCAN clusters prior to relabeling.
+        - Cluster probabilities from HDBSCAN are preserved; KMeans-assigned
+        clusters are given a default probability of 1.0.
+        - Final cluster labels are reassigned to ensure descending size order
+        and global uniqueness across research questions.
+        - The resulting clustering guarantees that no group exceeds the specified
+        maximum cluster size.
+        - The updated clustering is merged back into the main insights table,
+        replacing any previous clustering results.
         """
         
         rqs = self.valid_embeddings_df["question_id"].unique()
@@ -3111,8 +3167,9 @@ class Clustering:
         data = [self.rq_valid_embeddings_dfs[rq] for rq in rqs]
 
         offset = 0  # Initialize offset for cluster label adjustment
-
-        for d, rq, param in zip(data, rqs, params):
+        
+        # Get the labels and cluster probs
+        for i, (d,rq, param) in enumerate(zip(data, rqs, params)):
             embeddings_matrix = np.vstack(d["reduced_insight_embedding"].to_list())
             cluster_labels, cluster_probs = self.cluster(
                 embedding_matrix=embeddings_matrix,
@@ -3123,18 +3180,40 @@ class Clustering:
                 max_cluster_size=param["max_cluster_size"]
             )
 
+
+            # Add the labels and cluster probls to the data 
             d["cluster"] = cluster_labels
             d["cluster_prob"] = cluster_probs
+
+            #Check whether the number of outliers exceeds the max cluster size - if so apply kmeans 
+            num_outliers = np.sum(cluster_labels == -1)
+            if num_outliers > param["max_cluster_size"]:
+                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({param['max_cluster_size']}). Applying KMeans to outliers for {rq}...")
+                n_clusters = math.ceil(num_outliers / param["max_cluster_size"])
+                outliers = d[d["cluster"] == -1]
+                outlier_embeddings_list = outliers["reduced_insight_embedding"].to_list()
+                outlier_embeddings_matrix = np.vstack(outlier_embeddings_list)
+
+                kmeans_labels = self.kmeans_cluster(outlier_embeddings_matrix, n_clusters=n_clusters)
+                kmeans_labels = -(kmeans_labels + 1)  # Convert to negative labels starting from -1
+
+                outliers = outliers.assign(cluster=kmeans_labels)
+                outliers = outliers.assign(cluster_prob=1.0)  # Assign a cluster probability of 1 to kmeans-assigned outliers (this is arbitrary but indicates strong membership in the new cluster)
+                #drop the old outliers from d and add the new ones with kmeans labels
+                d = pd.concat([d[d["cluster"] != -1], outliers], ignore_index=True)
+
             # Translate cluster labels stating from 1, with 1 being the largest 
             # 1. Get cluster sizes (excluding -1)
-            cluster_sizes = d[d["cluster"] != -1].groupby("cluster").size().sort_values(ascending=False)
+            cluster_sizes = d[d["cluster"] > 0].groupby("cluster").size().sort_values(ascending=False)
             # 2. Map old cluster labels to new ones (largest=1, next=2, etc.)
             label_map = {old: i+1+offset for i, old in enumerate(cluster_sizes.index)}
             # 3. Apply mapping, keep -1 as is
-            d["cluster"] = d["cluster"].apply(lambda x: label_map[x] if x in label_map else -1)
+            d["cluster"] = d["cluster"].apply(lambda x: label_map[x] if x in label_map else x)
             # 4. Update offset for next DataFrame
             if cluster_sizes.size > 0:
                 offset = max(label_map.values())
+
+            data[i] = d
 
         summary_df = [self.make_cum_prop_cluster_table(d) for d in data]
         summary_df = [df.assign(question_id=rq) for df, rq in zip(summary_df, rqs)]
@@ -3151,102 +3230,9 @@ class Clustering:
             how="left"
         )
 
+        # Save the updated DataFrame to disk
+        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
         return self.corpus_state.insights
-
-    @staticmethod
-    def make_cum_prop_cluster_table(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Summarize the DataFrame by cluster, showing count, proportion, and cumulative proportion.
-        Outliers (cluster == -1) are moved to the end.
-        """
-        # Exclude rows with missing cluster
-        df = df.dropna(subset=["cluster"]).copy()
-
-        # Count size of each cluster (excluding outliers)
-        main = df[df["cluster"] != -1].groupby("cluster").size().sort_values(ascending=False)
-        # Relabel clusters so largest is 1, next is 2, etc.
-        label_map = {old: i+1 for i, old in enumerate(main.index)}
-        df["cluster"] = df["cluster"].apply(lambda x: label_map[x] if x in label_map else -1)
-
-        # Count again with new labels (including outliers)
-        summary = (
-            df.groupby("cluster")
-            .size()
-            .reset_index(name="count")
-            .sort_values(["cluster"], key=lambda col: col.where(col != -1, 999))
-            .reset_index(drop=True)
-        )
-
-        # Calculate proportion and cumulative proportion
-        summary["prop"] = summary["count"] / summary["count"].sum()
-        summary["cum_prop"] = summary["prop"].cumsum()
-
-        # Move outlier (-1) to the end
-        main_clusters = summary[summary["cluster"] != -1]
-        outliers = summary[summary["cluster"] == -1]
-        summary = pd.concat([main_clusters, outliers], ignore_index=True)
-
-        return summary
-    
-    def clean_clusters(self, final_cluster_count: dict = None) -> pd.DataFrame:
-        """
-        Select the most informative clusters for each research question.
-
-        This method retains only the largest N clusters for each research
-        question and marks all remaining clusters as outliers.
-
-        This step provides a lightweight filtering mechanism before cluster
-        summarization while preserving all insights in the underlying corpus.
-
-        Parameters
-        ----------
-        final_cluster_count : dict
-            Mapping from `question_id` to the number of clusters to retain.
-
-        Returns
-        -------
-        pd.DataFrame
-            Updated insights table containing a `selected_cluster` column.
-        """
-        if final_cluster_count is None:
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
-            return(self.corpus_state.insights)
-
-        else:
-            rqs = self.corpus_state.insights["question_id"].unique()
-            if len(rqs) != len(final_cluster_count):
-                raise ValueError(
-                    "final_cluster_count must specify the number of clusters to keep for each research question."
-                )
-
-            selected_clusters_list = []
-
-            # Loop over each research question
-            for rq in self.corpus_state.insights["question_id"].unique():
-                # Filter insights for the current research question
-                current_rq_df = self.corpus_state.insights[self.corpus_state.insights["question_id"] == rq].copy()
-                # Count the size of each cluster (excluding outliers)
-                cluster_sizes = current_rq_df.dropna(subset=["cluster"]).groupby("cluster").size().sort_values(ascending=False)
-
-                # Get the number of clusters to keep for this question
-                n_keep = final_cluster_count.get(rq, 0)
-                # Get the cluster labels of the top N clusters (excluding outlier cluster -1)
-                top_clusters = cluster_sizes[cluster_sizes.index != -1].head(n_keep).index.tolist()
-
-                # Mark clusters to keep, others (and outliers) set to -1
-                current_rq_df["selected_cluster"] = np.where(
-                    current_rq_df["cluster"].isin(top_clusters),
-                    current_rq_df["cluster"],
-                    -1
-                )
-
-                selected_clusters_list.append(current_rq_df)
-
-            # Concatenate all research questions back together
-            self.corpus_state.insights = pd.concat(selected_clusters_list)
-            # Save the updated DataFrame to disk
-            self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
-            return self.corpus_state.insights
 
 class Summarize:
     def __init__(self,

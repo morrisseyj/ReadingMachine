@@ -273,11 +273,6 @@ cluster.generate_clusters({
     "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"}
 })
 
-# Optional: collapse very small clusters into outliers
-# Inspect the cumulative distribution of cluster sizes to choose a cutoff
-cluster.cum_prop_cluster
-# Clean to your new cutoff if you want
-cluster.clean_clusters()
 
 # ==========================================================
 # 4. SYNTHESIZE THEMES

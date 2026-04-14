@@ -393,8 +393,8 @@ Now we can cluster on the reduced dimensional embeddings. We use HDBSCAN for thi
 cluster.tune_hdbscan_params(
     min_cluster_sizes=[5, 10, 15, 20],
     metrics=["euclidean", "manhattan"],
-    cluster_selection_methods=["eom", "leaf"]
-)
+    min_sample_ratios=[0.5, 0.25, 0.1, 0.05]
+    )
 ```
 
 The clustering parameters are calculated per question. The easiest way to inspect the results is via html:
@@ -419,18 +419,7 @@ cluster.generate_clusters({
 })
 ```
 
-### 4.4. Optimizing clusters
-
-You can now optionally collapse very small clusters into outliers by selecting a cutoff. 
-Note even if you don't want to reduce the clusters you should run `cluster.clean_clusters()` to trigger the state of the current class to save. 
-
-```
-# Inspect the cumulative distribution of cluster sizes to choose a cutoff
-cluster.cum_prop_cluster
-# Clean to your new cutoff if you want
-cluster.clean_clusters(final_cluster_count = <int of the number of clusters you want>)
-
-```
+Note that this applies a limit on the max cluster size (to prevent the context window being overwhelmed when we summarie clusters). TO achieve this, constrain all clusters to use a max size. For any cases in which outliers exceed this size, we use KMeans clustering to structure the outliers into groups. In the final arrangement in corpus_state.insights HDBSCAN clusters are labelled positively while outliers are labelled negatively.
 
 ## 5. Summarize the data
 
