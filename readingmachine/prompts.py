@@ -728,7 +728,7 @@ class Prompts:
     # CORE PROMPTS - SUMMARIZE
     ####
 
-    def summarize_clusters(self, frozen_summary_window, max_output_words = 2800):
+    def summarize_clusters(self, frozen_summary_window, max_output_words = 2500):
         """
         Generate the system prompt for cluster-level summarization.
 

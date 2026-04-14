@@ -2923,7 +2923,7 @@ class Clustering:
         max_cluster_size_by_rq = {}
         for rq, avg_len in avg_insight_len_by_rq.items():
                 # Estimate the number of insights that would fit in the context window based on the average insight length
-                estimated_insights_in_window = context_window_constraint / (avg_len * 1.5)  # Use a multiplier to be conservative
+                estimated_insights_in_window = context_window_constraint / (avg_len * 2)  # Use a multiplier to be conservative
                 max_cluster_size_by_rq[rq] = int(estimated_insights_in_window)
 
         return max_cluster_size_by_rq
@@ -3682,20 +3682,20 @@ class Summarize:
                         x[0] if isinstance(x, list) and len(x) == 1 and isinstance(x[0], str) else None
                     )).tolist()
 
-                # --- Sampling step for large clusters ---
-                MAX_WORDS = 70000
+                # # --- Sampling step for large clusters ---
+                # MAX_WORDS = 70000
 
-                if sum(len(i.split()) for i in insights) > MAX_WORDS:
-                    insights = utils.sample_to_word_limit(
-                        insights,
-                        max_words=MAX_WORDS,
-                        seed=config.seed
-                    )
+                # if sum(len(i.split()) for i in insights) > MAX_WORDS:
+                #     insights = utils.sample_to_word_limit(
+                #         insights,
+                #         max_words=MAX_WORDS,
+                #         seed=config.seed
+                #     )
 
-                    print(
-                        f"Cluster {cluster} (RQ {rq_id}): sampled {len(insights)} insights to fit word budget"
-                    )
-                #------
+                #     print(
+                #         f"Cluster {cluster} (RQ {rq_id}): sampled {len(insights)} insights to fit word budget"
+                #     )
+                # #------
                 
                 if any(i is None for i in insights):
                     raise ValueError("Insight format error: each insight must be a string or a single-item list containing a string.")
@@ -3730,12 +3730,9 @@ class Summarize:
                     "schema": {
                         "type": "object",
                         "properties": {
-                            "question_id": {"type": "string"},
-                            "question_text": {"type": "string"},
-                            "cluster": {"type": "number"},
                             "summary": {"type": "string"}
                         },
-                        "required": ["question_id", "question_text", "cluster", "summary"],
+                        "required": ["summary"],
                         "additionalProperties": False
                     }
                 }
@@ -3748,11 +3745,22 @@ class Summarize:
                     ai_model=self.ai_model,
                     return_json=True,
                     json_schema=json_schema,
-                    fall_back=fall_back, 
+                    fall_back=fall_back,
                     max_tokens=4000
-                    )
+                )
 
-                summaries_dict_lst.append(response)
+                summary = response.get("summary")
+                if not summary: 
+                    print(f"Warning: No summary generated for cluster {cluster} of research question {rq_id}. Storing empty summary.")
+                
+                response_dict = {
+                    "question_id": rq_id,
+                    "question_text": rq_text,
+                    "cluster": cluster,
+                    "summary": summary
+                }
+                
+                summaries_dict_lst.append(response_dict)
 
         # Now convert the list of dict responses to a dataframe for easier handling and saving
         summaries_df: pd.DataFrame = pd.DataFrame(summaries_dict_lst)
