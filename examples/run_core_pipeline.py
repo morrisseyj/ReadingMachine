@@ -258,8 +258,8 @@ cluster.reduce_dimensions(
 cluster.tune_hdbscan_params(
     min_cluster_sizes=[5, 10, 15, 20],
     metrics=["euclidean", "manhattan"],
-    cluster_selection_methods=["eom", "leaf"]
-)
+    min_sample_ratios=[0.5, 0.25, 0.1, 0.05]
+    )
 
 # Inspect the tuning results a choose params that balance cluster coherence with coverage - question-by-question
 cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
