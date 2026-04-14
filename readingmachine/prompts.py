@@ -728,7 +728,7 @@ class Prompts:
     # CORE PROMPTS - SUMMARIZE
     ####
 
-    def summarize_clusters(self, frozen_summary_window, max_output_words = 2500):
+    def summarize_clusters(self, frozen_summary_window, max_output_words=2500):
         """
         Generate the system prompt for cluster-level summarization.
 
@@ -777,7 +777,7 @@ class Prompts:
             "- A limited set of preceding cluster summaries (for context only; not to be included in your output). "
             f"These represent a small, recent window of clusters (typically {frozen_summary_window}) ordered by semantic proximity, not the full corpus. "
             f"They may be empty or less than {frozen_summary_window}; if empty/less than {frozen_summary_window}, there is no/limited preceding text.\n"
-            "- The cluster number for the insights (all clusters are uniquely labelled, with -1 indicating outliers or 'other').\n"
+            "- The cluster number for the insights (all clusters are uniquely labelled; cluster labels > 0 indicate valid clusters generated via HDBSCAN, cluster labels < 0 indicate outliers, sometimes split via KMeans).\n"
             "- All insights for this cluster, each with source citations.\n\n"
 
             "SUMMARY REQUIREMENTS:\n"
@@ -807,9 +807,6 @@ class Prompts:
 
             "OUTPUT FORMAT (STRICT JSON ONLY):\n"
             "{\n"
-            '    "question_id": "<question_id>",\n'
-            '    "question_text": "<question_text>",\n'
-            '    "cluster": <cluster_no>,\n'
             '    "summary": "<summary>"\n'
             "}\n\n"
 
@@ -819,8 +816,8 @@ class Prompts:
             f"- The summary MUST NOT exceed {max_output_words} words.\n"
             "- This is a strict upper bound and must be respected.\n\n"
 
-            "2. COVERAGE (HARD)\n"
-            "- All insights must be represented in the summary.\n"
+            "2. COVERAGE (SOFT)\n"
+            "- All insights should be represented in the summary.\n"
             "- Each insight must contribute to the synthesized output either directly or through accurate abstraction.\n\n"
 
             "3. GRANULARITY (PRESERVE WHERE POSSIBLE)\n"
@@ -830,11 +827,12 @@ class Prompts:
             "4. WHEN CONSTRAINTS CONFLICT\n"
             "- You MUST prioritize staying within the length limit.\n"
             "- Then ensure all insights are represented.\n"
+            "- Then ensure granularity is preserved"
             "- If necessary to satisfy the length constraint:\n"
             "  • combine clearly similar insights\n"
             "  • abstract repeated mechanisms or findings\n"
             "  • compress phrasing while preserving meaning\n"
-            "- Do NOT omit unique or substantively different claims.\n\n"
+            "- Do NOT omit unique or substantively different claims, but if necessary compress aggressively to fit the length constraint.\n\n"
 
             "OUTPUT RULES:\n"
             "- Return strictly valid JSON.\n"
