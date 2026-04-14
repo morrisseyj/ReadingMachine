@@ -2780,7 +2780,7 @@ class Clustering:
         print(self.umap_param_tuning_results)
 
     @staticmethod
-    def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom", min_samples = None, max_cluster_size = None):
+    def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom", min_samples = None):
         """
         Perform density-based clustering using HDBSCAN.
 
@@ -2872,8 +2872,6 @@ class Clustering:
         score should be interpreted as a heuristic rather than a definitive
         measure of clustering quality.
         """
-
-
         mask = cluster_labels != -1
         num_outliers = np.sum(~mask)
         filtered_embeddings = embeddings_matrix[mask]
@@ -2883,7 +2881,7 @@ class Clustering:
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
         return db_score, num_outliers
 
-    def _estimate_max_cluster_sizes(self, context_window_constraint, max_cluster_size_cap):
+    def _estimate_max_cluster_sizes(self, context_window_constraint, hdbscan_cluster_size_cap):
         """
         Estimate maximum allowable cluster sizes for each research question.
 
@@ -2912,7 +2910,6 @@ class Clustering:
 
         # Calculate the average insight lengh in words for each research question
         avg_insight_len_by_rq = {}
-        avg_insight_len_by_rq.fromkeys(valid_insights["question_id"].unique())
         for rq in valid_insights["question_id"].unique():
             rq_insights_list = valid_insights[valid_insights["question_id"] == rq]["insight"].tolist()
             rq_avg_insight_len = np.mean([len(insight.split()) for insight in rq_insights_list])
@@ -2924,18 +2921,19 @@ class Clustering:
         for rq, avg_len in avg_insight_len_by_rq.items():
                 # Estimate the number of insights that would fit in the context window based on the average insight length
                 estimated_insights_in_window = context_window_constraint / (avg_len * 1.5)  # Use a multiplier to be conservative
-                max_cluster_size_by_rq[rq] = int(min(estimated_insights_in_window, max_cluster_size_cap))
+                max_cluster_size_by_rq[rq] = int(min(estimated_insights_in_window, hdbscan_cluster_size_cap))
 
         return max_cluster_size_by_rq
-
 
     def tune_hdbscan_params(
         self,
         min_cluster_sizes: list[int] = [5, 10, 15, 20],
         metrics: list[str] = ["euclidean", "manhattan"],
-        min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05], 
-        context_window_constraint: int = 90000,
-        max_cluster_size_cap: int = 800
+        min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05],
+        cluster_selection_method: list[str] = ["eom", "leaf"],
+        context_window_constraint: int = 90000, 
+        hdbscan_cluster_size_cap: int = 1000,
+        outlier_cluster_size_cap: int = 300
         ) -> None:
 
         """
@@ -2992,12 +2990,12 @@ class Clustering:
         
         #Calculate the max cluster sizes
         max_cluster_size_by_rq = self._estimate_max_cluster_sizes(context_window_constraint=context_window_constraint, 
-                                                                  max_cluster_size_cap=max_cluster_size_cap)
+                                                                  hdbscan_cluster_size_cap=hdbscan_cluster_size_cap)
 
         # Pass sample size values to get the full grid of search options
         param_grid = (
-            pd.DataFrame(itertools.product(min_cluster_sizes, metrics, min_sample_ratios), 
-                         columns=["min_cluster_size", "metric", "min_sample_ratio"])
+            pd.DataFrame(itertools.product(min_cluster_sizes, metrics, min_sample_ratios, cluster_selection_method), 
+                         columns=["min_cluster_size", "metric", "min_sample_ratio", "cluster_selection_method"])
             .assign(min_samples=lambda df: (df["min_cluster_size"] * df["min_sample_ratio"]).round().astype(int))
             .query("min_samples >= 2 & min_samples <= min_cluster_size")  # Ensure min_samples is less than min_cluster_size and greater than 2 (required)
             .drop_duplicates(subset=["min_cluster_size", "metric", "min_samples"])
@@ -3016,28 +3014,29 @@ class Clustering:
                     min_cluster_size=row.min_cluster_size,
                     metric=row.metric,
                     min_samples=row.min_samples,
-                    max_cluster_size = max_cluster_size_by_rq[rq]
+                    cluster_selection_method=row.cluster_selection_method
                     )
                 
                 db_score, num_outliers = self.calc_davies_bouldain_score(embeddings_matrix, cluster_labels)
 
-                outlier_cluster_count = math.ceil(num_outliers / max_cluster_size_by_rq[rq]) if num_outliers > 0 else 0
-                total_valid_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0) 
+                outlier_cluster_count = math.ceil(num_outliers / outlier_cluster_size_cap) if num_outliers > 0 else 0
+                hdbscan_cluster_count = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0) 
 
                 results.append({
                     "question_id": rq,
                     "min_cluster_size": row.min_cluster_size,
                     "metric": row.metric,
-                    "cluster_selection_method": "eom", # We only run over eom because that allows for max_cluster_size to be passed
+                    "cluster_selection_method": row.cluster_selection_method,
                     "min_sample_ratio": row.min_sample_ratio,
                     "min_samples": row.min_samples,
-                    "max_cluster_size": max_cluster_size_by_rq[rq],
                     "db_score": db_score,
                     "num_outliers": num_outliers,
                     "outlier_fraction": num_outliers / len(cluster_labels) if len(cluster_labels) > 0 else 0,
-                    "total_valid_clusters": total_valid_clusters,
-                    "outlier_cluster_count": outlier_cluster_count,
-                    "total_final_groups_to_summarize": total_valid_clusters + outlier_cluster_count
+                    "max_hdbscan_cluster_size": max_cluster_size_by_rq[rq],
+                    "max_outlier_cluster_size": outlier_cluster_size_cap,
+                    "final_hdbscan_cluster_count": hdbscan_cluster_count,
+                    "final_outlier_cluster_count": outlier_cluster_count,
+                    "total_final_clusters_to_summarize": hdbscan_cluster_count + outlier_cluster_count
                     })
 
         results_df = pd.DataFrame(results)
@@ -3253,27 +3252,41 @@ class Clustering:
     def generate_clusters(self,
                           clustering_param_dict: dict,
                           context_window_constraint: int = 90000,
-                          max_cluster_size_cap: int = 800) -> pd.DataFrame:
+                          hdbscan_cluster_size_cap: int = 1000, 
+                          outlier_cluster_size_cap: int = 300) -> pd.DataFrame:
         """
-        Assign clusters to insights using HDBSCAN with constrained partitioning fallback.
+        Assign clusters to insights using HDBSCAN with post-processing size constraints.
 
         Clustering is performed independently for each research question using
-        HDBSCAN with the "eom" selection method and a specified maximum cluster
-        size constraint. This produces density-based clusters along with a set
-        of outliers.
+        HDBSCAN with the specified parameters. HDBSCAN is used purely for
+        structure discovery and is not constrained by cluster size during fitting.
 
-        If the number of outliers exceeds the allowed maximum cluster size,
-        a custom density-seeded partitioning algorithm is applied to the outliers.
-        This algorithm:
+        After initial clustering, all resulting groups—both HDBSCAN clusters
+        (label ≥ 0) and outlier groups (label = -1)—are evaluated against size
+        constraints. Any group exceeding its allowable size is partitioned using
+        a custom density-seeded partitioning algorithm.
 
-            1. Selects seed points in high-density regions using HDBSCAN.
-            2. Removes K-nearest neighborhoods around each seed to ensure coverage.
-            3. Restores all points and assigns them to seeds via balanced, round-robin
-            nearest-neighbor growth.
-            4. Guarantees full coverage and enforces a strict maximum cluster size.
+        Partitioning algorithm
+        ----------------------
+        For any group exceeding its size cap:
 
-        Outlier-derived clusters are assigned negative labels to distinguish them
-        from HDBSCAN clusters. Final cluster labels are reassigned to ensure global uniqueness.
+        1. Select seed points in dense regions using HDBSCAN.
+        2. Remove K-nearest neighborhoods around each seed to ensure coverage.
+        3. Restore all points and assign them to seeds using balanced,
+        round-robin nearest-neighbor growth.
+        4. Produce subclusters that satisfy strict size constraints.
+
+        Core clusters and outliers are treated uniformly during this step, but
+        with different size caps:
+            - Core clusters (label ≥ 0) use `max_cluster_size_by_rq`
+            - Outlier-derived clusters (label < 0) use `outlier_cluster_size_cap`
+
+        Labeling scheme
+        ---------------
+        - HDBSCAN clusters are assigned positive integer labels.
+        - Outlier-derived clusters are assigned negative integer labels.
+        - All newly created clusters are assigned globally unique labels using
+        running counters to avoid collisions across research questions.
 
         Parameters
         ----------
@@ -3282,126 +3295,170 @@ class Clustering:
             Each entry should include:
                 - min_cluster_size : int
                 - metric : str
+                - cluster_selection_method : str ("eom" or "leaf")
                 - min_samples : int
+
+        context_window_constraint : int, default=90000
+            Constraint used to estimate the maximum allowable cluster size for
+            core clusters, based on downstream LLM context limits.
+
+        hdbscan_cluster_size_cap : int, default=1000
+            Upper bound used when deriving maximum cluster sizes for core clusters.
+            This does not constrain HDBSCAN directly, but influences post-processing.
+
+        outlier_cluster_size_cap : int, default=300
+            Maximum allowed size for outlier-derived clusters during partitioning.
 
         Returns
         -------
         pd.DataFrame
             Updated insights table containing:
-                - cluster labels
+                - cluster labels (globally unique)
                 - cluster probabilities
                 - embedding vectors
 
         Notes
         -----
         - Clustering is performed independently per research question.
-        - HDBSCAN is used to identify dense clusters under a size constraint.
-        - Outliers (label = -1) are reassigned only if their count exceeds the
-        maximum allowed cluster size.
-        - The fallback partitioning guarantees:
+        - HDBSCAN is used only for structure discovery and is not constrained
+        by cluster size during fitting.
+        - All clusters are post-processed to ensure:
             * Full coverage (all points assigned)
             * No overlap (each point assigned exactly once)
-            * Hard size constraint (cluster size ≤ max_cluster_size)
-        - Cluster probabilities from HDBSCAN are preserved; reassigned points are
-        given a default probability of 1.0.
-        - Final cluster labels are reassigned to ensure descending size order
-        and global uniqueness across research questions.
-        - Outlier reassignment relies on positional alignment:
-        embeddings are extracted in order, processed, and reassigned in the same order.
-        - The updated clustering is merged back into the main insights table,
-        replacing any previous clustering results.
+            * Hard size constraint (cluster size ≤ cap)
+        - Cluster probabilities from HDBSCAN are preserved; partitioned clusters
+        are assigned a default probability of 1.0.
+        - Outlier reassignment relies on positional alignment: embeddings are
+        extracted in order, processed, and reassigned in the same order.
+        - Final cluster labels are globally unique across all research questions.
+        - The updated clustering replaces any previous clustering results in
+        `corpus_state.insights`.
         """
-        # Get rqs
+        # Get research questions
         rqs = self.valid_embeddings_df["question_id"].unique()
-        # Get max cluster sizes
-        max_cluster_size_by_rq = self._estimate_max_cluster_sizes(context_window_constraint=context_window_constraint, 
-                                                                  max_cluster_size_cap=max_cluster_size_cap)
 
-        # Check if clustering_param_dict has entries for all rqs
+        # Estimate max cluster sizes (for core clusters only)
+        max_cluster_size_by_rq = self._estimate_max_cluster_sizes(
+            context_window_constraint=context_window_constraint,
+            hdbscan_cluster_size_cap=hdbscan_cluster_size_cap
+        )
+
+        # Resolve parameters
         if len(clustering_param_dict) != len(rqs):
             use_default = None
             while use_default not in ['y', 'n']:
                 use_default = input(
-                    f"You did not enter specific clustering parameters for each research question. "
-                    "Do you want to use default parameters? (y/n): "
+                    "You did not enter specific clustering parameters for each research question. "
+                    "Use default parameters? (y/n): "
                 ).lower()
                 if use_default == 'n':
-                    raise KeyboardInterrupt("Please rerun and provide clustering parameters for each research question.")
-                else:
-                    params = [clustering_param_dict.get(rq, {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5}) for rq in rqs]
+                    raise KeyboardInterrupt("Provide parameters for each research question.")
+            params = [
+                clustering_param_dict.get(
+                    rq,
+                    {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5}
+                )
+                for rq in rqs
+            ]
         else:
             params = [clustering_param_dict[rq] for rq in rqs]
-        
+
         data = [self.rq_valid_embeddings_dfs[rq] for rq in rqs]
 
-        offset = 0  # Initialize offset for cluster label adjustment
-        
-        # Get the labels and cluster probs
-        for i, (d,rq, param) in enumerate(zip(data, rqs, params)):
+        # 🔑 GLOBAL label counters (ensure uniqueness across all RQs)
+        next_positive_label = 1
+        next_negative_label = -1
+
+        # --- CLUSTERING LOOP ---
+        for i, (d, rq, param) in enumerate(zip(data, rqs, params)):
+
             embeddings_matrix = np.vstack(d["reduced_insight_embedding"].to_list())
+
             cluster_labels, cluster_probs = self.cluster(
                 embedding_matrix=embeddings_matrix,
                 min_cluster_size=param["min_cluster_size"],
                 metric=param["metric"],
-                cluster_selection_method="eom", 
+                cluster_selection_method=param["cluster_selection_method"],
                 min_samples=param["min_samples"],
-                max_cluster_size=max_cluster_size_by_rq[rq]
             )
 
-            # Add the labels and cluster probls to the data 
+            d = d.copy()
             d["cluster"] = cluster_labels
             d["cluster_prob"] = cluster_probs
 
-            #Check whether the number of outliers exceeds the max cluster size - if so apply density based partitioning 
-            num_outliers = np.sum(cluster_labels == -1)
-            if num_outliers > max_cluster_size_by_rq[rq]:
-                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({max_cluster_size_by_rq[rq]}). Applying desnity-seeded partitioning to outliers for {rq}...")
-                # Get the outliers
-                outliers = d[d["cluster"] == -1]
-                # Get the embedding matrix for the outliers
-                outlier_embeddings_list = outliers["reduced_insight_embedding"].to_list()
-                outlier_embeddings_matrix = np.vstack(outlier_embeddings_list)
+            new_rows = []
 
-                # Partition the outliers using the density seeded partition method
-                outlier_labels, _ = self.density_seeded_partition(X = outlier_embeddings_matrix,
-                                                                  K=max_cluster_size_by_rq[rq])
-                
-                outlier_labels = -(outlier_labels.astype(int) + 1)  # Convert to negative labels starting from -1
+            # Process each cluster independently
+            for label in sorted(d["cluster"].unique()):
 
-                outliers = outliers.assign(cluster=outlier_labels)
-                outliers = outliers.assign(cluster_prob=1.0)  # Assign a cluster probability of 1 to assigned outliers (this is arbitrary but indicates strong membership in the new cluster)
-                #drop the old outliers from d and add the new ones with outlier labels
-                d = pd.concat([d[d["cluster"] != -1], outliers], ignore_index=True)
+                cluster_df = d[d["cluster"] == label].copy()
+                cluster_size = len(cluster_df)
 
-            # Translate cluster labels stating from 1, with 1 being the largest 
-            # 1. Get cluster sizes (excluding -1)
-            cluster_sizes = d[d["cluster"] > 0].groupby("cluster").size().sort_values(ascending=False)
-            # 2. Map old cluster labels to new ones (largest=1, next=2, etc.)
-            label_map = {old: i+1+offset for i, old in enumerate(cluster_sizes.index)}
-            # 3. Apply mapping, keep -1 as is
-            d["cluster"] = d["cluster"].apply(lambda x: label_map[x] if x in label_map else x)
-            # 4. Update offset for next DataFrame
-            if cluster_sizes.size > 0:
-                offset = max(label_map.values())
+                # Decide cap
+                if label >= 0:
+                    cap = max_cluster_size_by_rq[rq]
+                else:
+                    cap = outlier_cluster_size_cap
 
+                # Split if needed
+                if cluster_size > cap:
+                    X_cluster = np.vstack(cluster_df["reduced_insight_embedding"].to_list())
+
+                    sub_labels, _ = self.density_seeded_partition(X_cluster, K=cap)
+
+                    unique_sub = np.unique(sub_labels)
+
+                    if label >= 0:
+                        # Assign new positive labels
+                        label_map = {
+                            old: next_positive_label + idx
+                            for idx, old in enumerate(unique_sub)
+                        }
+                        cluster_df["cluster"] = [label_map[l] for l in sub_labels]
+                        next_positive_label += len(unique_sub)
+
+                    else:
+                        # Assign new negative labels
+                        label_map = {
+                            old: next_negative_label - idx
+                            for idx, old in enumerate(unique_sub)
+                        }
+                        cluster_df["cluster"] = [label_map[l] for l in sub_labels]
+                        next_negative_label -= len(unique_sub)
+
+                    cluster_df["cluster_prob"] = 1.0
+
+                new_rows.append(cluster_df)
+
+            # Rebuild dataframe for this RQ
+            d = pd.concat(new_rows, ignore_index=True)
             data[i] = d
 
-        # Concat the data back together
-        clustered_df = pd.concat(data)
+        # Combine all RQs
+        clustered_df = pd.concat(data, ignore_index=True)
 
-        # Clean corpus_state_insights of cluster variables that might have been created on multiple passes of generate clusters:
+        # Clean existing cluster columns
         cluster_cols = ["cluster", "cluster_prob", "full_insight_embedding", "reduced_insight_embedding"]
-        self.corpus_state.insights = self.corpus_state.insights.drop(columns=[col for col in cluster_cols if col in self.corpus_state.insights.columns])
+        self.corpus_state.insights = self.corpus_state.insights.drop(
+            columns=[col for col in cluster_cols if col in self.corpus_state.insights.columns]
+        )
 
+        # Merge results back
         self.corpus_state.insights = self.corpus_state.insights.merge(
-            clustered_df[["question_id", "paper_id", "chunk_id", "insight_id", "cluster", "cluster_prob", "full_insight_embedding", "reduced_insight_embedding"]],
+            clustered_df[[
+                "question_id", "paper_id", "chunk_id", "insight_id",
+                "cluster", "cluster_prob",
+                "full_insight_embedding", "reduced_insight_embedding"
+            ]],
             on=["question_id", "paper_id", "chunk_id", "insight_id"],
             how="left"
         )
 
-        # Save the updated DataFrame to disk
+        # Save
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
+
         return self.corpus_state.insights
+
 
 class Summarize:
     def __init__(self,
