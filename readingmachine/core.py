@@ -2883,7 +2883,7 @@ class Clustering:
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
         return db_score, num_outliers
 
-    def _estimate_max_cluster_sizes(self, context_window_constraint=90000):
+    def _estimate_max_cluster_sizes(self, context_window_constraint, max_cluster_size_cap):
         """
         Estimate maximum allowable cluster sizes for each research question.
 
@@ -2923,8 +2923,8 @@ class Clustering:
         max_cluster_size_by_rq = {}
         for rq, avg_len in avg_insight_len_by_rq.items():
                 # Estimate the number of insights that would fit in the context window based on the average insight length
-                estimated_insights_in_window = context_window_constraint / (avg_len * 2)  # Use a multiplier to be conservative
-                max_cluster_size_by_rq[rq] = int(estimated_insights_in_window)
+                estimated_insights_in_window = context_window_constraint / (avg_len * 1.5)  # Use a multiplier to be conservative
+                max_cluster_size_by_rq[rq] = int(min(estimated_insights_in_window, max_cluster_size_cap))
 
         return max_cluster_size_by_rq
 
@@ -2933,7 +2933,9 @@ class Clustering:
         self,
         min_cluster_sizes: list[int] = [5, 10, 15, 20],
         metrics: list[str] = ["euclidean", "manhattan"],
-        min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05]
+        min_sample_ratios: list[float] = [0.5, 0.25, 0.1, 0.05], 
+        context_window_constraint: int = 90000,
+        max_cluster_size_cap: int = 800
         ) -> None:
 
         """
@@ -2989,7 +2991,8 @@ class Clustering:
         """
         
         #Calculate the max cluster sizes
-        max_cluster_size_by_rq = self._estimate_max_cluster_sizes()
+        max_cluster_size_by_rq = self._estimate_max_cluster_sizes(context_window_constraint=context_window_constraint, 
+                                                                  max_cluster_size_cap=max_cluster_size_cap)
 
         # Pass sample size values to get the full grid of search options
         param_grid = (
@@ -3247,7 +3250,10 @@ class Clustering:
 
         return labels, seeds
 
-    def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
+    def generate_clusters(self,
+                          clustering_param_dict: dict,
+                          context_window_constraint: int = 90000,
+                          max_cluster_size_cap: int = 800) -> pd.DataFrame:
         """
         Assign clusters to insights using HDBSCAN with constrained partitioning fallback.
 
@@ -3308,7 +3314,8 @@ class Clustering:
         # Get rqs
         rqs = self.valid_embeddings_df["question_id"].unique()
         # Get max cluster sizes
-        max_cluster_size_by_rq = self._estimate_max_cluster_sizes()
+        max_cluster_size_by_rq = self._estimate_max_cluster_sizes(context_window_constraint=context_window_constraint, 
+                                                                  max_cluster_size_cap=max_cluster_size_cap)
 
         # Check if clustering_param_dict has entries for all rqs
         if len(clustering_param_dict) != len(rqs):
@@ -3395,7 +3402,6 @@ class Clustering:
         # Save the updated DataFrame to disk
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
         return self.corpus_state.insights
-
 
 class Summarize:
     def __init__(self,
