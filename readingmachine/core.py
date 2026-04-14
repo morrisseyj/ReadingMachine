@@ -3018,6 +3018,9 @@ class Clustering:
                 
                 db_score, num_outliers = self.calc_davies_bouldain_score(embeddings_matrix, cluster_labels)
 
+                outlier_cluster_count = math.ceil(num_outliers / max_cluster_size_by_rq[rq]) if num_outliers > 0 else 0
+                total_valid_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0) 
+
                 results.append({
                     "question_id": rq,
                     "min_cluster_size": row.min_cluster_size,
@@ -3029,7 +3032,9 @@ class Clustering:
                     "db_score": db_score,
                     "num_outliers": num_outliers,
                     "outlier_fraction": num_outliers / len(cluster_labels) if len(cluster_labels) > 0 else 0,
-                    "total_clusters": len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+                    "total_valid_clusters": total_valid_clusters,
+                    "outlier_cluster_count": outlier_cluster_count,
+                    "total_final_groups_to_summarize": total_valid_clusters + outlier_cluster_count
                     })
 
         results_df = pd.DataFrame(results)
