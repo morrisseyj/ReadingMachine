@@ -403,7 +403,7 @@ The clustering parameters are calculated per question. The easiest way to inspec
 cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 ```
 
-You want to select parameter combinations that both minimize the db score and minimize outliers. Note however that unlike other ML approaches, outliers here are not discarded (they will be worked into themes) so it minimizing them should likely recieve less emphasis than is normal in other approaches. 
+You want to select parameter combinations that simultanously balance: small db score, small outliers and small total final groups to summarize. As a heuristic try and keep the small total groups to summarize to between 40-60, and then optimize for cluster quality (db score) and coverage (low outliers). Note that unlike other ML approaches, outliers here are not discarded (they will be worked into themes) so minimizing them should likely recieve less emphasis than is normal in other approaches. 
 
 #### 4.3.2. Cluster with HDBSCAN
 
@@ -411,15 +411,15 @@ With the parameters selected we now cluster with HDBSCAN
 
 ```
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"},
-    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"}
+    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "min_samples": "5"},
+    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "min_samples": "5"},
+    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "min_samples": "4"},
+    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "min_samples": "5"},
+    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "min_samples": "10"}
 })
 ```
 
-Note that this applies a limit on the max cluster size (to prevent the context window being overwhelmed when we summarie clusters). TO achieve this, constrain all clusters to use a max size. For any cases in which outliers exceed this size, we use KMeans clustering to structure the outliers into groups. In the final arrangement in corpus_state.insights HDBSCAN clusters are labelled positively while outliers are labelled negatively.
+Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers, which also get broken up using KMeans.
 
 ## 5. Summarize the data
 
