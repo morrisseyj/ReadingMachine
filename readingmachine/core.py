@@ -3050,56 +3050,206 @@ class Clustering:
         self.hdbscan_tuning_results = valid_results_df
         print(self.hdbscan_tuning_results)
 
-    def kmeans_cluster(self, 
-                       embeddings_array: np.ndarray,
-                       n_clusters: int, 
-                       random_state:int = config.seed) -> np.ndarray:
-        
+    @staticmethod
+    def density_seeded_partition(X: np.ndarray, K: int):
         """
-        Cluster a set of embeddings using KMeans.
+        Partition embeddings into bounded groups using density-guided seed selection
+        and balanced assignment.
 
-        This method applies KMeans clustering to a subset of embeddings, typically
-        used to partition outlier points produced by HDBSCAN when they exceed the
-        maximum allowed cluster size.
+        This function performs a two-phase constrained partitioning:
+
+        1. Seed selection (density-guided, destructive):
+        - Iteratively identifies high-density points using HDBSCAN.
+        - For each selected seed, removes its K nearest neighbors from consideration.
+        - Ensures seeds are distributed across dense regions of the embedding space.
+
+        2. Assignment (balanced, capacity-constrained):
+        - All points are restored.
+        - Points are assigned to seeds iteratively in a round-robin fashion.
+        - Each seed grows outward by repeatedly claiming its nearest unassigned point.
+        - Ensures no cluster exceeds size K and no point is assigned more than once.
 
         Parameters
         ----------
-        embeddings_array : np.ndarray
-            2D array of shape (n_samples, n_features) containing the embeddings
-            to be clustered.
+        X : np.ndarray
+            Embedding matrix of shape (n_points, n_features).
 
-        n_clusters : int
-            Number of clusters to form. Typically computed as:
-                ceil(n_outliers / max_cluster_size)
-            to ensure resulting clusters respect size constraints.
-
-        random_state : int, default=config.seed
-            Random seed for reproducibility.
+        K : int
+            Maximum cluster size. All output clusters will have size ≤ K.
 
         Returns
         -------
-        np.ndarray
-            Array of shape (n_samples,) containing cluster labels in the range
-            [0, n_clusters - 1].
+        labels : np.ndarray
+            Array of shape (n_points,) assigning each point to a cluster index.
+
+        seeds : list[int]
+            Indices of selected seed points in the original dataset.
 
         Notes
         -----
-        - This method is used as a fallback when HDBSCAN produces too many outliers.
-        - Returned labels are later transformed into negative values to distinguish
-        them from HDBSCAN clusters.
-        
+        - This is not a standard clustering algorithm; it is a constrained partitioning method.
+        - Guarantees:
+            * Full coverage (all points assigned)
+            * No overlap (each point assigned exactly once)
+            * Hard size constraint (cluster size ≤ K)
+        - HDBSCAN is used only to guide seed placement, not for final clustering.
+        - Resulting clusters are approximately balanced and spatially coherent, but
+        do not optimize a global clustering objective.
         """
 
-        kmeans = KMeans(n_clusters=n_clusters,
-                        random_state=random_state, 
-                        n_init=10) #Set to 10 for reproducibility and to avoid convergence issues with small clusters
-        
-        cluster_labels = kmeans.fit_predict(embeddings_array)
-        return cluster_labels
+        # ----- COMPONENT FUNCTIONS START -----
+
+        def select_seeds_with_density(X: np.ndarray, n_seeds: int):
+
+            """
+            Select seed points using iterative density-based extraction.
+
+            This function identifies seed points by repeatedly:
+            1. Running HDBSCAN on the remaining (unassigned) points.
+            2. Selecting the point with the highest density score (cluster membership probability).
+            3. Removing the K nearest points to that seed from further consideration.
+
+            This produces a set of seeds that are:
+            - Located in high-density regions
+            - Distributed across the embedding space
+            - Representative of underlying data structure
+
+            Parameters
+            ----------
+            X : np.ndarray
+                Embedding matrix of shape (n_points, n_features).
+
+            n_seeds : int
+                Number of seeds to select. Typically ceil(n_points / K).
+
+            Returns
+            -------
+            seeds : list[int]
+                Indices of selected seed points in the original dataset.
+
+            Notes
+            -----
+            - Removal of K nearest points after each seed enforces spatial separation
+            between seeds and prevents over-representation of dense regions.
+            - Density is estimated using HDBSCAN probabilities.
+            - This step modifies the effective data distribution to encourage coverage.
+            
+            """
+
+            remaining_idx = np.arange(len(X))
+            seeds = []
+
+            for _ in range(n_seeds):
+                if len(remaining_idx) == 0:
+                    break
+
+                X_sub = X[remaining_idx]
+
+                # Run HDBSCAN
+                clusterer = HDBSCAN(min_cluster_size=5)
+                clusterer.fit(X_sub)
+
+                # Pick highest density point
+                probs = clusterer.probabilities_
+                seed_local_idx = np.argmax(probs)
+                seed_global_idx = remaining_idx[seed_local_idx]
+
+                seeds.append(seed_global_idx)
+
+                # Remove K nearest points
+                seed = X_sub[seed_local_idx]
+                dists = np.linalg.norm(X_sub - seed, axis=1)
+                idx = np.argsort(dists)[:K]
+
+                remaining_idx = np.delete(remaining_idx, idx)
+
+            return seeds
+
+
+        def assign_points_balanced(X, seed_indices, K):
+            """
+            Assign points to seeds using balanced, capacity-constrained growth.
+
+            This function assigns each point to a seed cluster by:
+            - Precomputing distances from all points to all seeds
+            - Iteratively assigning points in a round-robin fashion:
+                * Each seed claims its nearest unassigned point
+                * Cluster growth alternates across seeds
+            - Enforcing a hard maximum cluster size (K)
+
+            Parameters
+            ----------
+            X : np.ndarray
+                Embedding matrix of shape (n_points, n_features).
+
+            seed_indices : list[int]
+                Indices of seed points selected during the seed selection phase.
+
+            K : int
+                Maximum cluster size.
+
+            Returns
+            -------
+            assigned : np.ndarray
+                Array of shape (n_points,) containing cluster assignments.
+
+            Notes
+            -----
+            - Ensures:
+                * Each point is assigned exactly once
+                * No cluster exceeds size K
+            - Unlike KMeans, assignment is not global; clusters grow incrementally.
+            - This avoids cluster imbalance and prevents dense regions from dominating.
+            - Resulting clusters are approximately equal in size (±1 point).
+            
+            """
+            n = len(X)
+            assigned = np.full(n, -1, dtype=int)
+
+            seeds = X[seed_indices]
+
+            # distance matrix (n_points x n_seeds)
+            dist_matrix = np.linalg.norm(X[:, None, :] - seeds[None, :, :], axis=2)
+
+            sorted_points = [np.argsort(dist_matrix[:, i]) for i in range(len(seeds))]
+            pointers = [0] * len(seeds)
+            cluster_sizes = [0] * len(seeds)
+
+            remaining = set(range(n))
+
+            while remaining:
+                for i in range(len(seeds)):
+                    if cluster_sizes[i] >= K:
+                        continue
+
+                    while pointers[i] < n:
+                        candidate = sorted_points[i][pointers[i]]
+                        pointers[i] += 1
+
+                        if candidate in remaining:
+                            assigned[candidate] = i
+                            remaining.remove(candidate)
+                            cluster_sizes[i] += 1
+                            break
+
+                    if not remaining:
+                        break
+
+            return assigned
+
+        # ----- COMPONENT FUNCTIONS END -----
+
+        n_points = len(X)
+        n_seeds = math.ceil(n_points / K)
+
+        seeds = select_seeds_with_density(X, n_seeds)
+        labels = assign_points_balanced(X, seeds, K)
+
+        return labels, seeds
 
     def generate_clusters(self, clustering_param_dict: dict) -> pd.DataFrame:
         """
-        Assign clusters to insights using HDBSCAN with size-constrained fallback.
+        Assign clusters to insights using HDBSCAN with constrained partitioning fallback.
 
         Clustering is performed independently for each research question using
         HDBSCAN with the "eom" selection method and a specified maximum cluster
@@ -3107,18 +3257,17 @@ class Clustering:
         of outliers.
 
         If the number of outliers exceeds the allowed maximum cluster size,
-        KMeans is applied to partition the outliers into smaller groups, ensuring
-        that all resulting groups (including those derived from outliers) respect
-        the size constraint.
+        a custom density-seeded partitioning algorithm is applied to the outliers.
+        This algorithm:
 
-        Cluster labels are then normalized within each research question so that:
-            cluster 1 = largest cluster
-            cluster 2 = second largest
-            ...
+            1. Selects seed points in high-density regions using HDBSCAN.
+            2. Removes K-nearest neighborhoods around each seed to ensure coverage.
+            3. Restores all points and assigns them to seeds via balanced, round-robin
+            nearest-neighbor growth.
+            4. Guarantees full coverage and enforces a strict maximum cluster size.
 
-        Cluster labels are made globally unique across all research questions
-        using an offset, but their numeric values should not be interpreted
-        across questions.
+        Outlier-derived clusters are assigned negative labels to distinguish them
+        from HDBSCAN clusters. Final cluster labels are reassigned to ensure global uniqueness.
 
         Parameters
         ----------
@@ -3128,7 +3277,6 @@ class Clustering:
                 - min_cluster_size : int
                 - metric : str
                 - min_samples : int
-                - max_cluster_size : int
 
         Returns
         -------
@@ -3142,16 +3290,18 @@ class Clustering:
         -----
         - Clustering is performed independently per research question.
         - HDBSCAN is used to identify dense clusters under a size constraint.
-        - Outliers (label = -1) are retained unless they exceed the maximum
-        cluster size, in which case they are partitioned using KMeans.
-        - KMeans-derived clusters are assigned negative labels to distinguish
-        them from HDBSCAN clusters prior to relabeling.
-        - Cluster probabilities from HDBSCAN are preserved; KMeans-assigned
-        clusters are given a default probability of 1.0.
+        - Outliers (label = -1) are reassigned only if their count exceeds the
+        maximum allowed cluster size.
+        - The fallback partitioning guarantees:
+            * Full coverage (all points assigned)
+            * No overlap (each point assigned exactly once)
+            * Hard size constraint (cluster size ≤ max_cluster_size)
+        - Cluster probabilities from HDBSCAN are preserved; reassigned points are
+        given a default probability of 1.0.
         - Final cluster labels are reassigned to ensure descending size order
         and global uniqueness across research questions.
-        - The resulting clustering guarantees that no group exceeds the specified
-        maximum cluster size.
+        - Outlier reassignment relies on positional alignment:
+        embeddings are extracted in order, processed, and reassigned in the same order.
         - The updated clustering is merged back into the main insights table,
         replacing any previous clustering results.
         """
@@ -3171,7 +3321,7 @@ class Clustering:
                 if use_default == 'n':
                     raise KeyboardInterrupt("Please rerun and provide clustering parameters for each research question.")
                 else:
-                    params = [clustering_param_dict.get(rq, {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5, "max_cluster_size": 1000}) for rq in rqs]
+                    params = [clustering_param_dict.get(rq, {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5}) for rq in rqs]
         else:
             params = [clustering_param_dict[rq] for rq in rqs]
         
@@ -3195,21 +3345,25 @@ class Clustering:
             d["cluster"] = cluster_labels
             d["cluster_prob"] = cluster_probs
 
-            #Check whether the number of outliers exceeds the max cluster size - if so apply kmeans 
+            #Check whether the number of outliers exceeds the max cluster size - if so apply density based partitioning 
             num_outliers = np.sum(cluster_labels == -1)
             if num_outliers > max_cluster_size_by_rq[rq]:
-                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({max_cluster_size_by_rq[rq]}). Applying KMeans to outliers for {rq}...")
-                n_clusters = math.ceil(num_outliers / max_cluster_size_by_rq[rq])
+                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({max_cluster_size_by_rq[rq]}). Applying desnity-seeded partitioning to outliers for {rq}...")
+                # Get the outliers
                 outliers = d[d["cluster"] == -1]
+                # Get the embedding matrix for the outliers
                 outlier_embeddings_list = outliers["reduced_insight_embedding"].to_list()
                 outlier_embeddings_matrix = np.vstack(outlier_embeddings_list)
 
-                kmeans_labels = self.kmeans_cluster(outlier_embeddings_matrix, n_clusters=n_clusters)
-                kmeans_labels = -(kmeans_labels + 1)  # Convert to negative labels starting from -1
+                # Partition the outliers using the density seeded partition method
+                outlier_labels, _ = self.density_seeded_partition(X = outlier_embeddings_matrix,
+                                                                  K=max_cluster_size_by_rq[rq])
+                
+                outlier_labels = -(outlier_labels.astype(int) + 1)  # Convert to negative labels starting from -1
 
-                outliers = outliers.assign(cluster=kmeans_labels)
-                outliers = outliers.assign(cluster_prob=1.0)  # Assign a cluster probability of 1 to kmeans-assigned outliers (this is arbitrary but indicates strong membership in the new cluster)
-                #drop the old outliers from d and add the new ones with kmeans labels
+                outliers = outliers.assign(cluster=outlier_labels)
+                outliers = outliers.assign(cluster_prob=1.0)  # Assign a cluster probability of 1 to assigned outliers (this is arbitrary but indicates strong membership in the new cluster)
+                #drop the old outliers from d and add the new ones with outlier labels
                 d = pd.concat([d[d["cluster"] != -1], outliers], ignore_index=True)
 
             # Translate cluster labels stating from 1, with 1 being the largest 
@@ -3241,6 +3395,7 @@ class Clustering:
         # Save the updated DataFrame to disk
         self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "09_clusters"))
         return self.corpus_state.insights
+
 
 class Summarize:
     def __init__(self,
