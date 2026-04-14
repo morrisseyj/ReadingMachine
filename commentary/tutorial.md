@@ -446,6 +446,10 @@ The first step is to have an LLM summarize all the clusters of insights.
 summarize.summarize_clusters()
 ```
 
+Note if your summarize_clusters step produces errors, there are two likely cases:
+1. Context window exceeded. Fix by passing a smaller `context_window_constraint` to **both** `tune_hdbscan_params()` and `generate_clusters()`. The default is 90000 (words). 
+2. LLM output is truncated and not valid json. Fix by passing a smallrer `max_cluster_size_cap` to **both** `tune_hdbscan_params() and `generate_clusters()`. The default is 800 (insights).  
+
 ### 5.2. Generate theme schema
 
 Then we have the LLM look at these summaries and build a better conceptual mapping of the dominant themes, expressed as a theme schema - a set of theme labels, theme descriptions and rules for whether to include or exclude an insight. 
