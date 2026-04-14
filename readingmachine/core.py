@@ -2827,8 +2827,7 @@ class Clustering:
             min_cluster_size=min_cluster_size,
             metric=metric,
             cluster_selection_method=cluster_selection_method, 
-            min_samples=min_samples,
-            max_cluster_size=max_cluster_size
+            min_samples=min_samples
         )
 
         cluster_labels = clusterer.fit_predict(embedding_matrix)
