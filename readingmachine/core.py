@@ -3090,7 +3090,10 @@ class Clustering:
         
         """
 
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+        kmeans = KMeans(n_clusters=n_clusters,
+                        random_state=random_state, 
+                        n_init=10) #Set to 10 for reproducibility and to avoid convergence issues with small clusters
+        
         cluster_labels = kmeans.fit_predict(embeddings_array)
         return cluster_labels
 
@@ -3152,8 +3155,11 @@ class Clustering:
         - The updated clustering is merged back into the main insights table,
         replacing any previous clustering results.
         """
-        
+        # Get rqs
         rqs = self.valid_embeddings_df["question_id"].unique()
+        # Get max cluster sizes
+        max_cluster_size_by_rq = self._estimate_max_cluster_sizes()
+
         # Check if clustering_param_dict has entries for all rqs
         if len(clustering_param_dict) != len(rqs):
             use_default = None
@@ -3182,9 +3188,8 @@ class Clustering:
                 metric=param["metric"],
                 cluster_selection_method="eom", 
                 min_samples=param["min_samples"],
-                max_cluster_size=param["max_cluster_size"]
+                max_cluster_size=max_cluster_size_by_rq[rq]
             )
-
 
             # Add the labels and cluster probls to the data 
             d["cluster"] = cluster_labels
@@ -3192,9 +3197,9 @@ class Clustering:
 
             #Check whether the number of outliers exceeds the max cluster size - if so apply kmeans 
             num_outliers = np.sum(cluster_labels == -1)
-            if num_outliers > param["max_cluster_size"]:
-                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({param['max_cluster_size']}). Applying KMeans to outliers for {rq}...")
-                n_clusters = math.ceil(num_outliers / param["max_cluster_size"])
+            if num_outliers > max_cluster_size_by_rq[rq]:
+                print(f"Number of outliers ({num_outliers}) exceeds max cluster size ({max_cluster_size_by_rq[rq]}). Applying KMeans to outliers for {rq}...")
+                n_clusters = math.ceil(num_outliers / max_cluster_size_by_rq[rq])
                 outliers = d[d["cluster"] == -1]
                 outlier_embeddings_list = outliers["reduced_insight_embedding"].to_list()
                 outlier_embeddings_matrix = np.vstack(outlier_embeddings_list)
@@ -3220,9 +3225,7 @@ class Clustering:
 
             data[i] = d
 
-        summary_df = [self.make_cum_prop_cluster_table(d) for d in data]
-        summary_df = [df.assign(question_id=rq) for df, rq in zip(summary_df, rqs)]
-        self.cum_prop_cluster = pd.concat(summary_df)
+        # Concat the data back together
         clustered_df = pd.concat(data)
 
         # Clean corpus_state_insights of cluster variables that might have been created on multiple passes of generate clusters:
