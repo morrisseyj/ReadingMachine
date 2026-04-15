@@ -5867,6 +5867,7 @@ class Summarize:
 
                     # if there is an error
                     if error is not None or response["updated_summary"] == "":
+                        print(f"WARNING: Orphan integration failed for theme {theme_id} batch {batch_count}. Capturing summary of failed batch for diagnostics and proceeding with original summary.\nError details: {error if error else 'No error message returned.'}")
                         failed_batch_summary = self.summarize_failed_orphan_batch(
                             orphans=orphan_batch_str,
                             question_text=question_text,

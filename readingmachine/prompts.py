@@ -1490,6 +1490,16 @@ class Prompts:
             '- You MAY omit redundant or low-importance detail if necessary.\n'
             '- Do NOT fail or produce an incomplete response due to length.\n\n'
 
+            '6. STRUCTURAL CLARITY\n'
+            '- Present the synthesis as clearly separable components rather than a single blended narrative.\n'
+            '- Each component should represent a distinct grouping of related ideas.\n'
+            '- Maintain clear boundaries between substantively different idea groupings.\n\n'
+
+            '7. FIDELITY AND CITATIONS\n'
+            '- Preserve all factual details and citations exactly as they appear in the source insights.\n'
+            '- Do not alter, merge, or remove citation markers.\n'
+            '- If multiple insights support the same claim with different citations, retain all citations.\n\n'
+
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
             '- The response MUST be complete and valid JSON. Do not truncate the output.\n'
