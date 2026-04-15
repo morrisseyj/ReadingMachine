@@ -1455,7 +1455,44 @@ class Prompts:
     
     def summarize_failed_orphan_batch(self):
         """
-        
+        Generate the system prompt for summarizing a failed orphan batch.
+
+        This prompt is used when orphan integration fails (typically due to
+        output truncation under token constraints). It instructs the model to
+        compress the failed batch of insights into a complete, structured
+        summary that preserves core claims while allowing controlled abstraction.
+
+        Unlike the integration prompt, this prompt prioritizes successful
+        completion over full fidelity. It permits merging, abstraction, and
+        omission of lower-importance detail in order to produce a usable
+        representation of the content that could not be integrated.
+
+        The resulting summary is intended for diagnostic use in downstream
+        schema regeneration. It exposes the conceptual structure of the failed
+        batch in a form that supports identification of:
+
+            • overloaded themes
+            • separable conceptual dimensions
+            • potential new themes
+            • misclassified insights
+
+        The prompt also enforces structural clarity and citation preservation
+        so that the output is both interpretable and grounded in the source
+        material.
+
+        Returns
+        -------
+        str
+            System prompt instructing the model to produce a structured,
+            citation-preserving summary of orphan insights as strict JSON.
+
+        Notes
+        -----
+        - This function is part of the failure-handling pathway and is expected
+        to always yield a complete output.
+        - Abstraction and controlled loss of detail are acceptable and expected.
+        - The output is not a final synthesis, but a diagnostic representation
+        of content that could not be integrated under current schema constraints.
         """
         return(
             '# ROLE\n'
