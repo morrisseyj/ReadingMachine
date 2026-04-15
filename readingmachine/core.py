@@ -5751,7 +5751,7 @@ class Summarize:
                     orphan_batch_str = "\n".join([f"- {i}" for i in batch])
 
                     # Build LLM prompt
-                    sys_prompt = Prompts().integrate_orphans(max_length = 2800)
+                    sys_prompt = Prompts().integrate_orphans(max_length = 2500)
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
                         f"THEME LABEL: {theme_label}\n"
@@ -5789,7 +5789,7 @@ class Summarize:
                         fall_back=fall_back,
                         return_json=True,
                         json_schema=json_schema, 
-                        max_tokens=4000
+                        max_tokens=4096
                     )
 
                     # Update working summary with integrated content
