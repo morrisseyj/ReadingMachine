@@ -5591,6 +5591,96 @@ class Summarize:
         orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema
         return(orphans_df)
     
+    def summarize_failed_orphan_batch(self,
+                                      orphans: str,
+                                      question_text: str,
+                                      theme_label: str
+                                      ) -> str:
+        """
+        Summarize a batch of orphan insights that could not be fully integrated.
+
+        This method is invoked when orphan integration fails (typically due to
+        output truncation under capacity constraints). It compresses the failed
+        batch into a concise, structured summary so that the information can be
+        retained and passed downstream (e.g. for theme restructuring or schema
+        adjustment).
+
+        Unlike the integration step, this method prioritizes successful
+        completion over full fidelity. It allows abstraction, merging, and
+        omission of lower-importance detail in order to produce a complete,
+        non-truncated summary of the batch.
+
+        The summary is generated via a constrained LLM call that enforces a
+        strict JSON structure.
+
+        Parameters
+        ----------
+        orphans : str
+            Formatted string containing the orphan insights to be summarized.
+            Typically a bullet list of insight texts.
+
+        question_text : str
+            The research question providing context for interpretation.
+
+        theme_label : str
+            The theme label associated with the orphan batch.
+
+        Returns
+        -------
+        str
+            A concise summary of the orphan insights capturing their core claims
+            and major themes. If the LLM call fails or returns invalid output,
+            a fallback summary string is returned.
+
+        Notes
+        -----
+        - This function is part of the failure-handling pathway and is designed
+        to always return a usable output.
+        - Abstraction and controlled loss of detail are acceptable and expected.
+        - The output is intended for diagnostic and restructuring purposes,
+        not as a final thematic synthesis.
+        - JSON structure is strictly enforced to ensure reliable parsing.
+        """
+        sys_prompt = Prompts().summarize_failed_orphan_batch()
+        user_prompt = (
+            f"QUESTION:\n{question_text}\n\n"
+            f"THEME:\n{theme_label}\n\n"
+            f"ORPHANS:\n{orphans}\n\n"
+        )
+
+        json_schema = json_schema = {
+            "name": "failed_orphan_batch_summarizer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string"
+                    }
+                },
+                "required": ["summary"],
+                "additionalProperties": False
+            }
+        }
+
+        fall_back = {"summary": "No summary available."}
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema, 
+            max_tokens = 4096
+        )
+
+        response_summary = response["summary"]
+
+        return response_summary
+
+
     def _integrate_orphans(
             self,
             orphans_df: pd.DataFrame
@@ -5657,10 +5747,7 @@ class Summarize:
         total_batches_all_themes = 0
 
         # ---- Capacity parameters (tune once) ----
-        MODEL_INPUT_WORD_LIMIT = 25000   # practical integration limit (well below 128k hard cap)
-        PROMPT_OVERHEAD_WORDS = 800      # reserve space for instructions, schema, formatting
-        SAFETY_RATIO = 0.7               # avoid edge-of-window degradation / instability
-        EXPANSION_FACTOR = 1.3           # summary tends to grow when integrating new content
+        MODEL_INPUT_WORD_LIMIT = 28000   # practical integration limit (well below 128k hard cap)
         # ----------------------------------------
 
         # Packs as many insights as possible into a single batch without exceeding capacity
@@ -5718,26 +5805,11 @@ class Summarize:
                 batch_count = 0
                 total_orphans = len(remaining)
 
+                failed_batch_summaries = []
+
                 while remaining:
 
-                    # Estimate current summary size (drives remaining capacity)
-                    summary_words = len(updated_summary.split())
-
-                    # Inflate estimate to account for expansion during rewrite
-                    effective_summary_words = int(summary_words * EXPANSION_FACTOR)
-
-                    # Apply safety margin to avoid degraded attention near limits
-                    usable_words = int(MODEL_INPUT_WORD_LIMIT * SAFETY_RATIO)
-
-                    # Remaining capacity available for orphan insertion
-                    available_words = usable_words - effective_summary_words - PROMPT_OVERHEAD_WORDS
-
-                    # If summary is already large, force minimal progress instead of failing
-                    if available_words <= 0:
-                        available_words = 500  # ensures loop continues
-
-                    # Pack the largest possible batch of orphans into available space
-                    batch = pack_batch(remaining, available_words)
+                    batch = pack_batch(remaining, MODEL_INPUT_WORD_LIMIT)
 
                     # Edge case: single very long insight → force it through
                     if not batch:
@@ -5751,7 +5823,7 @@ class Summarize:
                     orphan_batch_str = "\n".join([f"- {i}" for i in batch])
 
                     # Build LLM prompt
-                    sys_prompt = Prompts().integrate_orphans(max_length = 2500)
+                    sys_prompt = Prompts().integrate_orphans()
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
                         f"THEME LABEL: {theme_label}\n"
@@ -5781,7 +5853,7 @@ class Summarize:
                     }
 
                     # Call LLM to integrate current batch into summary
-                    response = utils.call_chat_completion(
+                    response, error = utils.call_chat_completion(
                         sys_prompt=sys_prompt,
                         user_prompt=user_prompt,
                         llm_client=self.llm_client,
@@ -5789,11 +5861,32 @@ class Summarize:
                         fall_back=fall_back,
                         return_json=True,
                         json_schema=json_schema, 
-                        max_tokens=4096
+                        max_tokens=4096, 
+                        return_with_error=True
                     )
 
-                    # Update working summary with integrated content
-                    updated_summary = response.get("updated_summary", updated_summary)
+                    # if there is an error
+                    if error is not None or response["upated_summary"] == "":
+                        failed_batch_summary = self.summarize_failed_orphan_batch(
+                            orphans=orphan_batch_str,
+                            question_text=question_text,
+                            theme_label=theme_label
+                        )
+
+                        failed_batch_details = (
+                            f"failed batch summary {batch_count}\n"
+                            f"Reason for failure: {error if error else 'Returned empty summary'}\n\n"
+                            f"Summary of failed batch contents:\n{failed_batch_summary}\n\n"
+                        )
+
+                        failed_batch_summaries.append(failed_batch_details)
+                    
+                        updated_summary = updated_summary
+                    
+                    else:
+                                         
+                        # Update working summary with integrated content
+                        updated_summary = response.get("updated_summary", updated_summary)
 
                     # Remove processed insights from remaining obligation set
                     remaining = remaining[len(batch):]
@@ -5803,6 +5896,9 @@ class Summarize:
                     f"Theme {theme_id}: {total_orphans} orphans integrated in "
                     f"{batch_count} batches (avg {avg_batch_size:.1f} insights/batch)"
                 )
+
+                if failed_batch_summaries:
+                    updated_summary += "\n\n--- FAILED BATCH SUMMARIES ---\n\n" + "\n\n".join(failed_batch_summaries) + "\n\n" 
 
                 # Store final fully integrated summary for this theme
                 updated_row = pd.DataFrame([{

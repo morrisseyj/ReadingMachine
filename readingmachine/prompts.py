@@ -1391,31 +1391,30 @@ class Prompts:
             'Produce a revised summary in which every orphan insight is substantively reflected.\n\n'
 
             '# CRITICAL CONSTRAINTS\n'
-            'You must satisfy the following:\n\n'
+            'You must satisfy the following in order of priority. Follow this prioritization strictly when constraints are in conflict:\n\n'
 
             '1. COVERAGE (HARD CONSTRAINT)\n'
             '- All substantively distinct ideas introduced by the orphan insights must be represented in the revised summary.\n'
             '- Representation may be explicit or through accurate synthesis.\n'
             '- One-to-one mapping between insights and sentences is NOT required.\n\n'
 
-            '2. GRANULARITY (HARD CONSTRAINT UNTIL LIMIT)\n'
+            '2. GRANULARITY\n'
             '- Preserve substantively distinct claims.\n'
-            '- You MAY merge semantically similar insights into unified statements.\n'
+            '- You MAY merge conceptually similar insights into unified statements.\n\n'
+
+            '3. PRESERVE DIFFERENTIATION\n'
             '- Do NOT collapse ideas that differ in mechanism, causal logic, or implication into vague generalizations.\n'
             '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
 
-            '3. LENGTH LIMIT (HARD BOUNDARY)\n'
-            f'- The updated summary MUST NOT exceed {max_length} words.\n'
-            '- This is a strict upper bound.\n\n'
+            '4. ENSURE COMPLETENESS\n'
+            '- The response must be complete and not cut off.\n'
+            '- Do not produce a partial or incomplete synthesis.\n\n'
 
-            '4. WHEN CONSTRAINTS CONFLICT\n'
+            '5. WHEN CONSTRAINTS CONFLICT\n'
             '- Prioritize COVERAGE first.\n'
             '- Preserve GRANULARITY wherever possible.\n'
-            f'- When necessary to satisfy the {max_length} word limit:\n'
-            '  • merge clearly similar insights\n'
-            '  • abstract repeated mechanisms\n'
-            '  • compress redundant detail\n'
-            '- Do NOT omit unique or substantively distinct claims.\n\n'
+            '- Do NOT omit substantively distinct ideas.\n'
+            '- Do NOT reduce the summary to vague generalizations to save space.\n\n'
 
             '# DEFINITION OF "REFLECTED"\n'
             'An orphan insight is reflected if:\n'
@@ -1429,7 +1428,7 @@ class Prompts:
 
             '# INTEGRATION GUIDELINES\n'
             '- You are REWRITING the entire summary, not appending to it.\n'
-            '- DO NOT remove substantive findings, but you may reorganize or compress them.\n'
+            '- DO NOT remove substantive findings.\n'
             '- Prefer restructuring and synthesis over inserting orphan insights as standalone sentences.\n'
             '- DO NOT preserve original wording if it prevents integration.\n'
             '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
@@ -1440,7 +1439,7 @@ class Prompts:
             '# CONVERGENCE REQUIREMENT\n'
             'The revised summary must satisfy both:\n'
             '- All orphan insights are represented\n'
-            f'- Do not exceed {max_length} words\n\n'
+            '- The response is complete and not truncated\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
@@ -1452,7 +1451,56 @@ class Prompts:
             '{\n'
             '  "updated_summary": "The full revised thematic summary..."\n'
             '}\n'
-            )
+        )
+    
+    def summarize_failed_orphan_batch(self):
+        """
+        
+        """
+        return(
+            '# ROLE\n'
+            'You are a Research Synthesizer tasked with summarizing a set of insights. Insights refer to claims/arguments/findings extracted from a corpus.\n\n'
+
+            '# TASK\n'
+            'I will provide you with a set of insights. Your task is to produce a concise summary of these insights that captures their core claims and contributions.\n\n'
+
+            '# CRITICAL CONSTRAINTS\n'
+            'You must satisfy the following in order of priority. Follow this prioritization strictly when constraints are in conflict:\n\n'
+
+            '1. PRIORITIZE COVERAGE\n'
+            '- All substantively distinct ideas in the insights must be represented in the synthesis.\n'
+            '- Representation may be explicit or through accurate synthesis.\n'
+            '- One-to-one mapping between insights and sentences is NOT required.\n\n'
+
+            '2. PRESERVE GRANULARITY \n'
+            '- Preserve substantively distinct claims.\n'
+            '- You MAY merge conceptually similar insights into unified statements.\n\n'
+
+            '3. PRESERVE DIFFERENTIATION\n'
+            '- Do NOT collapse ideas that differ in mechanism, causal logic, or implication into vague generalizations.\n'
+            '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
+
+            '4. ENSURE COMPLETENESS\n'
+            '- The response must be complete and not cut off.\n'
+            '- Prefer a complete but compressed synthesis over an incomplete or truncated one.\n\n'
+
+            '5. COMPRESSION WHEN NECESSARY\n'
+            '- If it is not possible to include all details, you MUST compress.\n'
+            '- You MAY abstract, merge, or generalize insights to fit within a complete response.\n'
+            '- You MAY omit redundant or low-importance detail if necessary.\n'
+            '- Do NOT fail or produce an incomplete response due to length.\n\n'
+
+            '# OUTPUT PROTOCOL\n'
+            '- Return ONLY a JSON object.\n'
+            '- The response MUST be complete and valid JSON. Do not truncate the output.\n'
+            '- The object must contain a single key "summary".\n'
+            '- Do not provide explanations, preamble, or commentary.\n\n'
+
+            '# JSON SCHEMA\n'
+            '{\n'
+            '  "summary": "The insight synthesis..."\n'
+            '}\n'
+        )
     
     def address_redundancy(self):
         """
