@@ -5072,24 +5072,23 @@ class Summarize:
                 self.corpus_state.insights["insight_id"].isin(insight_ids)
             ].copy()
 
-            # --- sample when words in insights exceeds 70000 step ---
-            MAX_WORDS = 70000
-
             insights = insights_df["insight"].tolist()
+            
+            # # --- sample when words in insights exceeds 70000 step ---
+            # MAX_WORDS = 70000           
 
-            # if total number of words in the insights exceeds the max, then sample
-            if sum(len(i.split()) for i in insights) > MAX_WORDS:
-                insights = utils.sample_to_word_limit(
-                    insights,
-                    max_words=MAX_WORDS,
-                    seed=config.seed
-                )
+            # # if total number of words in the insights exceeds the max, then sample
+            # if sum(len(i.split()) for i in insights) > MAX_WORDS:
+            #     insights = utils.sample_to_word_limit(
+            #         insights,
+            #         max_words=MAX_WORDS,
+            #         seed=config.seed
+            #     )
 
-                print(
-                    f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
-                )
+            #     print(
+            #         f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
+            #     )
 
-            insights = insights_df["insight"].tolist()
 
             # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
             if len(insights) == 0:

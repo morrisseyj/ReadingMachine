@@ -1208,10 +1208,21 @@ class Prompts:
             "The synthesis must remain tightly bounded by this logic and read as a "
             "self-contained thematic section aligned to the overarching research question.\n\n"
 
-            "2. Full Insight Coverage (Non-Negotiable):\n"
-            "   Every distinct insight must be substantively represented. "
-            "Do not omit meaningfully different claims. "
-            "Do not collapse distinct ideas into overly generic umbrella statements.\n\n"
+            "2. Coverage with Abstraction (Non-Negotiable):\n\n"
+            "   All substantively distinct ideas present in the input insights must be represented in the synthesis.\n\n"
+            "However:\n"
+            "- You SHOULD consolidate semantically similar insights into unified statements.\n"
+            "- You SHOULD generalize where multiple insights express the same underlying claim.\n"
+            "- You SHOULD avoid one-to-one mapping between insights and sentences.\n\n"
+
+            "Prefer structured generalization over repetition:\n"
+            "- When multiple insights support the same mechanism or argument, express this as a single, well-formed claim.\n\n"
+
+            "You MUST NOT:\n"
+            "- omit substantively distinct claims\n"
+            "- collapse ideas that differ in mechanism, causal logic, or normative implication into a single generalized statement\n\n"
+
+            "The goal is full conceptual coverage with minimal redundancy, not surface-level reproduction.\n\n"
 
             "3. Salience Preservation:\n"
             "   Reflect the relative salience of insights within the theme. "
@@ -1276,7 +1287,7 @@ class Prompts:
             are reflected in the thematic summary and return the result
             as strict JSON.
         """
-        return(
+        return (
             '# ROLE\n'
             'You are a Research Auditor. Your task is to verify the groundedness of a thematic summary by mapping source insights to the text.\n\n'
 
@@ -1299,7 +1310,8 @@ class Prompts:
             'An insight is considered reflected if:\n'
             '- Its core claim, finding, or argument is clearly represented in the summary, even if expressed at a higher level of abstraction.\n'
             '- It meaningfully contributes to a synthesized claim in the summary, even if not individually distinguishable.\n'
-            '- It is incorporated as part of a broader grouping of similar insights, where the shared mechanism, relationship, or implication is clearly represented.\n\n'
+            '- It is incorporated as part of a broader grouping of similar insights, where the shared mechanism, relationship, or implication is clearly represented.\n'
+            '- The "core claim" refers to the central mechanism, relationship, or implication of the insight, not its exact phrasing or contextual detail.\n\n'
 
             'An insight is NOT reflected if:\n'
             '- The specific claim, finding, or argument is absent from the summary.\n'
@@ -1308,8 +1320,10 @@ class Prompts:
 
             '# IMPORTANT\n'
             '- Reflection requires substantive representation, not mere topic overlap.\n'
-            '- You may infer inclusion when a generalized or synthesized claim clearly captures the core mechanism or implication of the insight, even if not all details are explicitly stated.\n'
-            '- However, do not mark an insight as reflected if its specific contribution is plausibly omitted under the abstraction.\n\n'   
+            '- You may infer inclusion when a generalized or synthesized claim clearly captures the core mechanism or implication of the insight.\n'
+            '- Multiple insights may be reflected by a single synthesized statement if they share a common underlying mechanism, relationship, or implication.\n'
+            '- Do not mark an insight as reflected if its core contribution is missing.\n'
+            '- However, abstraction alone is not grounds for exclusion if the underlying mechanism, relationship, or implication is clearly preserved.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
@@ -1351,7 +1365,7 @@ class Prompts:
             System prompt instructing the model to integrate orphan insights
             into an updated thematic summary returned as strict JSON.
         """
-        return(
+        return (
             '# ROLE\n'
             'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected.\n\n'
 
@@ -1380,12 +1394,14 @@ class Prompts:
             'You must satisfy the following:\n\n'
 
             '1. COVERAGE (HARD CONSTRAINT)\n'
-            '- All orphan insights must be represented in the revised summary.\n'
-            '- Each insight must be reflected either explicitly or through accurate synthesis.\n\n'
+            '- All substantively distinct ideas introduced by the orphan insights must be represented in the revised summary.\n'
+            '- Representation may be explicit or through accurate synthesis.\n'
+            '- One-to-one mapping between insights and sentences is NOT required.\n\n'
 
             '2. GRANULARITY (HARD CONSTRAINT UNTIL LIMIT)\n'
-            '- Preserve distinct claims wherever possible.\n'
-            '- Do NOT merge substantively different insights into vague generalizations.\n'
+            '- Preserve substantively distinct claims.\n'
+            '- You MAY merge semantically similar insights into unified statements.\n'
+            '- Do NOT collapse ideas that differ in mechanism, causal logic, or implication into vague generalizations.\n'
             '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
 
             '3. LENGTH LIMIT (HARD BOUNDARY)\n'
@@ -1395,11 +1411,11 @@ class Prompts:
             '4. WHEN CONSTRAINTS CONFLICT\n'
             '- Prioritize COVERAGE first.\n'
             '- Preserve GRANULARITY wherever possible.\n'
-            f'- ONLY when necessary to satisfy the {max_length} word limit:\n'
-            '  • combine clearly similar insights\n'
+            f'- When necessary to satisfy the {max_length} word limit:\n'
+            '  • merge clearly similar insights\n'
             '  • abstract repeated mechanisms\n'
             '  • compress redundant detail\n'
-            '- Do NOT omit unique claims.\n\n'
+            '- Do NOT omit unique or substantively distinct claims.\n\n'
 
             '# DEFINITION OF "REFLECTED"\n'
             'An orphan insight is reflected if:\n'
@@ -1414,6 +1430,7 @@ class Prompts:
             '# INTEGRATION GUIDELINES\n'
             '- You are REWRITING the entire summary, not appending to it.\n'
             '- DO NOT remove substantive findings, but you may reorganize or compress them.\n'
+            '- Prefer restructuring and synthesis over inserting orphan insights as standalone sentences.\n'
             '- DO NOT preserve original wording if it prevents integration.\n'
             '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
             '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
@@ -1434,8 +1451,8 @@ class Prompts:
             '# JSON SCHEMA\n'
             '{\n'
             '  "updated_summary": "The full revised thematic summary..."\n'
-            '}'
-        )
+            '}\n'
+            )
     
     def address_redundancy(self):
         """
