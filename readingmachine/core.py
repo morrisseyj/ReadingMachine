@@ -5866,7 +5866,7 @@ class Summarize:
                     )
 
                     # if there is an error
-                    if error is not None or response["upated_summary"] == "":
+                    if error is not None or response["updated_summary"] == "":
                         failed_batch_summary = self.summarize_failed_orphan_batch(
                             orphans=orphan_batch_str,
                             question_text=question_text,
