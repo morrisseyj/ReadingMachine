@@ -135,22 +135,27 @@ def validate_format(
     
 
 def call_chat_completion(
-    llm_client, 
-    ai_model, 
-    sys_prompt, 
-    user_prompt, 
-    fall_back: Dict[str, Any], 
-    return_json: bool, 
-    json_schema=None,
-    max_tokens: int | None = None
-):
+    llm_client,
+    ai_model: str,
+    sys_prompt: str,
+    user_prompt: str,
+    fall_back: Dict[str, Any],
+    return_json: bool,
+    json_schema: Optional[dict] = None,
+    max_tokens: Optional[int] = None,
+    return_with_error: bool = False
+    ) -> Union[
+    str,
+    Dict[str, Any],
+    Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]
+    ]:
     """
     Standardized wrapper for chat completion calls.
 
     This function provides a consistent interface for interacting with
-    chat completion models throughout the codebase. It supports both
-    structured JSON responses and plain text outputs, and optionally
-    allows control over the maximum number of tokens generated.
+    chat completion models. It supports both structured JSON responses
+    and plain text outputs, optional schema enforcement, and optional
+    structured error reporting.
 
     The function centralizes:
 
@@ -175,7 +180,7 @@ def call_chat_completion(
 
     fall_back : Dict[str, Any]
         Default value returned if the LLM call fails or returns
-        invalid output (only used when return_json=True).
+        invalid JSON (only used when return_json=True).
 
     return_json : bool
         If True, the function attempts to parse the model response
@@ -188,39 +193,61 @@ def call_chat_completion(
 
     max_tokens : Optional[int], default=None
         Maximum number of tokens the model is allowed to generate.
-        If None, the API default is used. This parameter should be used
-        when strict output length control is required (e.g. to prevent
-        truncation or enforce bounded summaries).
+        If None, the API default is used.
+
+    return_with_error : bool, default=False
+        If True, the function returns a tuple of (result, error).
+        If False, only the result is returned (backward-compatible behavior).
 
     Returns
     -------
-    Union[str, Dict[str, Any]]
-        Parsed JSON object if `return_json=True`, otherwise the raw
-        text response string.
+    Union[str, Dict[str, Any], Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]]
+        - If return_with_error=False:
+            • str when return_json=False
+            • Dict[str, Any] when return_json=True
+        - If return_with_error=True:
+            • Tuple[result, error]
+                result : str or Dict[str, Any]
+                    The model output (or fallback on failure)
+                error : Optional[Dict[str, str]]
+                    None if successful, otherwise a dictionary describing the error
+
+    Error Structure
+    ---------------
+    When return_with_error=True, errors are returned as dictionaries:
+
+        {
+            "type": "<error_type>",
+            "message": "<human-readable message>"
+        }
+
+    Possible error types include:
+        • "api_error"   : Failure during API call or unexpected response structure
+        • "parse_error" : Failure to parse JSON response when return_json=True
 
     Notes
     -----
-    - If `return_json=True` and the model output cannot be parsed as valid JSON,
-    the function returns `fall_back`.
-    - If `return_json=False`, failures return an empty string.
-    - Setting `max_tokens` does not reduce the model's input capacity; it only
-    constrains output length and helps prevent incomplete or truncated responses.
-    - For tasks requiring strict output bounds (e.g. orphan integration),
-    it is recommended to set `max_tokens` slightly above the expected
-    output length to allow for formatting overhead.
+    - If return_json=True and parsing fails, `fall_back` is returned.
+    - If return_json=False and the API call fails, an empty string is returned.
+    - The function always computes both result and error internally, but only
+    exposes the error when `return_with_error=True`.
+    - Setting `max_tokens` constrains output length only; it does not affect
+    input token limits.
     """
-
+    # create the messages
     messages = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_prompt}
     ]
 
+    # Allocate the variabls for the API call to kwargs for cleaner handling of optional parameters
     kwargs = {
         "model": ai_model,
         "messages": messages,
         "temperature": 0
     }
 
+    # Conditionally add response format to kwargs based on return_json and json_schema
     if return_json:
         if json_schema is not None:
             kwargs["response_format"] = {
@@ -229,25 +256,51 @@ def call_chat_completion(
             }
         else:
             kwargs["response_format"] = {"type": "json_object"}
-
+    
+    # Conditionally add max_tokens to kwargs if provided
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
+    # Set both values to none and compute later
+    result: Union[str, Dict[str, Any], None] = None
+    error: Optional[Dict[str, str]] = None
+
+    # Pass api the kwargs
     try:
         response = llm_client.chat.completions.create(**kwargs)
-    except Exception as e:
-        print(f"Call to OpenAI failed. Error: {e}")
-        return fall_back if return_json else ""
+        content = response.choices[0].message.content
 
-    if return_json:
-        try:
-            parsed = json.loads(response.choices[0].message.content.strip())
-            return parsed
-        except Exception as e:
-            print(f"LLM failed to return valid JSON: {e}")
-            return fall_back
-    else:
-        return response.choices[0].message.content
+        # Check if call worked:
+        # LLM returned something
+        if content is None:
+            raise ValueError("Empty response content")
+
+        # LLM returned valid JSON (if expected)
+        if return_json:
+            try:
+                result = json.loads(content.strip())
+            except Exception as e:
+                result = fall_back
+                error = {
+                    "type": "parse_error",
+                    "message": f"Failed to parse JSON: {e}"
+                }
+        else:
+            result = content
+
+    # Api call failed and error was returned
+    except Exception as e:
+        result = fall_back if return_json else ""
+        error = {
+            "type": "api_error",
+            "message": str(e)
+        }
+
+    # Conditionally retrn output or output with error based on return_with_error flag
+    if return_with_error:
+        return result, error
+
+    return result
 
 def call_reasoning_model(
     prompt: str,
