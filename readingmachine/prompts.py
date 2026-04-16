@@ -842,57 +842,69 @@ class Prompts:
         )
     
     
-    def gen_theme_schema(self):
+    def gen_theme_schema_cluster_source(self):
         """
-        Generate the system prompt for thematic schema construction.
+        Generate the system prompt for initial thematic schema construction.
 
-        This prompt instructs the model to analyze clustered summaries
-        or previously generated theme outputs and construct a thematic
-        codebook describing the conceptual structure of the corpus.
+        This prompt instructs the model to transform semantically clustered
+        summaries into a conceptual codebook that defines the structure of the
+        corpus. The model identifies major themes, establishes conceptual
+        boundaries, and defines assignment rules for mapping insights to themes.
 
-        The model must:
-
-            • identify the dominant conceptual themes
-            • define clear semantic boundaries between themes
-            • optionally identify discursive conflicts between positions
-            • optionally define an "Other" category for residual ideas
+        The resulting codebook represents a shift from semantic grouping
+        (similarity in language or content) to conceptual organization
+        (coherent, interpretable categories aligned with the research question).
 
         Each theme must include:
-
             - theme_label
-            - theme_description
-            - instructions
+            - theme_description (conceptual "North Star")
+            - instructions (INCLUDE / EXCLUDE logic)
 
-        The instructions specify inclusion and exclusion rules for
-        assigning insights to themes.
+        Special themes:
+            - "Conflicts": captures incompatible positions using detection triggers
+            - "Other": captures residual concepts that do not warrant a standalone theme
 
-        The prompt explicitly prohibits the model from generating
-        numeric identifiers (`theme_id`). These identifiers are assigned
-        programmatically after schema generation.
+        The prompt also guides the model toward selecting an appropriate level of
+        abstraction:
+            - themes may contain multiple related concepts
+            - themes must preserve conceptual distinctions
+            - themes should not be overly broad or diffuse
 
         Returns
         -------
         str
-            System prompt instructing the LLM to produce a thematic schema
+            System prompt instructing the LLM to generate a thematic codebook
             in strict JSON format.
+
+        Notes
+        -----
+        - This is a generative step that defines the initial conceptual partition
+        of the corpus.
+        - The prompt does not consider downstream capacity constraints directly;
+        those are evaluated later during synthesis and integration.
+        - The resulting schema is expected to be iteratively refined based on
+        integration failures.
         """
 
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
             "Your task is to analyze the provided text and design a 'Thematic Codebook' "
-            "that maps the semantic landscape while ensuring total coverage of the ideas expressed.\n"
-            "The text provided is either a semantically clustered set of insights or the output of a prior theme population exercise.\n\n"
+            "that maps the conceptual landscape while ensuring total coverage of the ideas expressed.\n"
+            "The text provided is the result of a semantic clustering process, where the core data has been synthesized into cluster summaries. "
+            "A central task for you is transforming this map of semantic density to one of conceptual density.\n\n"
 
             "## THE TASK\n"
             "1. **Identify Major Themes:** Determine the recurring, dominant topics. "
-            "Themes must be conceptually exclusive—each should represent a distinct semantic territory.\n\n"
+            "Themes must have clearly defined conceptual boundaries, even though a single data point may be assigned to multiple themes.\n\n"
 
             "2. **Identify Discursive Conflicts (Conditional):** "
             "If and only if the text contains substantively incompatible interpretations, "
             "claims, or prescriptions that cannot be jointly maintained within a single "
             "coherent analytical frame, create a theme object where \"theme_label\" is exactly \"Conflicts\".\n\n"
+
             "Do NOT paraphrase or rename this label. Use exactly \"Conflicts\".\n\n"
+
             "Do NOT create a Conflicts theme if the text merely:\n"
             "- Presents multiple reinforcing critiques,\n"
             "- Describes layered constraints or complexities,\n"
@@ -902,7 +914,7 @@ class Prompts:
             "If no such incompatibility exists, omit this theme entirely.\n\n"
 
             "3. **Identify 'Other' Category (Conditional):** "
-            "If necessary to ensure full semantic coverage without inducing theme bloat, "
+            "If necessary to ensure full conceptual coverage without inducing theme bloat, "
             "create a theme object where the field \"theme_label\" is exactly \"Other\".\n"
             "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n"
             "If no minority or residual concepts exist, omit this theme entirely.\n\n"
@@ -912,6 +924,19 @@ class Prompts:
             "   - For Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
             "   - For Conflicts: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
 
+            "## IDEAL CODEBOOK PROPERTIES\n"
+            "An effective thematic codebook will:\n\n"
+            "- Define themes that are internally conceptually coherent\n"
+            "- Ensure clear conceptual boundaries between themes\n"
+            "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
+            "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
+            "- Minimize reliance on the 'Other' category\n\n"
+
+            "Themes should represent stable conceptual categories that can accommodate their assigned content without requiring excessive compression or loss of conceptual granularity.\n\n"
+            "Themes should be articulated at a suitable level of abstraction to provide clear insight into the research question.\n\n"
+            "A theme may encompass multiple related concepts, provided they can be expressed coherently without collapsing meaningful distinctions.\n\n"
+            "Themes should not be so broad that they require excessively long or diffuse descriptions to explain their scope.\n\n"
+            
             "## INPUT\n"
             "RESEARCH QUESTION: <question_text>\n"
             "TEXT TO ANALYZE: <text_content>\n\n"
@@ -932,7 +957,7 @@ class Prompts:
             "## ARCHITECTURAL CONSTRAINTS\n"
             "- **Structural Identity:** Do NOT generate numeric identifiers. "
             "theme_id values will be assigned programmatically outside this step. "
-            "Focus only on semantic design (theme_label, theme_description, instructions).\n"
+            "Focus only on conceptual design (theme_label, theme_description, instructions).\n"
             "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
             "This provides the conceptual narrative for the theme and serves as the North Star logic "
             "for downstream tagging and summary population.\n"
@@ -957,8 +982,61 @@ class Prompts:
             "- **Theme Optimization:** You have full authority to merge, split, or revise themes to best serve the research question. "
             "You are not tethered to the original structure of the provided text."
         )
-    
+
+
     def gen_theme_schema_orphan_source(self):
+        """
+        Generate the system prompt for iterative refinement of a thematic schema.
+
+        This prompt instructs the model to revise an existing thematic codebook
+        based on the results of a synthesis and completeness-checking process.
+        It uses both successful and failed theme summaries to diagnose structural
+        issues and improve conceptual alignment.
+
+        The model receives:
+            - the current codebook
+            - theme-level summaries
+            - pass/fail completeness indicators
+            - summaries of content that could not be integrated ("FAILED BATCH SUMMARIES")
+            - summary lengths as a proxy for representational load
+
+        Failures are interpreted as signals of conceptual overload:
+            - the theme contains more distinct ideas than can be represented
+            without loss of granularity under length constraints
+
+        The model must refine the schema by:
+            - splitting overloaded themes
+            - tightening or expanding inclusion boundaries
+            - reallocating content where appropriate
+            - introducing new themes when necessary
+
+        The goal is to produce a stable conceptual partition that:
+            - maintains internal coherence
+            - has clear boundaries between themes
+            - supports full coverage of the data
+            - avoids excessive reliance on "Other"
+            - avoids over-expansion of already dense themes
+
+        A convergence flag is required:
+            - "no_change": true if no clear improvements are needed
+            - "no_change": false if any structural modification is made
+
+        Returns
+        -------
+        str
+            System prompt instructing the LLM to return an updated thematic
+            codebook and convergence flag in strict JSON format.
+
+        Notes
+        -----
+        - This is a corrective step that operates on an existing conceptual schema.
+        - It uses integration failures as a structural diagnostic, not as
+        classification errors.
+        - The prompt enforces conservative updates: changes should only be made
+        when clearly justified by the input.
+        - This step is part of an iterative loop that converges toward a stable,
+        capacity-compatible schema.
+        """
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
@@ -1019,6 +1097,8 @@ class Prompts:
             "- A completeness check for each theme (Pass / Fail)\n"
             "- The current length of the summaries (in words)\n\n"
 
+            "Avoid expanding themes in ways that make them overly broad or conceptually diffuse..\n\n"
+
             "The maximum output length of the system is approximately 4096 tokens, which corresponds to roughly 2500 words.\n\n"
 
             "Use the current summary length (in words) as a proxy for how close the theme is to this limit.\n\n"
@@ -1048,8 +1128,8 @@ class Prompts:
             "Use failures and edge cases to refine conceptual structure:\n\n"
 
             "- If a theme cannot accommodate its content without loss of conceptual clarity:\n"
-            "- If the content reflects multiple distinct conceptual dimensions → split the theme\n"
-            "- If the content aligns with another theme but is excluded by overly narrow rules → expand that theme or reallocate\n"
+            "   - If the content reflects multiple distinct conceptual dimensions → split the theme\n"
+            "   - If the content aligns with another theme but is excluded by overly narrow rules → expand that theme or reallocate\n"
             "- If similar concepts appear across multiple themes → refine INCLUDE/EXCLUDE rules to sharpen boundaries\n"
             "- If failed content introduces a coherent but unsupported concept → create a new theme\n"
             "- If failed content fits an existing conceptual territory but is excluded by overly narrow rules → expand that theme\n"
