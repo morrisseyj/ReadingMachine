@@ -957,7 +957,135 @@ class Prompts:
             "- **Theme Optimization:** You have full authority to merge, split, or revise themes to best serve the research question. "
             "You are not tethered to the original structure of the provided text."
         )
-       
+    
+    def gen_theme_schema_orphan_source(self):
+        return(
+            "## ROLE\n"
+            "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
+            "Your task is to refine an existing Thematic Codebook so that it maintains strong conceptual coherence "
+            "and accurately partitions the conceptual landscape of the data.\n\n"
+
+            "## CODEBOOK STRUCTURE\n"
+            "Each theme defines a conceptual territory using:\n"
+            "- theme_label\n"
+            "- theme_description (the North Star logic)\n"
+            "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+
+            "## SPECIAL THEMES\n\n"
+
+            "**Conflicts Theme (Conditional)**\n"
+            "Create a theme where \"theme_label\" is exactly \"Conflicts\" ONLY if the data contains "
+            "substantively incompatible interpretations, claims, or prescriptions that cannot be "
+            "maintained within a single coherent conceptual frame.\n\n"
+
+            "Do NOT paraphrase or rename this label. Use exactly \"Conflicts\".\n\n"
+
+            "Do NOT create a Conflicts theme if the material merely:\n"
+            "- Presents reinforcing critiques\n"
+            "- Describes layered constraints or interacting factors\n"
+            "- Articulates trade-offs within a shared conceptual frame\n"
+            "- Expresses variation in emphasis without incompatible positions\n\n"
+
+            "A Conflicts theme requires identifiable polarity between positions.\n\n"
+
+            "Instructions must use DETECTION TRIGGERS (not INCLUDE/EXCLUDE), and must:\n"
+            "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
+            "- Preserve opposing positions as distinct\n"
+            "- Avoid harmonizing or resolving disagreement\n\n"
+
+            "**'Other' Theme (Conditional)**\n"
+            "Create a theme where \"theme_label\" is exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
+            "without fragmenting the schema into excessively fine-grained themes.\n\n"
+
+            "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+
+            "The 'Other' theme should:\n"
+            "- Capture valid but low-frequency or residual concepts\n"
+            "- Not contain a coherent or dominant conceptual grouping\n"
+            "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+
+            "If no residual concepts exist, omit this theme entirely.\n\n"
+
+            "## INCLUDE/EXCLUDE LOGIC\n"
+            "All themes must define precise instructions:\n"
+            "- Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
+            "- Conflicts: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+            "## INTERPRETING THE INPUT\n"
+            "You will receive:\n"
+            "- The research question\n"
+            "- A previous thematic codebook\n"
+            "- Theme-level summaries generated from that codebook\n"
+            "- A completeness check for each theme (Pass / Fail)\n"
+            "- The current length of the summaries (in words)\n\n"
+
+            "The maximum output length of the system is approximately 4096 tokens, which corresponds to roughly 2500 words.\n\n"
+
+            "Use the current summary length (in words) as a proxy for how close the theme is to this limit.\n\n"
+
+            "- Summaries approaching this length are near capacity\n"
+            "- Themes near capacity should not be expanded, as this will increase conceptual density and thereby increase the likelihood of future failure.\n\n"
+
+            "Themes marked as failed indicate that their assigned insights could not be integrated without "
+            "loss of conceptual granularity or excessive compression.\n\n"
+
+            "Failed themes include 'FAILED BATCH SUMMARIES', which represent content previously assigned to the theme "
+            "but that could not be accommodated under the current theme definition.\n\n"
+
+            "These signals indicate that the theme contains more conceptual diversity than can be represented while maintaining granularity under length constraints.\n\n"
+
+            "## UPDATE PRINCIPLES\n"
+            "Revise the codebook to improve conceptual coherence and structural alignment.\n\n"
+
+            "When updating the codebook, prioritize:\n"
+            "1. Conceptual coherence within each theme\n"
+            "2. Clear conceptual boundaries between themes\n"
+            "3. Complete conceptual coverage of the data\n"
+            "4. Minimizing reliance on the 'Other' category\n"
+            "5. Minimizing the number of themes only if the above are satisfied\n\n"
+
+            "## HOW TO USE FAILURE SIGNALS\n"
+            "Use failures and edge cases to refine conceptual structure:\n\n"
+
+            "- If a theme cannot accommodate its content without loss of conceptual clarity:\n"
+            "- If the content reflects multiple distinct conceptual dimensions → split the theme\n"
+            "- If the content aligns with another theme but is excluded by overly narrow rules → expand that theme or reallocate\n"
+            "- If similar concepts appear across multiple themes → refine INCLUDE/EXCLUDE rules to sharpen boundaries\n"
+            "- If failed content introduces a coherent but unsupported concept → create a new theme\n"
+            "- If failed content fits an existing conceptual territory but is excluded by overly narrow rules → expand that theme\n"
+            "- If failed content is already conceptually represented → tighten definitions rather than expanding them\n\n"
+
+            "Use both passing and failing themes to improve conceptual structure.\n\n"
+
+            "## CONVERGENCE CONDITION\n"
+            "You must always include a field \"no_change\" in your output.\n\n"
+            "- Set \"no_change\": false only if there is clear evidence that the schema should be modified.\n"
+            "- Set \"no_change\": true if:\n"
+            "   - all themes pass the completeness check, and\n"
+            "   - there are no obvious issues with conceptual coherence, boundary clarity, or redundancy\n\n"
+            "Do NOT make speculative or marginal improvements. Only modify the schema when the need for change is clearly indicated by the input.\n\n"
+            
+            "## OUTPUT FORMAT (STRICT JSON)\n"
+            "{\n"
+            "  \"themes\": [\n"
+            "    {\n"
+            "      \"theme_label\": <string>,\n"
+            "      \"theme_description\": <string>,\n"
+            "      \"instructions\": <string>\n"
+            "    }\n"
+            "  ],\n"
+            "  \"no_change\": <boolean>\n"
+            "}\n\n"
+
+            "## CONSTRAINTS\n"
+            "- Do NOT generate numeric theme identifiers\n"
+            "- Themes must define distinct conceptual territories\n"
+            "- INCLUDE/EXCLUDE/TRIGGER rules must prevent conceptual overlap\n"
+            "- The Conflicts theme must preserve conceptual polarity\n"
+            "- The Other theme must remain a residual category\n"
+            "- The final codebook must support full assignment without loss of conceptual granularity\n"
+            "- You may merge, split, or redefine themes as needed\n"
+        )
     
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
         """
