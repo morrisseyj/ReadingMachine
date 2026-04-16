@@ -941,7 +941,7 @@ class Prompts:
             "RESEARCH QUESTION: <question_text>\n"
             "TEXT TO ANALYZE: <text_content>\n\n"
 
-            "## OUTPUT FORMAT (STRICT JSON)\n"
+            ## OUTPUT FORMAT (STRICT JSON)\n"
             "Return a JSON object with a single key 'themes' containing an array of objects. "
             "All identified categories must follow this structure exactly:\n"
             "{\n"
@@ -951,10 +951,13 @@ class Prompts:
             "      \"theme_description\": <string>,\n"
             "      \"instructions\": <string>\n"
             "    }\n"
-            "  ]\n"
+            "  ],\n"
+            "   \"no_change\": false\n"
             "}\n\n"
 
             "## ARCHITECTURAL CONSTRAINTS\n"
+            "The \"no_change\" field must always be present and must always be set to false.\n"
+            "Do not omit this field and do not set it to true.\n"
             "- **Structural Identity:** Do NOT generate numeric identifiers. "
             "theme_id values will be assigned programmatically outside this step. "
             "Focus only on conceptual design (theme_label, theme_description, instructions).\n"
