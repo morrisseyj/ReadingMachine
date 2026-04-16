@@ -1118,7 +1118,10 @@ class Prompts:
             "These signals indicate that the theme contains more conceptual diversity than can be represented while maintaining granularity under length constraints.\n\n"
 
             "## UPDATE PRINCIPLES\n"
-            "Revise the codebook to improve conceptual coherence and structural alignment.\n\n"
+            "Revise the codebook to improve conceptual coherence and structural alignment.\n"
+            "Themes that cannot pass completeness checks should be revised or split.\n"
+            "Themes that fail the completeness check **must** be revised, however you may merge, split, or redefine any themes as needed.\n"
+            "Use both passing and failing themes to improve conceptual structure.\n\n"
 
             "When updating the codebook, prioritize:\n"
             "1. Conceptual coherence within each theme\n"
@@ -1138,14 +1141,17 @@ class Prompts:
             "- If failed content fits an existing conceptual territory but is excluded by overly narrow rules → expand that theme\n"
             "- If failed content is already conceptually represented → tighten definitions rather than expanding them\n\n"
 
-            "Use both passing and failing themes to improve conceptual structure.\n\n"
-
             "## CONVERGENCE CONDITION\n"
             "You must always include a field \"no_change\" in your output.\n\n"
-            "- Set \"no_change\": false only if there is clear evidence that the schema should be modified.\n"
-            "- Set \"no_change\": true if:\n"
-            "   - all themes pass the completeness check, and\n"
-            "   - there are no obvious issues with conceptual coherence, boundary clarity, or redundancy\n\n"
+            "HARD RULE:\n"
+            "- If any theme has \"completeness_check\": \"fail\", you MUST set \"no_change\": false.\n\n"
+
+            "- Set \"no_change\": true ONLY if:\n"
+            "   - all themes pass the completeness check, AND\n"
+            "   - there are no obvious issues with conceptual coherence, boundary clarity, or redundancy.\n"
+
+            "Do NOT set \"no_change\": true if any theme has failed the completeness check.\n"
+
             "Do NOT make speculative or marginal improvements. Only modify the schema when the need for change is clearly indicated by the input.\n\n"
             
             "## OUTPUT FORMAT (STRICT JSON)\n"
@@ -1167,7 +1173,6 @@ class Prompts:
             "- The Conflict theme must preserve conceptual polarity\n"
             "- The Other theme must remain a residual category\n"
             "- The final codebook must support full assignment without loss of conceptual granularity\n"
-            "- You may merge, split, or redefine themes as needed\n"
         )
     
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):

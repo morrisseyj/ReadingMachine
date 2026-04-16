@@ -30,7 +30,7 @@ This reframing has several implications. First, the marginal cost of reading—b
 
 This white paper introduces ReadingMachine as both a technical framework and a methodological intervention. It outlines the architectural design of the system, the analytical assumptions it encodes, and the trade-offs it makes in shifting from selective, human-limited synthesis toward structured, inspectable corpus mapping. More broadly, it situates the approach within an information landscape where the central challenge is no longer producing knowledge, but ensuring that it can be systematically read, organized, and understood at scale.
 
-ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations. The properties described in this paper—such as improved coverage, omission detection, and traceability—should be understood as design objectives and observed behaviors in a single large-scale run, rather than as formally validated performance characteristics.
+ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations. The properties described in this paper—such as improved coverage, omission detection, and traceability—should be understood as design objectives and observed behaviors in a single large-scale run, rather than as formally validated performance characteristics. Support on evaluation and testing of the tool is actively encouraged.
 
 ## 2. The Problem
 
@@ -50,11 +50,11 @@ The result is a persistent gap between what is written and what is systematicall
 
 ## 3. ReadingMachine: Structured Corpus Reading
 
-To address these limitations, ReadingMachine proposes a different approach to large-scale corpus analysis. Rather than retrieving subsets of documents or compressing texts through successive summaries, the system performs a structured reading pass across the entire corpus, extracting and organizing atomic insights prior to synthesis.
+To address these limitations, ReadingMachine proposes a different approach to large-scale corpus analysis. Rather than retrieving subsets of documents or compressing texts through successive summaries, the system performs a structured reading pass across the **entire** corpus, extracting and organizing atomic insights prior to synthesis.
 
-The core design principle is to separate reading from interpretation. This distinction is important. Many contemporary applications treat language models as general-purpose reasoning systems, capable of synthesizing and evaluating complex bodies of information in a single pass. ReadingMachine adopts a different approach: it decomposes the act of reading into bounded, inspectable tasks—such as insight extraction, semantic clustering, and theme formation. This constrains the model to perform narrowly defined reading tasks over bounded inputs, and defers interpretation, evaluation, and judgment to the researcher or downstream analysis. The system is therefore not designed to “reason over” a corpus, or to determine which claims are correct, important or true in a corpus, but to produce a structured representation of what the corpus contains. At the same time, this approach preserves traceability between synthesized outputs and their source material.
+The core design principle is to separate reading from interpretation. This distinction is important. Many contemporary applications treat language models as general-purpose reasoning systems, capable of synthesizing and evaluating complex bodies of information in a single pass. ReadingMachine adopts a different approach: it decomposes the act of reading into bounded, inspectable tasks—such as insight extraction, semantic cluster summarization, and theme formation. This constrains the model to perform narrowly defined reading tasks over bounded inputs, and defers interpretation, evaluation, and judgment to the researcher or downstream analysis. The system is therefore not designed to “reason over” a corpus, or to determine which claims are correct, important or true in a corpus, but to produce a structured representation of what the corpus contains. At the same time, this approach preserves traceability between synthesized outputs and their source material.
 
-The architecture also implements explicit mechanisms to ensure coverage and to preserve conflict during synthesis. This structure is intended to reduce omission, delay compression (i.e., maintain granularity), and make the analytical process inspectable and reproducible.
+The architecture also implements explicit mechanisms to ensure coverage and to preserve conflict during synthesis. This structure is intended to reduce omission, maintain granularity, and make the analytical process inspectable and reproducible.
 
 ## 3. Methodology
 
@@ -66,7 +66,7 @@ Conceptually, the methodology formalizes a familiar qualitative research workflo
 
 reading a corpus → extracting notes → identifying themes → synthesizing those themes → checking for completeness → refining for clarity
 
-ReadingMachine decomposes this process into a more granular and structured sequence of steps. Each step isolates a specific analytical function—such as insight extraction, clustering, or thematic synthesis—so that transformations remain inspectable and omission can be detected and corrected. It should be noted that the system does not eliminate interpretive bias; rather, it externalizes and structures it, making it available for inspection and comparison across runs. The pipeline separates reading into bounded transformations, followed by iterative refinement at the level of themes.
+ReadingMachine decomposes this process into a more granular and structured sequence of steps. Each step isolates a specific analytical function—such as insight extraction, clustering, or thematic synthesis—so that transformations remain inspectable and omission can be detected and corrected. It should be noted that the system does not eliminate interpretive bias; rather, it limits that bias to that which is neccesary for reading while it externalizes and structures other interpretative acts, making them available for inspection and comparison across runs.
 
 Thus the qualitative research workflow is implemented computationally via the following pipeline (each step is described in detail below):
 
@@ -108,11 +108,9 @@ Thus the qualitative research workflow is implemented computationally via the fo
 		↓  
 [Address Redundancy (Optional)]  
 		↓  
-[Generate Title, Executive Summary,  
-Question Summaries (Optional)]  
+[Generate Title, Executive Summary, Question Summaries (Optional)]  
 		↓  
 [Render Output]  
-
 
 Because the pipeline consists of a sequence of computational calls to language models, its behavior is determined by the analytical specification encoded within it. This includes the definition of insights, extraction instructions, clustering parameters, and theme construction rules. These components are fixed, inspectable, and version-controlled. As with any formal method, they shape the resulting synthesis. ReadingMachine makes these assumptions explicit and available for inspection, rather than embedding them implicitly within a single opaque step. The full pipeline is described below.
 
@@ -124,7 +122,7 @@ Prior to processing the corpus, the user defines a set of research questions tha
 
 Documents are ingested into the system, with the current implementation supporting PDF and HTML formats. During ingestion, basic metadata (e.g., title, author, year) is extracted using a language model.
 
-The corpus is then divided into smaller semantic units through a chunking process. Chunking uses a greedy, size-constrained strategy to produce segments of approximately fixed length (e.g., ~3500 characters), ensuring consistent coverage of the source text. Within each segment, the splitter preferentially backtracks to the nearest paragraph break, sentence boundary, or whitespace to avoid arbitrary truncation where possible. However, preserving strict size constraints takes priority over perfect semantic boundaries.
+The corpus is then divided into smaller semantic units through a chunking process. Chunking uses a greedy, size-constrained strategy to produce segments of approximately fixed length (e.g., ~3500 characters), ensuring consistent coverage of the source text. Within each segment, the splitter preferentially backtracks to the nearest paragraph break, sentence boundary, or whitespace to avoid arbitrary truncation where possible. Preserving strict size constraints takes priority over perfect semantic boundaries.
 
 ### 3.3 Generate Insights
 
@@ -162,9 +160,9 @@ First, each cluster of insights is summarized. Clusters are processed in an orde
 
 The result is a sequence of cluster summaries that forms a structured narrative of the corpus, organized by semantic proximity and with reduced repetition. This narrative serves as the input for theme generation, allowing the model to operate over an ordered representation of the corpus rather than a disorganized set of individual insights.
 
-Second, the cluster summary narrative is passed to a language model to generate a theme schema. This schema defines a set of thematic categories (theme label and theme description), along with rules for assigning insights to each theme. The schema includes an Other category to capture minority insights that do not warrant a dedicated theme, preventing unnecessary proliferation of categories. This category is distinct from clustering outliers; outlier insights may be assigned to any theme based on their content.
+Second, the cluster summary narrative is passed to a language model to generate a theme schema. This schema defines a set of thematic categories (theme label and theme description), along with rules for assigning insights to each theme. The schema includes an *Other* category to capture minority insights that do not warrant a dedicated theme, preventing unnecessary proliferation of categories. This category is distinct from clustering outliers; outlier insights may be assigned to any theme based on their content.
 
-The schema also includes a Conflicts category when substantively incompatible claims are present. This is introduced explicitly to counter the tendency of language models to smooth disagreement during summarization and to preserve contested areas of the corpus. Conflict is defined in the prompt as:
+The schema also includes a *Conflicts* category when substantively incompatible claims are present. This is introduced explicitly to counter the tendency of language models to smooth disagreement during summarization and to preserve contested areas of the corpus. Conflict is defined in the prompt as:
 
 > "claims, or prescriptions that cannot be jointly maintained within a single coherent analytical frame. [Conflicts are not]: multiple reinforcing critiques, layered constraints or complexities, [the articulation of] trade-offs within a shared analytical orientation, [expressions of] variations that do not represent incompatible positions. Conflicts … [require] identifiable polarity between positions"
 
@@ -176,21 +174,15 @@ Once a theme schema has been defined, insights are assigned to themes. Insights 
 
 After all insights have been mapped, each theme—now represented as a theme label, theme description, and collection of associated insights—is passed to the language model for summarization. Because synthesis operates directly over structured insight sets rather than full documents or intermediate summaries, compression occurs at a late stage in the pipeline. Each theme is generated independently, using only the insights assigned to it, which allows the model to focus on a bounded and conceptually coherent subset of the corpus during each synthesis step.
 
-Note, in cases where there are large numbers of insights mapped to a theme, the model was found to fail and return an empty result. To account for this once more than 400 insights occur in a theme the insights are sampled across clusters before summarization. This drops insights from the summary (i.e omission), this is handled in the process of orphan detection and reintegration (see below). For now sampling allows the theme to be articulated in such a way that orphan integration is plausible.
-
 It is worth noting that compression does occur at multiple stages of the pipeline, prior to summarization: during clustering (dimensionality reduction) and schema generation. However, these compressive acts are used to organize the insight space. They are not destructive compressive acts in that they do not replace or discard the underlying insight set. Irreversible compression occurs only at the point of theme-level synthesis, which operates directly over the full set of assigned insights, and even then raw insights are reinserted in the orphan handling loop—see below.
 
 ### 3.7 Orphan Handling
 
-To reduce omission risk, the pipeline explicitly identifies and reintegrates orphan insights. Orphans **are NOT clustering outliers or insights assigned to the Other category**. Rather, they are insights that were mapped to a theme but do not appear in that theme’s synthesized summary. As such, they represent omissions introduced during the synthesis stage.
+To reduce omission risk, the pipeline explicitly identifies and reintegrates orphan insights. Orphans **are NOT clustering outliers or insights assigned to the Other category**. Rather, they are insights that were mapped to a theme but do not appear in that theme’s synthesized summary. As such, they represent omissions introduced during the theme synthesis stage.
 
-Orphan detection is performed by comparing the set of insights assigned to each theme with the content of the corresponding theme summary. Insights are processed in batches alongside the summary, and the language model is instructed to identify which insights are substantively represented. Any assigned insights not identified in this process are classified as orphans.
+Orphan detection is performed by comparing the set of insights assigned to each theme with the content of the corresponding theme summary. Insights are processed in batches alongside the summary, and the language model is instructed to identify which insights are substantively represented. Any assigned insights not identified in this process are classified as orphans. The Orphan identification prompt is intentionally strict to drive false positives, as a guard against omission.
 
-Once identified, orphan insights are reintroduced, with orphans and the current theme passed to a language model with instructions to insert them into the existing theme, and return a full re-write. To ensure that orphans integration is effective it is important that the number of orphans being inserted does not overwhelm the conext window. To handle this orphan integration is batched, to not exceed 25000 words for any one pass. This number could be tunable in the future but the aim is to balance model attention with compute cost - as each batch produces a full re-write of the theme and output tokens are costly. 
-
-It should be noted that in cases where there are a large number of orphans being inserted (orphan detection is strict as a means to limit omission), inserting them into an already long theme can cause the model to fail as output token limits are reached. To address this, the model is instructed to maintainin granularity during insight insertion, up until the output limit is reached. At this point it is permitted to start compressing the orphan insights in order to ensure the output limit is respected. This begins to lose granularity in the output, but it is a hard limit on the pipeline, where granularity preservations is bumping up against model output limits. 
-
-Orphan handling therefore is a mechanism for pursuing coverage at the theme level, with maximum granularity prusued until model output limits are reached. This serves to reduce the likelihood of silent omission during synthesis. Orphan insertion also plays a central role in theme iteration (see below)
+Once identified, orphan insights are reintroduced, with orphans and the current theme passed to a language model with instructions to insert them into the existing theme, and return a full re-write. Orphan handling therefore is a mechanism for pursuing coverage at the theme level. This serves to reduce the likelihood of silent omission during synthesis. Orphan insertion also plays a central role in theme iteration (see below)
 
 ### 3.8 Theme Iteration
 
@@ -198,7 +190,7 @@ The initial theme schema is generated from cluster summaries, which introduces a
 
 To address this, the pipeline regenerates the theme schema using the current theme summaries as input. This second pass operates over a representation that now includes all insights, allowing the model to refine, split, or reorganize themes to better reflect the underlying material. Following schema regeneration, insights are remapped to themes, summaries are regenerated, and orphan handling is applied again.
 
-This theme generation → mapping → orphan handling loop can be repeated iteratively. In practice, two passes are recommended: an initial pass to establish the thematic structure, and a second pass to refine it using a fully populated insight set. The final step of the pipeline always concludes with an orphan handling pass to enforce coverage at the maximum level of granulatiy possible given the models output limits.
+This theme generation → mapping → orphan handling loop can be repeated iteratively. In practice, two passes are recommended: an initial pass to establish the thematic structure, and a second pass to refine it using a fully populated insight set. The final step of the pipeline always concludes with an orphan handling pass to enforce coverage at the maximum level of granulatiy possible given the model's output limits.
 
 Future iterations of the system may include quantitative measures of theme stabilization—such as changes in theme structure, insight allocation, and orphan counts—to guide stopping conditions. At present, iteration is user-controlled and guided only by heuristics.
 
@@ -220,9 +212,36 @@ As with the redundancy pass, this step introduces a trade-off. While it improves
 
 The final output can be rendered as a PDF, markdown, or Word document.
 
-## 4. Results
+## 4. Scaling the methodology
 
-### 4.1 Evaluation Status
+The hard scaling limit for any LLM is the context window, comprising of the input and output windows. There are further soft scaling limits regarding attention degradation, and missing middle effects which appear when the context window is large or contains complex content. The above methodology accounts primarily for soft failings by constraning the load on the context window: bind the reading requirements, batch insights for mapping, actively identify and reinsert orphans, re-theme iteratively. 
+
+However there are moments when the above method still encounters the hard limits of the LLM, which occured during the run of a real large, diverse corpus. Specifically: 
+- too many insights passed to the LLM during cluster summary (input window limit exceeded)
+- too many orphans passed to the LLM during orphan reinsertion (input window limit exceeded)
+- the requirments to i) represent all orphans and ii) maintain granularity of insights during orphan insertion causes the model to overrun the output window, and truncate the output (output window limit exceeded)
+
+All of these are catastrophic to the method: if the cluster summaries cannot all be included in the summaries that drive the theme schema generation, the schema is partial, which explodes orphans. Handling orphans then overwhelms the input and output windows and the partial themes from the partial schema cannot be updated. Effectively all the architecture attacking omission and granularity are foregone. To address this the following steps were implemented. 
+
+### 4.1 Too many insights per cluster
+
+To address the issue of clusters containing too many insights for the model to summarize, the approach was to develop a secondary density seeded partitionning method and use it to break up any clusers, including outliers that were too large for the context window. Specifically the clustering steps were to use UMAP and HDBSCAN as described above. For any clusters of a size greater than a set threshold (k):
+1. Calculate the total number of partions (ceil(cluster size/threshold))
+2. Use HDBSCAN to identify the single densest point in the data and place the seed there
+3. Identify all nearest neighbors up to neighbor k
+4. Repeat steps 2 and 3 until all the partitions have been created
+5. Put all the points back in the pool, along with the seeds
+6. Use a round-robin approach to allocate the nearest neighbor to each seed to that partition (removing the data point once allocated)
+7. Run until all data points have been allocated
+
+The result is a semantically meaninful clusters of size < threshold, including all outliers. These clusters are all then ordered by shortest distance between centroids and summarized with frozen context as described above.
+
+### 4.2 Too many orphans passed to reinsertion loop
+
+
+## 5. Results
+
+### 5.1 Evaluation Status
 
 The results from ReadingMachine are at an early stage of evaluation. To date, evaluation consists of a single large-scale corpus run and internal qualitative review.
 
@@ -239,7 +258,7 @@ Formal evaluation remains outstanding. Future evaluation should include:
 
 To support this process, this paper constitutes an open invitation to domain experts to review the industrial policy output. Reviews may be submitted via a structured evaluation form (link), and will be published in the project’s GitHub repository as part of an open review archive. Further collaboration on systematic evaluation, including cross-domain testing and benchmarking, is actively invited.
 
-### 4.2 Experimental Setup
+### 5.2 Experimental Setup
 
 The corpus was constructed using the ReadingMachine getlit module, which combines structured search, LLM-assisted retrieval of grey literature, and human filtering. The final corpus consisted of 176 documents. This was considered a challenging corpus. It is large, covers a varied literature and comprises a variety of document types: webpages, academic papers, long institutional reports and books. 
 
@@ -253,7 +272,7 @@ The analysis was guided by the following research questions:
 
 The pipeline was also provided with a contextual framing derived from Oxfam’s Terms of Reference for the research. This context guided both document retrieval and insight extraction.
 
-### 4.3 System Metrics
+### 5.3 System Metrics
 
 The full pipeline execution required approximately 14 hours and incurred a total cost of approximately $300.
 
@@ -272,14 +291,14 @@ Core system metrics include:
 | Theme count (second pass)   | 35      |
 | Orphan pass (second pass)   | 13830   |
 
-### 4.4 Example Insights (Selected at Random)
+### 5.4 Example Insights (Selected at Random)
 
 | Question | Insight type | Insight |
 |----------|-------------|--------|
 | What challenges and constraints do less-industrialized countries face in implementing effective industrial policy? | Chunk insight | 'The financialization of the global economy and the lack of global regulations have weakened governments in both developed and developing countries, reducing their capacity to run effective industrial policy (Chang, Ha-Joon; Andreoni, Antonio 2020).' |
 | What drivers account for the resurgence of industrial policy in both highly industrial and industrializing countries? | Meta insight | 'The resurgence of industrial policy is driven by the need to address market failures, such as when markets do not reflect the full environmental costs of an investment or when market actors lack relevant information, which necessitates government intervention to foster structural change towards a low-carbon economy (Altenburg, T.; Assmann, C. 2017).' |
 
-### 4.5 Qualitative Observations
+### 5.5 Qualitative Observations
 
 #### Output Characteristics
 
@@ -295,7 +314,7 @@ No obvious hallucinations were identified during internal review, though this ha
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects the density of the underlying literature, rather than a failure of the system. In contrast, human-led reviews often impose balance across sections, even where this distorts the distribution of available evidence.
 
-### 4.6 Failure Modes and Issues
+### 5.6 Failure Modes and Issues
 
 #### Large proportion of meta-insights
 
@@ -337,7 +356,7 @@ The computational cost and runtime of the system are non-trivial. Their signific
 
 Insights are currently referenced via author-date-year referencing. This means that recall has to operate at the level of the theme and author. In some cases, papers cluster around themes; thus, an insight trace reveals multiple chunks (and meta-chunks). These make tracing the insight to the exact text more difficult. This could be addressed in future iterations of the tool, where `insight_id` is linked to the claim, with human-readable author-date referencing layered on top. The execution of this is render dependent — HTML hoverover vs. pdf/word jump links. At the same time, for meta-insights, large volumes of text will be returned even if a single `insight_id` is traced. This undermines simple traceability and reflects the need to understand why the meta-insight pass is returning so many insights.
 
-### 4.7 Interpretation and Next Steps
+### 5.7 Interpretation and Next Steps
 
 Based on the observations above, the architecture appears to function as intended. It produces structured, traceable representations of large corpora, preserves granular claims, and maintains internal coherence without obvious hallucination. Fundamentally, the output looks different to both human-produced reviews and other AI approaches, in ways that reflect its architecture.
 
@@ -345,15 +364,15 @@ However, the extent to which this approach improves upon and/or augments existin
 
 The current results should therefore be understood as a demonstration of system behavior at scale, rather than as a definitive assessment of performance.
 
-## 5. Implications
+## 6. Implications
 
 ReadingMachine has implications both for the practice of large-scale synthesis and for how knowledge is produced and evaluated in institutional settings.
 
-### 5.1 Cost and Time Reductions
+### 6.1 Cost and Time Reductions
 
 By shifting the labor of large-scale reading from human analysts to structured machine processes, the system substantially reduces both the cost and time required to synthesize large corpora. Tasks that would typically require months of expert review can be completed in hours or days at a fraction of the cost. While computational costs are non-trivial, they remain orders of magnitude lower than comparable human-led efforts, particularly as corpus size increases.
 
-### 5.2 A Shift in the Bottleneck of Knowledge Work
+### 6.2 A Shift in the Bottleneck of Knowledge Work
 
 As the cost of reading declines, the primary constraint in knowledge production shifts. For institutions, the bottleneck moves away from information acquisition and toward:
 
@@ -364,15 +383,15 @@ As the cost of reading declines, the primary constraint in knowledge production 
 
 In this sense, ReadingMachine does not eliminate human labor; it reallocates it from reading to interpretation and action.
 
-### 5.3 Increased Coverage
+### 6.3 Increased Coverage
 
 Because the system performs a structured pass over the entire corpus, it reduces the risk of partial engagement that characterizes both human review and retrieval-based AI systems. All documents are processed, and insights are extracted systematically. Mechanisms such as orphan detection further reinforce coverage by identifying and reintegrating omitted material.
 
-### 5.4 Inspectability and Traceability
+### 6.4 Inspectability and Traceability
 
 Each stage of the pipeline produces intermediate artifacts—chunks, insights, clusters, themes—that can be inspected directly. This makes it possible to trace any element of the final synthesis back to its source material. In contrast to both human synthesis (where intermediate reasoning is rarely visible) and many AI systems (where transformations are opaque), ReadingMachine exposes the structure of the analytical process.
 
-### 5.5 Separation of Reading and Reasoning
+### 6.5 Separation of Reading and Reasoning
 
 A central implication of the ReadingMachine approach is the explicit separation of reading from reasoning. In most forms of human synthesis, these processes are intertwined: analysts read, interpret, evaluate, and draw conclusions simultaneously, often in ways that are difficult to observe or reconstruct. This coupling was historically necessary when reading was slow, as judgment guided which arguments to engage with, how to resolve debates and whether to balance narrative weights. However, this muddies claims of what the literature says with what the authors thinks of the literature and therefor limits the transparency of how conclusions are formed.
 
@@ -382,7 +401,7 @@ This separation has two implications. First, it increases transparency: the inte
 
 It is important to note that reading itself remains inherently interpretive. Both human readers and language models rely on prior frameworks—conceptual in the case of humans, and learned semantic patterns in the case of models—to identify and express what counts as an insight. ReadingMachine does not eliminate this interpretive layer. Instead, it makes these transformations visible by externalizing intermediate outputs. While reasoning over the corpus is deferred, interpretive judgments made during reading are exposed and can be examined, compared, and, where necessary, challenged. This creates opportunities for epistemic analysis, discussed further below.
 
-### 5.6 Reproducibility
+### 6.6 Reproducibility
 
 Reproducibility in this system is conceptual rather than semantic. Re-running the pipeline with the same configuration is not expected to produce identical text, but it should produce a similar thematic structure: comparable themes, consistent groupings of insights, and stable relationships between them.
 
@@ -394,7 +413,7 @@ This form of reproducibility is achieved through:
 
 Under these conditions, variation across runs is expected to remain at the level of phrasing and emphasis rather than underlying structure. At larger scales, this stability may degrade as clustering noise, context limits, and corpus heterogeneity increase. These scaling effects are discussed further in the limitations section.
 
-### 5.7 Architectural Scaling
+### 6.7 Architectural Scaling
 
 ReadingMachine is designed to operate on corpora substantially larger than those typically handled by retrieval systems or hierarchical summarization workflows. However, it is not assumed to be infinitely scalable, and its behavior at scale should be understood as an open empirical question.
 
@@ -413,11 +432,11 @@ Because synthesis occurs at the theme level rather than the corpus level, the mo
 
 In theory, this decomposition should allow the system to scale beyond the point at which corpus-level synthesis becomes unstable in other approaches.
 
-### 5.8 Parameterization and Experimental Control
+### 6.8 Parameterization and Experimental Control
 
 Because each stage of the pipeline is explicitly defined, the system can be treated as an experimental framework. Researchers can hold most parameters constant while varying individual components—such as models, prompts, or clustering settings—to observe how these changes affect the resulting thematic structure. This enables systematic sensitivity analysis that is difficult to achieve in both human-led synthesis and less structured AI workflows. Note however, that such experimentation requires system stability, and therefore reproducibility. As mentioned above (and discussed below) it is not clear this will hold as scale increases.
 
-### 5.9 Implications for Epistemic Analysis
+### 6.9 Implications for Epistemic Analysis
 
 As noted above, beyond synthesis, ReadingMachine creates opportunities for epistemic experimentation in understanding how knowledge is constructed. By comparing outputs across models or configurations, researchers can observe how different systems organize, prioritize, or omit information. These differences can be interpreted as expressions of underlying assumptions or priors embedded in models or analytical choices.
 
@@ -425,11 +444,11 @@ In this sense, the system can be used not only to map a corpus, but also to stud
 
 Together, these properties suggest a shift from selective, narrative synthesis toward structured, inspectable corpus mapping as a distinct mode of knowledge production.
 
-## 6. Limitations
+## 7. Limitations
 
 ReadingMachine is designed for a specific analytical task: high-fidelity thematic synthesis of large natural-language corpora. It is not intended to replace other approaches to working with language models, nor should it be considered universally superior. In many contexts—particularly exploratory analysis or question answering—other methods remain more appropriate (see below for complementarity with other approaches).
 
-### 6.1 Cost
+### 7.1 Cost
 
 While ReadingMachine reduces the cost of human-led synthesis by one to two orders of magnitude, it is not costless. The system performs multiple passes over the entire corpus, incurring both computational and time costs. As a result, it is less well suited to rapid exploration or ad hoc query answering.
 
@@ -439,7 +458,7 @@ There are clear pathways for reducing cost. The most immediate is parallelizatio
 
 Additional efficiencies may be achieved through model specialization. Smaller models could be used for bounded tasks such as insight extraction, though higher-capability models are currently preferred given the importance of insight quality in downstream stages. Over time, the system may enable a data flywheel: high-quality, structured insight outputs can serve as training data for smaller, task-specific models, reducing reliance on more expensive general-purpose models.
 
-### 6.2 Functional Scope
+### 7.2 Functional Scope
 
 The pipeline does not reason over the corpus. It cannot answer questions such as “how many studies did x” or “what is the strongest method for examining y” unless such claims are explicitly present in the source material. Nor does it independently assess the credibility or weight of claims unless this is discussed within the corpus itself. Its output is therefore a structured mapping of what the corpus contains, not an evaluation of what should be concluded.
 
@@ -447,17 +466,17 @@ This places greater importance on question formulation and corpus selection, whi
 
 While this constraint limits the range of tasks the system can perform, it also underpins several of its advantages. By avoiding open-ended reasoning, the pipeline increases traceability, inspectability, and reproducibility. Rather than embedding interpretation within a single opaque step, it relocates reasoning to distinct stages: upstream (question definition and corpus selection), external (parameter choices and stopping conditions), and downstream (interpretation and decision-making).
 
-### 6.3 Performance Under Scale
+### 7.3 Performance Under Scale
 
 The primary scaling constraints in ReadingMachine arise from two interacting factors: the heterogeneity of insights, which affects the stability of intermediate representations, and the volume of insights assigned to individual themes, which affects the system’s ability to integrate them during synthesis. These constraints emerge at different stages of the pipeline and produce distinct but interacting failure modes.
 
-#### 6.3.1 Representation Under Heterogeneity
+#### 7.3.1 Representation Under Heterogeneity
 
 As corpus heterogeneity increases, the semantic structure of the insight space becomes more difficult to represent consistently. Small variations in embeddings can lead to different clustering outcomes, particularly as the number and diversity of insights grow. Because clusters serve as the scaffolding for theme generation, this variability propagates into the theme schema, altering how the corpus is organized conceptually.
 
 These effects reduce the stability of the system across runs. Even with identical configurations, small stochastic differences in model outputs can lead to different cluster structures and, in turn, different thematic organizations. More heterogeneous corpora are therefore expected to produce less stable representations and require more iterations to converge on a coherent structure.
 
-#### 6.3.2 Synthesis Under Volume
+#### 7.3.2 Synthesis Under Volume
 
 While ReadingMachine redistributes context constraints across theme-level synthesis, these constraints do not disappear; they re-emerge as the volume and heterogeneity of insights within individual themes increase.
 
@@ -471,7 +490,7 @@ Under this regime, as mentioned above, the the true scale limit of the system is
 
 These scaling effects also impact reproducibility. While the system is designed to produce stable thematic structures under fixed configurations, increasing heterogeneity and theme-level volume can introduce variation in clustering, theme formation, and synthesis. As a result, reproducibility should be understood as conditional: it holds under controlled scale, but may degrade as the system approaches its performance limits. As mentioned above, the current high volume of meta-insights also compromises reproducibility.
 
-### 6.4 Coverage and Redundancy Trade-offs
+### 7.4 Coverage and Redundancy Trade-offs
 
 A central aim of ReadingMachine is to maximize coverage and minimize omission. While the system is designed to approach this asymptotically—through full-corpus processing and orphan reinsertion—it cannot guarantee complete coverage, particularly under scale.
 
@@ -479,7 +498,7 @@ As volume increases, the system compensates by prioritizing local completeness w
 
 These limitations reflect trade-offs inherent to the system’s design: prioritizing coverage, traceability, and inspectability shifts constraints toward scale, stability, and computational cost.
 
-## 7. Complementarity with Other AI Approaches
+## 8. Complementarity with Other AI Approaches
 
 ReadingMachine differs from both hierarchical summarization and retrieval-based systems. Unlike hierarchical summarization, it delays compression rather than aggregating it through successive summaries. Unlike retrieval-augmented generation (RAG) and its agentic variants, it performs a structured pass over the entire corpus rather than sampling subsets based on queries.
 
@@ -504,7 +523,7 @@ ReadingMachine → structural mapping of arguments and themes
 				↓  
 agentic or retrieval workflows → deeper analysis and follow-up questions  
 
-## 8. Status of ReadingMachine and Future Work
+## 9. Status of ReadingMachine and Future Work
 
 ReadingMachine is currently an early-stage experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). The project is intended as a methodological framework as much as a software tool, and its robustness, limitations, and boundary conditions require empirical evaluation across domains.
 
@@ -525,7 +544,7 @@ In additional area of future work would be the creation of a downstream, overt r
 
 Any downstream reasoning pass is not assumed to provide canonical answers, avoid bias or be infallible. It is simply proposed as an epistemically honest means (within the spirit of ReadingMachine) to re-insert the reasoning process that has come to characterize corpus synthesis, and potentially increase the immediate useability of the ReadingMachine output.
 
-## 9. Conclusion
+## 10. Conclusion
 
 The growth in the volume of written information has created a structural imbalance between what is available to be known and what can be systematically read and synthesized. Existing approaches—both human and computational—address this problem only partially, often introducing forms of omission that are difficult to detect.
 
