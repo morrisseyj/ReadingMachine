@@ -4117,6 +4117,11 @@ class Summarize:
 
                 # Get the current populated themes for this rq
                 current_populated_themes_rq = current_populated_themes[current_populated_themes["question_id"] == question_id].copy()
+                # Get pass/fail for the themes with failing batches
+                current_populated_themes_rq["completeness_check"] = current_populated_themes_rq["thematic_summary"].apply(
+                    lambda x: "fail" if isinstance(x, str) and "--- FAILED BATCH SUMMARIES ---" in x else "pass"
+                )
+
                 # Get the word count before the failed batches
                 current_populated_themes_rq["word_count"] = current_populated_themes_rq["thematic_summary"].apply(lambda x: len(x.split("--- FAILED BATCH SUMMARIES ---")[0].split()) if isinstance(x, str) else 0)
                 # Merge with schema to get the instructions
@@ -4139,11 +4144,12 @@ class Summarize:
                     "theme_description",
                     "instructions",
                     "thematic_summary",
+                    "passed_completeness_check",
                     "word_count"
                 ]].to_dict(orient="records")
                
                 user_prompt = (
-                    f"LATEST THEME CODEBOOK:\n {current_schema_rq_json}\n\n"
+                    f"LATEST THEME CODEBOOK:\n{current_schema_rq_json}\n\n"
                     "-------------------------------------------------------------\n\n"
                     f"THEME SUMMARIES POPULATED WITH INSIGHTS:\n {current_populated_themes_json}"
                     )
