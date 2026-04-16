@@ -4004,13 +4004,29 @@ class Summarize:
 
         The method supports two input sources:
 
-            - "cluster summaries": used for the first schema pass
+            - "cluster summaries": used for the initial schema pass
             - "populated themes": used during iterative refinement passes
 
-        In the first pass, cluster summaries act as scaffolding for theme
-        generation. In later passes, the model receives the current thematic
-        summaries (including orphan reinsertion effects) to refine the
-        schema structure.
+        In the initial pass, semantically clustered summaries are used to
+        generate a conceptual schema. In refinement passes, the model receives
+        the current thematic summaries (including orphan reintegration effects)
+        along with completeness signals to iteratively improve the schema.
+
+        For each research question, the LLM returns a schema of the form:
+
+            {
+                "themes": [
+                    {
+                        "theme_label": str,
+                        "theme_description": str,
+                        "instructions": str
+                    }
+                ],
+                "no_change": bool
+            }
+
+        The "no_change" flag indicates whether the model believes further
+        improvements to the schema are unnecessary.
 
         Parameters
         ----------
@@ -4022,9 +4038,11 @@ class Summarize:
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame containing the generated theme schema. Columns include:
+        pd.DataFrame or None
+            DataFrame containing the generated theme schema, or None if the
+            model indicates no changes are required across all research questions.
 
+            Columns include:
                 - theme_id
                 - theme_label
                 - theme_description
@@ -4034,74 +4052,148 @@ class Summarize:
 
         Notes
         -----
-        The LLM returns theme definitions consisting of:
+        - Theme definitions consist of:
+            • theme_label: short name for the theme
+            • theme_description: conceptual definition ("North Star")
+            • instructions: INCLUDE / EXCLUDE assignment rules
 
-            - theme_label: short name for the theme
-            - theme_description: description of the thematic category
-            - instructions: rules for assigning insights to the theme
-
-        A numeric `theme_id` is assigned after generation to preserve a
+        - A numeric `theme_id` is assigned after generation to preserve a
         stable ordering of themes during later synthesis stages.
-        
+
+        - When "no_change" is True for a given question, the existing schema
+        for that question is retained rather than replaced.
+
+        - If "no_change" is True for all questions, the method returns None,
+        signaling convergence of the schema.
+
+        - Fallback behavior:
+            • If the LLM call fails, the previous schema is reused
+            • Fallback responses are always treated as "no_change": False to
+            avoid false convergence signals
         """
         if source not in ["cluster summaries", "populated themes"]:
             raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
         
-        if source == "cluster summaries":
-            # Grab data from summaries
-            source_df = self.summary_state.cluster_summary_list[0].copy()
-            source_df.rename(columns={"cluster": "id", "summary": "text_to_theme"}, inplace=True)
-        else:
-            # if its an iteration we get data from the last populated theme and convert the columsn to a generic form to send to the llm
-            source_df = self.summary_state.populated_theme_list[-1].copy()
-            source_df.rename(columns={"theme_id": "id", "thematic_summary": "text_to_theme"}, inplace=True)
-        
         out_df_list = []
+        no_change_count = 0
 
         for idx, row in self.corpus_state.questions.iterrows():
             print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
             question_id = row["question_id"]
             question_text = row["question_text"]
-            rq_df = source_df[source_df["question_id"] == question_id].copy()
-            text_to_theme = "\n\n".join(rq_df["text_to_theme"].tolist())
 
-            user_prompt = (
-                f"Research Question: {question_text}\n"
-                "TEXT TO ANALYZE:\n"
-                f"{text_to_theme}\n"
-            )
-            sys_prompt = Prompts().gen_theme_schema()
+            if source == "cluster summaries":
+                # Grab data from summaries
+                source_df = self.summary_state.cluster_summary_list[0].copy()
+                
+                # Get the clusters for this rq
+                rq_df = source_df[source_df["question_id"] == question_id].copy()
+                summary = "\n\n".join(rq_df["summary"].tolist())
 
-            fall_back = {"question_id": question_id, "themes": []}
+                # Generate user and sys prompt
+                user_prompt = (
+                    f"Research Question: {question_text}\n"
+                    "TEXT TO ANALYZE:\n"
+                    f"{summary}\n"
+                )
+                sys_prompt = Prompts().gen_theme_schema_cluster_source()
+
+            else:
+                # Generate the user prompt: json for the current schema and json for the populated themes
+                # First create the json of the current schema
+                current_schema = self.summary_state.theme_schema_list[-1].copy()
+                # Get the schema for this rq
+                current_schema_rq = current_schema[current_schema["question_id"] == question_id].sort_values(by=["theme_id"]).copy()
+                # Convert to json
+                current_schema_rq_json = current_schema_rq[[
+                    "theme_label",
+                    "theme_description",
+                    "instructions"
+                ]].to_dict(orient="records")
+
+                # Then create the json of the current themes
+                # Copy and select the current populated theme values
+                current_populated_themes = self.summary_state.populated_theme_list[-1].copy()
+
+                # Get the current populated themes for this rq
+                current_populated_themes_rq = current_populated_themes[current_populated_themes["question_id"] == question_id].copy()
+                # Get the word count before the failed batches
+                current_populated_themes_rq["word_count"] = current_populated_themes_rq["thematic_summary"].apply(lambda x: len(x.split("--- FAILED BATCH SUMMARIES ---")[0].split()) if isinstance(x, str) else 0)
+                # Merge with schema to get the instructions
+                current_populated_themes_rq = (
+                    current_populated_themes_rq
+                    .merge(
+                        current_schema_rq[["theme_id", "instructions"]],
+                        on=["theme_id"],
+                        how="left"
+                    )
+                )
+
+                # Sort and select only the relevant columns to send to the LLM
+                current_populated_themes_json = (
+                    current_populated_themes_rq
+                    .sort_values(by =["theme_id"],
+                                ascending=[True])
+                )[[
+                    "theme_label",
+                    "theme_description",
+                    "instructions",
+                    "thematic_summary",
+                    "word_count"
+                ]].to_dict(orient="records")
+               
+                user_prompt = (
+                    f"LATEST THEME CODEBOOK:\n {current_schema_rq_json}\n\n"
+                    "-------------------------------------------------------------\n\n"
+                    f"THEME SUMMARIES POPULATED WITH INSIGHTS:\n {current_populated_themes_json}"
+                    )
+                
+                # generate the sys prompt for source after orphan insertion
+                sys_prompt = Prompts().gen_theme_schema_orphan_source()
+
+                # Fall back uses existing schema
+                if source == "cluster summaries":
+                    fall_back = {
+                        "themes": [],
+                        "no_change": False
+                    }
+                else:
+                    fall_back = {
+                        "themes": current_schema_rq_json,
+                        "no_change": False
+                    }
 
             json_schema = {
-                "name": "thematic_schema_generator",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "themes": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "theme_label": { "type": "string" },
-                                    "theme_description": { "type": "string" },
-                                    "instructions": { "type": "string" }
-                                },
-                                "required": [
-                                    "theme_label", 
-                                    "theme_description", 
-                                    "instructions"
-                                ],
-                                "additionalProperties": False
-                            }
+            "name": "thematic_schema_generator",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": { "type": "string" },
+                                "theme_description": { "type": "string" },
+                                "instructions": { "type": "string" }
+                            },
+                            "required": [
+                                "theme_label", 
+                                "theme_description", 
+                                "instructions"
+                            ],
+                            "additionalProperties": False
                         }
                     },
-                    "required": ["themes"],
-                    "additionalProperties": False
-                }
+                    "no_change": {
+                        "type": "boolean"
+                    }
+                },
+                "required": ["themes", "no_change"],
+                "additionalProperties": False
             }
+        }
 
             response = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
@@ -4113,12 +4205,32 @@ class Summarize:
                 json_schema=json_schema
             )
 
-            theme_list = response.get("themes", [])
-            themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
+            # Check if the schema is not worth iterating on, if so exit
+            if response["no_change"]:
+                no_change_count += 1
+                print(f"No changes to the theme schema for question {question_id}. Retaining the previous schema.\n\n")
+                # Use previous schema directly
+                themes_df = current_schema_rq.copy()
+
+            else:
+                # Otherwise process the returned schema for the RQ and add to the list of schemas
+                theme_list = response.get("themes", [])
+                themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
+            
             themes_df["question_id"] = question_id
             themes_df["question_text"] = question_text
 
             out_df_list.append(themes_df)
+        
+        if no_change_count == self.corpus_state.questions.shape[0]:
+            print(
+                "This iteration has not made any changes to the schema for any of the research questions.\n"
+                "This means there are no errors in your populated themes and no obvious optimiaztion options for the schema to improve the mapping of insights to themes.\n"
+                "You should consider iterations done.\n"
+                "The final populated theme list is available in `self.summary_state.populated_theme_list[-1]`.\n"
+                "You should move to redundancy handling/rendering."
+                )
+            return(None)
         
         # Concat all the questions
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
@@ -4131,54 +4243,77 @@ class Summarize:
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
         
         """
-        Generate or update the theme schema for the synthesis process.
+        Generate or update the theme schema for the synthesis pipeline.
 
-        This method manages the iterative theme schema generation stage
-        of the pipeline. The schema defines the thematic categories that
-        will be used to organize insights during synthesis.
+        This method manages the iterative theme schema generation process.
+        The schema defines the conceptual categories used to organize and
+        synthesize insights.
 
         Schema generation operates in three modes:
 
             1. Initial pass
-            If no schema exists, themes are generated from cluster
-            summaries.
+            If no schema exists, themes are generated from cluster summaries.
 
-            2. Iterative pass
-            After insights have been mapped, themes populated, and
-            orphans handled, a new schema can be generated from the
-            updated thematic summaries.
+            2. Iterative refinement
+            After insights have been mapped, themes populated, and orphan
+            handling completed, a new schema can be generated using the
+            updated thematic summaries and failure signals.
 
             3. Regeneration
-            The most recent schema pass can be overwritten and
-            regenerated.
+            The most recent schema pass can be overwritten and regenerated
+            from the previous pipeline state.
 
         Parameters
         ----------
         force : bool, default=False
-            If True, bypass sequencing validation and generate a new
-            schema directly from cluster summaries.
+            If True, bypass sequencing validation and generate a new schema
+            directly from cluster summaries.
 
-            This mode is intended for development or testing and may
-            leave the pipeline state inconsistent.
+            This mode is intended for development or testing and may leave the
+            pipeline state inconsistent.
 
         Returns
         -------
-        pd.DataFrame
-            The newly generated theme schema.
+        pd.DataFrame or None
+            The newly generated theme schema, or None if the model determines
+            that no further improvements are required.
 
         Raises
         ------
         ValueError
-            If required upstream stages have not been completed or if
-            schema sequencing rules are violated.
+            If required upstream stages have not been completed or if schema
+            sequencing rules are violated.
+
+        Workflow
+        --------
+        The method enforces a structured pipeline:
+
+            1. Cluster summaries → initial schema
+            2. Insight mapping → theme population
+            3. Orphan detection and reintegration
+            4. Schema refinement using updated summaries
+
+        The refinement step uses failure signals (e.g. inability to integrate
+        insights without excessive compression) to adjust theme definitions.
 
         Notes
         -----
-        Theme schemas are stored as sequential passes in
+        - Theme schemas are stored as sequential passes in
         `self.summary_state.theme_schema_list`.
 
-        Each new schema pass reflects the evolving thematic structure
-        after incorporating orphan insights and updated theme summaries.
+        - Each new schema pass reflects an updated conceptual partition of the
+        data, informed by synthesis outcomes and failure diagnostics.
+
+        - If the model returns "no_change": True for all research questions,
+        the method returns None, indicating convergence.
+
+        - Convergence implies:
+            • all themes successfully integrate assigned insights
+            • no clear structural improvements are identified
+
+        - This method is designed to iteratively refine the schema until it
+        reaches a stable conceptual structure that supports high-fidelity
+        synthesis without excessive compression.
         """
         
         if force not in [True, False]:
@@ -4246,6 +4381,9 @@ class Summarize:
 
             source_name = "populated themes"
             new_schema = self._run_llm_schema_gen(source=source_name)
+            if new_schema is None:
+                # This means the LLM has indicated that there are no changes to the schema worth making, which likely means we have reached the optimal schema for the current state of populated themes and orphans. In this case we should not add a new schema pass as it is identical to the last one, so we return None to indicate no new schema was generated.
+                return None
             self.summary_state.theme_schema_list.append(new_schema)
 
             self.summary_state.save()
@@ -4267,6 +4405,9 @@ class Summarize:
                 source_name = "populated themes"
 
             new_schema = self._run_llm_schema_gen(source=source_name)
+            if new_schema is None:
+                # This means the LLM has indicated that there are no changes to the schema worth making, which likely means we have reached the optimal schema for the current state of populated themes and orphans. In this case we should not overwrite the last schema pass as the new one is identical to it, so we return None to indicate no new schema was generated.
+                return None
 
             # Replace last schema pass
             self.summary_state.theme_schema_list[-1] = new_schema
@@ -5591,7 +5732,7 @@ class Summarize:
         orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema
         return(orphans_df)
     
-    def summarize_failed_orphan_batch(self,
+    def _summarize_failed_orphan_batch(self,
                                       orphans: str,
                                       question_text: str,
                                       theme_label: str
@@ -5868,7 +6009,7 @@ class Summarize:
                     # if there is an error
                     if error is not None or response["updated_summary"] == "":
                         print(f"WARNING: Orphan integration failed for theme {theme_id} batch {batch_count}. Capturing summary of failed batch for diagnostics and proceeding with original summary.\nError details: {error if error else 'No error message returned.'}")
-                        failed_batch_summary = self.summarize_failed_orphan_batch(
+                        failed_batch_summary = self._summarize_failed_orphan_batch(
                             orphans=orphan_batch_str,
                             question_text=question_text,
                             theme_label=theme_label
