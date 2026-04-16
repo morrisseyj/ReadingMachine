@@ -4151,17 +4151,17 @@ class Summarize:
                 # generate the sys prompt for source after orphan insertion
                 sys_prompt = Prompts().gen_theme_schema_orphan_source()
 
-                # Fall back uses existing schema
-                if source == "cluster summaries":
-                    fall_back = {
-                        "themes": [],
-                        "no_change": False
-                    }
-                else:
-                    fall_back = {
-                        "themes": current_schema_rq_json,
-                        "no_change": False
-                    }
+            # Fall back uses existing schema
+            if source == "cluster summaries":
+                fall_back = {
+                    "themes": [],
+                    "no_change": False
+                }
+            else:
+                fall_back = {
+                    "themes": current_schema_rq_json,
+                    "no_change": False
+                }
 
             json_schema = {
             "name": "thematic_schema_generator",
