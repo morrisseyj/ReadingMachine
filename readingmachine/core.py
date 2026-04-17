@@ -5036,7 +5036,7 @@ class Summarize:
         return self.summary_state.mapped_theme_list[-1]
 
 
-    def _estimate_theme_lengths(self, paper_len: int, max_model_output_words: int = 2800) -> pd.DataFrame:
+    def _estimate_theme_lengths(self, paper_len: int, max_model_output_words: int = 2500) -> pd.DataFrame:
         """
         Estimate target word lengths for each theme.
 
@@ -5062,7 +5062,7 @@ class Summarize:
             Approximate total desired length of the final synthesis document
             in words.
 
-        max_model_output_words : int, default=2800
+        max_model_output_words : int, default=2500
             Maximum number of words the model can reliably produce in a single
             response. This acts as the upper bound for theme summaries.
 
@@ -5187,6 +5187,10 @@ class Summarize:
             # Do not flag if theme is already at hard ceiling
             if row["allocated_length"] == MAX_THEME_WORDS:
                 return 0
+
+            # If the theme is marked as stable we should not flag - we don't want to re-write.
+            if row["stable"] == True:
+                return 0
             
             # Standard proportional check
             if row["current_length"] <= row["allocated_length"] * max_prop:
@@ -5281,21 +5285,30 @@ class Summarize:
         # Normalise the id columsn as they come back from the LLM so could be str
         # Copy the df because this could be called on a corpus_state object
         
+        # Get the allocated lenghts
         schema_df = schema_df.copy()
-        schema_df["question_id"] = schema_df["question_id"]
         schema_df["theme_id"] = schema_df["theme_id"].astype(int)
-        
         if "allocated_length" not in schema_df.columns:
             schema_df = schema_df.merge(
             self._estimate_theme_lengths(paper_len),
             on="theme_id",
             how="left"
         )
+        
+        # Get the populated themese for the stable schema 
+        stable_schema = schema_df[schema_df["stable"] == True].copy()
+        stable_populated_themes = self.summary_state.populated_theme_list[-1][
+            self.summary_state.populated_theme_list[-1]["question_id"].isin(stable_schema["question_id"])
+        ].copy() if not self.summary_state.populated_theme_list[-1].empty else pd.DataFrame()
 
-        # Iterate over the themes from the schema to get the data for the LLM call
+        # Get the unstable schema
+        unstable_schema = schema_df[schema_df["stable"] == False].copy()
+     
+
+        # Iterate over the themes from the unstable schema to get the data for the LLM call
         populated_themes = []
-        for idx, row in schema_df.iterrows():
-            print(f"Populating theme {idx + 1} of {schema_df.shape[0]}...")
+        for idx, row in unstable_schema.iterrows():
+            print(f"Populating theme {idx + 1} of {unstable_schema.shape[0]}...")
             rq_id = row["question_id"]
             rq_text = row["question_text"]
             theme_id = row["theme_id"]
@@ -5347,7 +5360,7 @@ class Summarize:
             insights_str = "\n".join(insights)
 
             # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
-            if theme_label.strip().lower() == "conflicts":
+            if theme_label.strip().lower() == "conflict":
                 theme_type = "conflicts"
             elif theme_label.strip().lower() == "other":
                 theme_type = "other"
@@ -5402,11 +5415,17 @@ class Summarize:
             
             # Append the result to the list of dfs the loop is producing, which will be concatenated at the end
             populated_themes.append(thematic_summary)
+
         # Concat the final list of dfs and return
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+        # Add back the stable questions and themes with thier populated summaries
+        if stable_populated_themes is not None and not stable_populated_themes.empty:
+            populated_themes_df = pd.concat([populated_themes_df, stable_populated_themes], ignore_index=True)
+
         # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative
         populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+        
         return(populated_themes_df)
 
     def _iterative_length_check_and_expand_loop(
@@ -5661,7 +5680,6 @@ class Summarize:
         self.summary_state.populated_theme_list.append(populated_themes_df)
         self.summary_state.save()
         return self.summary_state.populated_theme_list[-1]
-
 
     def _identify_orphans(
             self, 
