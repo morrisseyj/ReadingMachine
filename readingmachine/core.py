@@ -5278,9 +5278,7 @@ class Summarize:
         - Full insight coverage is enforced later via orphan handling.
         - Themes with no mapped insights are retained with empty summaries.
         """
-
-    
-        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
+ # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
         # Copy the df because this could be called on a corpus_state object
@@ -5301,9 +5299,11 @@ class Summarize:
             self.summary_state.populated_theme_list[-1]["question_id"].isin(stable_schema["question_id"])
         ].copy() if not self.summary_state.populated_theme_list[-1].empty else pd.DataFrame()
 
+        if stable_populated_themes is not None and not stable_populated_themes.empty:
+            stable_populated_themes["stable"] = True
+
         # Get the unstable schema
         unstable_schema = schema_df[schema_df["stable"] == False].copy()
-     
 
         # Iterate over the themes from the unstable schema to get the data for the LLM call
         populated_themes = []
@@ -5418,6 +5418,7 @@ class Summarize:
 
         # Concat the final list of dfs and return
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+        populated_themes_df["stable"] = False # Add a column to indicate that these themes are not stable, which will be used in the length check function to avoid flagging these for expansion. We want to preserve the populated summaries for the stable themes and not re-write them, so we flag them as stable here and then use this flag in the length check function to avoid flagging them for expansion.
         # Add back the stable questions and themes with thier populated summaries
         if stable_populated_themes is not None and not stable_populated_themes.empty:
             populated_themes_df = pd.concat([populated_themes_df, stable_populated_themes], ignore_index=True)
