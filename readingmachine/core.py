@@ -4533,8 +4533,21 @@ class Summarize:
         stage of the pipeline. Insights are processed in batches and assigned
         to one or more themes defined in the current theme schema.
 
-        Each batch of mappings is saved to disk during execution to support
-        resumable operation and prevent loss of progress during long runs.
+        The method supports incremental execution and resume-safe behavior.
+        Only insights belonging to *unstable* questions are processed by the LLM.
+        Insights associated with *stable* questions are reused from the previous
+        mapping pass and seeded into the current result.
+
+        All mapping artifacts are maintained as a complete snapshot of the system
+        state. Even when only a subset of insights is processed, the final output
+        always contains mappings for all insights.
+
+        To ensure consistency, intermediate results are normalized during execution:
+            • mappings are concatenated incrementally
+            • duplicate rows are removed based on:
+                ("insight_id", "theme_id", "question_id")
+
+        This guarantees idempotent behavior across resume and partial execution.
 
         Parameters
         ----------
@@ -4543,12 +4556,12 @@ class Summarize:
 
         already_mapped_insight_ids : list
             List of insight IDs that have already been mapped. Used during
-            resume operations to avoid reprocessing previously completed
-            batches.
+            resume operations and to skip processing of stable insights.
 
         mapped_insights_df_list : list
-            List of DataFrames containing previously generated mapping
-            results. New batches are appended to this list.
+            List of DataFrames containing mapping results. This list is
+            incrementally normalized into a single deduplicated DataFrame
+            to maintain a consistent state across batches and resumes.
 
         in_progress_path : str
             File path where intermediate mapping progress is serialized
@@ -4572,14 +4585,44 @@ class Summarize:
 
         Notes
         -----
-        A state fingerprint is stored alongside intermediate results to
+        - Stable questions (as defined in the current theme schema) are not
+        reprocessed. Their mappings are reused from the previous pass.
+
+        - The method ensures that all insights are represented exactly once
+        per (insight_id, theme_id, question_id) combination.
+
+        - A state fingerprint is stored alongside intermediate results to
         ensure that the corpus and summary states have not changed between
         resume attempts. If a mismatch is detected, resume is aborted to
         prevent corruption of the synthesis pipeline.
+
+        - The function is designed to be resume-safe and idempotent:
+        repeated execution will not introduce duplicate mappings.
         """
         
         if mode not in ["force", "normal"]:
             raise ValueError("Invalid mode. Mode must be either 'force' or 'normal'.")
+
+        # Check if there are any stable questions in the current schema and exclude those from remapping
+        if any(self.summary_state.theme_schema_list[-1]["stable"].to_list()):
+            # Get the queston ids of the stable questions
+            stable_questions = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].unique().tolist()
+            # Use the stable questions to get the mappings from the last run which was stable
+            stable_mapping = self.summary_state.mapped_theme_list[-1][self.summary_state.mapped_theme_list[-1]["question_id"].isin(stable_questions)].copy()
+            if not stable_mapping.empty:
+                # use these "stable mappings" to seed the mapped insights and mapped insight ids 
+                # mapped_insights_df_list is a list of dfs so we need to concat, drop duplicates and then convert back to a list to add to the mapped insights list so that progress, resume etc all still work
+                mapped_insights_df_list.append(stable_mapping)
+                mapped_insighs_df = (
+                    pd.concat(mapped_insights_df_list, ignore_index=True, sort=False)
+                    .drop_duplicates(subset=["insight_id", "theme_id"])
+                )
+                # Back to list
+                mapped_insights_df_list = [mapped_insighs_df]
+                # Already mapped insight ids is a list so i just extend and set to drop duplicates
+                already_mapped_insight_ids.extend(stable_mapping["insight_id"].tolist())
+                # Drop duplicates to avoid multiple seeding if i resume
+                already_mapped_insight_ids = list(set(already_mapped_insight_ids))
         
         # Create a meta object of the state against which any resume can be checked to ensure state has not been changed between resume calls
         # This gets pickled along with the progess in mapped insights
@@ -4611,9 +4654,6 @@ class Summarize:
                 (temp_state_insights["insight"].notna()) &
                 (temp_state_insights["insight"] != "")
             ].copy()
-
-            if q_insights_df.empty:
-                continue
 
             # Get schema for this question
             q_schema_df = self.summary_state.theme_schema_list[-1][
