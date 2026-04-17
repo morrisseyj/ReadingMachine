@@ -3996,23 +3996,30 @@ class Summarize:
     
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
         """
-        Generate a theme schema using the LLM.
+        Generate or refine the thematic schema using the LLM.
 
-        This internal helper constructs the input data for schema generation
-        and performs the LLM call that produces a set of candidate themes
-        for each research question.
+        This method performs per-question schema generation across the corpus,
+        supporting both initial schema construction and iterative refinement.
 
-        The method supports two input sources:
+        Two input modes are supported:
 
-            - "cluster summaries": used for the initial schema pass
-            - "populated themes": used during iterative refinement passes
+            - "cluster summaries":
+                Used for the first schema pass. The model generates a conceptual
+                schema from semantically clustered summaries.
 
-        In the initial pass, semantically clustered summaries are used to
-        generate a conceptual schema. In refinement passes, the model receives
-        the current thematic summaries (including orphan reintegration effects)
-        along with completeness signals to iteratively improve the schema.
+            - "populated themes":
+                Used for iterative refinement. The model receives:
+                    • the current schema (unstable portion only)
+                    • theme-level summaries
+                    • completeness signals (pass/fail)
+                    • summaries of unintegrated content
+                and updates the schema accordingly.
 
-        For each research question, the LLM returns a schema of the form:
+        Schema refinement operates at the level of individual research questions.
+        Questions whose schemas are already marked as stable are skipped and
+        carried forward unchanged.
+
+        For each question, the LLM returns:
 
             {
                 "themes": [
@@ -4025,13 +4032,32 @@ class Summarize:
                 "no_change": bool
             }
 
-        The "no_change" flag indicates whether the model believes further
-        improvements to the schema are unnecessary.
+        The "no_change" flag indicates whether the schema for that question
+        should remain unchanged.
+
+        Stability Handling
+        ------------------
+        - Each theme row carries a boolean "stable" flag.
+        - Stable questions are excluded from further processing.
+        - Only unstable questions are passed to the LLM.
+        - Newly processed questions are marked:
+            • stable = True  → if "no_change" is True
+            • stable = False → otherwise
+
+        - The final schema is constructed by concatenating:
+            • updated unstable schemas
+            • previously stable schemas
+
+        Convergence Logic
+        ----------------
+        - The method tracks the number of stable questions.
+        - Convergence is reached when all questions are stable.
+        - When this occurs, the method returns None.
 
         Parameters
         ----------
         source : str
-            Input data source used for schema generation. Must be one of:
+            Input data source for schema generation. Must be one of:
 
                 "cluster summaries"
                 "populated themes"
@@ -4039,37 +4065,32 @@ class Summarize:
         Returns
         -------
         pd.DataFrame or None
-            DataFrame containing the generated theme schema, or None if the
-            model indicates no changes are required across all research questions.
+            A DataFrame containing the updated theme schema, or None if all
+            questions are stable (i.e., convergence has been reached).
 
-            Columns include:
+            Output columns:
                 - theme_id
                 - theme_label
                 - theme_description
                 - instructions
                 - question_id
                 - question_text
+                - stable
 
         Notes
         -----
-        - Theme definitions consist of:
-            • theme_label: short name for the theme
-            • theme_description: conceptual definition ("North Star")
-            • instructions: INCLUDE / EXCLUDE assignment rules
-
-        - A numeric `theme_id` is assigned after generation to preserve a
-        stable ordering of themes during later synthesis stages.
-
-        - When "no_change" is True for a given question, the existing schema
-        for that question is retained rather than replaced.
-
-        - If "no_change" is True for all questions, the method returns None,
-        signaling convergence of the schema.
+        - Only unstable questions are processed during refinement.
+        - Stable schemas are preserved exactly as they were in the previous pass.
+        - A numeric `theme_id` is assigned after concatenation to maintain a
+        consistent global ordering for downstream rendering.
 
         - Fallback behavior:
             • If the LLM call fails, the previous schema is reused
-            • Fallback responses are always treated as "no_change": False to
-            avoid false convergence signals
+            • Fallback responses are always treated as "no_change": False
+            to avoid false convergence signals
+
+        - The method assumes that stability is consistent per question
+        (i.e., all themes for a given question share the same "stable" value).
         """
         if source not in ["cluster summaries", "populated themes"]:
             raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
@@ -4077,16 +4098,28 @@ class Summarize:
         out_df_list = []
         no_change_count = 0
 
+        # initialize the primary dataframes for the two input branches:
+
+        if source == "cluster summaries":
+            # Grab data from summaries
+            source_df = self.summary_state.cluster_summary_list[0].copy()
+            no_change_count = 0
+            stable_schema = None
+
+        else:
+            # First identify any stable and unstable schema
+            stable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]
+            unstable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == False]
+            no_change_count = len(stable_schema["question_id"].unique().tolist()) if not stable_schema.empty else 0
+                
+
         for idx, row in self.corpus_state.questions.iterrows():
             print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
             question_id = row["question_id"]
             question_text = row["question_text"]
 
             if source == "cluster summaries":
-                # Grab data from summaries
-                source_df = self.summary_state.cluster_summary_list[0].copy()
-                
-                # Get the clusters for this rq
+                # Use source df and get the clusters for this rq
                 rq_df = source_df[source_df["question_id"] == question_id].copy()
                 summary = "\n\n".join(rq_df["summary"].tolist())
 
@@ -4099,11 +4132,16 @@ class Summarize:
                 sys_prompt = Prompts().gen_theme_schema_cluster_source()
 
             else:
-                # Generate the user prompt: json for the current schema and json for the populated themes
+                # Use the stable and unstable schema to generate the user prompts 
+                
                 # First create the json of the current schema
-                current_schema = self.summary_state.theme_schema_list[-1].copy()
+                current_schema = unstable_schema.copy()
                 # Get the schema for this rq
                 current_schema_rq = current_schema[current_schema["question_id"] == question_id].sort_values(by=["theme_id"]).copy()
+                # Check that there is something in this schema - i.e. its not stable for this question and therefore already processed. If stable continue to the next question
+                if current_schema_rq.empty:
+                    continue
+
                 # Convert to json
                 current_schema_rq_json = current_schema_rq[[
                     "theme_label",
@@ -4144,14 +4182,14 @@ class Summarize:
                     "theme_description",
                     "instructions",
                     "thematic_summary",
-                    "passed_completeness_check",
+                    "completeness_check",
                     "word_count"
                 ]].to_dict(orient="records")
                
                 user_prompt = (
                     f"LATEST THEME CODEBOOK:\n{current_schema_rq_json}\n\n"
                     "-------------------------------------------------------------\n\n"
-                    f"THEME SUMMARIES POPULATED WITH INSIGHTS:\n {current_populated_themes_json}"
+                    f"THEME SUMMARIES POPULATED WITH INSIGHTS:\n{current_populated_themes_json}"
                     )
                 
                 # generate the sys prompt for source after orphan insertion
@@ -4212,16 +4250,20 @@ class Summarize:
             )
 
             # Check if the schema is not worth iterating on, if so exit
-            if response["no_change"]:
+            if source != "cluster summaries" and response["no_change"]:
                 no_change_count += 1
                 print(f"No changes to the theme schema for question {question_id}. Retaining the previous schema.\n\n")
                 # Use previous schema directly
                 themes_df = current_schema_rq.copy()
+                # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable
+                themes_df["stable"] = True
 
             else:
                 # Otherwise process the returned schema for the RQ and add to the list of schemas
                 theme_list = response.get("themes", [])
                 themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
+                # Set the stable flag to false for all themes in this question as the model has indicated that there is a need to change the schema and therefore they are not stable
+                themes_df["stable"] = False
             
             themes_df["question_id"] = question_id
             themes_df["question_text"] = question_text
@@ -4242,7 +4284,19 @@ class Summarize:
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
         # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
         # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.
-        output["theme_id"] = [i + 1 for i in range(len(output))] 
+        output["theme_id"] = [i + 1 for i in range(len(output))]
+
+        # Now we need to add the originally stable schema back in. 
+        if stable_schema is not None and not stable_schema.empty:
+            # First make sure its sorted
+            stable_schema = stable_schema.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+            # Then concat it with the new schema output
+            output = pd.concat([output, stable_schema], ignore_index=True, sort=False)
+            # Then sort everything
+            output = output.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
+            # And now regen the theme_id to be a unique numeric id for each theme while preserving the order. This is important because we want to be able to sort by theme_id later to stitch together the narrative and if we have duplicates or non numeric values this will cause problems. We also want to make sure that the theme_id is unique across all questions so that we can use it as a stable identifier for themes even if they move around in the ordering.
+            # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.
+            output["theme_id"] = [i + 1 for i in range(len(output))]        
 
         return(output)
 
