@@ -5736,7 +5736,6 @@ class Summarize:
         resume attempts.
         """
 
-
         if mode not in ["replace", "append"]:
             raise ValueError("Mode must be either 'replace' or 'append'.")
 
@@ -5748,13 +5747,26 @@ class Summarize:
             "summary_hash": self.summary_state.fingerprint()
         }
 
+        # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
+        checked_insights_df = pd.DataFrame(columns=["question_id", "theme_id", "insight_id", "found"]) if checked_insights_df is None else checked_insights_df
+
+        # Get the stable questions so that i can avoid re running the orphan check on stable questions
+        stable_questions = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].tolist()
+        if len(stable_questions) > 0:
+            # Get the orphans for the stable questions
+            stable_orphans_df = self.summary_state.orphan_list[-1][self.summary_state.orphan_list[-1]["question_id"].isin(stable_questions)].copy() 
+            # Add to the checked orphans 
+            if not checked_insights_df.empty:
+                checked_insights_df = pd.concat([checked_insights_df, stable_orphans_df], ignore_index=True)
+                checked_insights_df = checked_insights_df.drop_duplicates(subset = ["question_id", "theme_id", "insight_id"])
+            else:
+                checked_insights_df = stable_orphans_df.copy()
+
+        checked_insight_id_list = checked_insights_df["insight_id"].tolist() if not checked_insights_df.empty else []
+            
         total_batches_to_check = math.ceil(len(self.corpus_state.insights) / batch_size)
         count = (checked_insights_df.shape[0] // batch_size) + 1 if checked_insights_df is not None else 0
 
-        # Set the output of the loop as either the recovered df if it exists or as an empty df to populate if it does not
-        checked_insights_df = pd.DataFrame(columns=["question_id", "theme_id", "insight_id", "found"]) if checked_insights_df is None else checked_insights_df
-        checked_insight_id_list = checked_insights_df["insight_id"].tolist() if not checked_insights_df.empty else []
-        
         # Now call the loop on these temp dataframes which will allow me to skip the insights that have already been checked and saved in the checked_insights_df which is being updated and saved to pickle as we go to allow for resumption if the process is interupted
         theme_map = self.summary_state.mapped_theme_list[-1].copy() # we need this in the loop, but to prevent copying each loop, i put it here
         for _, row in self.summary_state.populated_theme_list[-1].iterrows():
@@ -5807,6 +5819,7 @@ class Summarize:
                     ai_model=self.ai_model,
                     fall_back=fall_back,
                     return_json=True,
+                    max_tokens=4096,
                     json_schema=json_schema
                 )
                 # get all the found insights as sets for subtraction to get missed insights (i.e. orphans)
@@ -5851,6 +5864,7 @@ class Summarize:
         orphans_df["theme_id"] = orphans_df["theme_id"].astype(int) # make sure this is int for merging and comparison with the theme schema
         return(orphans_df)
     
+
     def _summarize_failed_orphan_batch(self,
                                       orphans: str,
                                       question_text: str,
@@ -5999,9 +6013,11 @@ class Summarize:
         # Prepare output holder for updated theme summaries
         updated_summary_df_lst = []
 
-        # Setup counter for logging progress across themes
-        populated_themes = self.summary_state.populated_theme_list[-1]
-        total_themes = len(populated_themes)
+        #Get the stable themes so that I can add them back in at the end without modification, as these should not be changed and we want to preserve the summaries for these themes as they are.  
+        stable_populated_themes = self.summary_state.populated_theme_list[-1][self.summary_state.populated_theme_list[-1]["stable"] == True].copy() 
+        unstable_populated_themes = self.summary_state.populated_theme_list[-1][self.summary_state.populated_theme_list[-1]["stable"] == False].copy()
+
+        total_themes = len(unstable_populated_themes)
         count = 1
 
         total_batches_all_themes = 0
@@ -6025,7 +6041,7 @@ class Summarize:
             return batch
 
         # Iterate over each theme (one row per theme summary)
-        for _, row in populated_themes.iterrows():
+        for _, row in unstable_populated_themes.iterrows():
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
@@ -6142,8 +6158,6 @@ class Summarize:
 
                         failed_batch_summaries.append(failed_batch_details)
                     
-                        updated_summary = updated_summary
-                    
                     else:
                                          
                         # Update working summary with integrated content
@@ -6168,19 +6182,42 @@ class Summarize:
                     "theme_id": int(theme_id),
                     "theme_label": theme_label,
                     "theme_description": theme_description,
-                    "question_text": question_text
+                    "question_text": question_text,
+                    "stable": False
                 }])
 
             else:
                 # No orphans → summary already complete
                 print(f"No orphans found for theme {count} of {total_themes}. Skipping integration.")
-                updated_row = pd.DataFrame([row])
+                updated_row = pd.DataFrame([{
+                    "thematic_summary": thematic_summary,
+                    "question_id": question_id,
+                    "theme_id": int(theme_id),
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "question_text": question_text,
+                    "stable": False
+                }])
 
             updated_summary_df_lst.append(updated_row)
             count += 1
 
         # Reassemble full dataframe and restore canonical ordering
         theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
+
+        # Add back the stable themes
+        if not stable_populated_themes.empty:
+            stable_populated_themes = stable_populated_themes[[
+                "thematic_summary",
+                "question_id",
+                "theme_id",
+                "theme_label",
+                "theme_description",
+                "question_text",
+                "stable"]].copy()
+            theme_no_orphans = pd.concat([theme_no_orphans, stable_populated_themes], ignore_index=True)
+
+        # Sort for outputing in the correct order - before this make sure the theme_id is int to prevent sorting issues
         theme_no_orphans["theme_id"] = theme_no_orphans["theme_id"].astype(int)
         theme_no_orphans = theme_no_orphans.sort_values(
             by=["question_id", "theme_id"]
