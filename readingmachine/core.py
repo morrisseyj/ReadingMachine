@@ -5278,7 +5278,7 @@ class Summarize:
         - Full insight coverage is enforced later via orphan handling.
         - Themes with no mapped insights are retained with empty summaries.
         """
- # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
+        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
         # Copy the df because this could be called on a corpus_state object
@@ -5295,9 +5295,19 @@ class Summarize:
         
         # Get the populated themese for the stable schema 
         stable_schema = schema_df[schema_df["stable"] == True].copy()
-        stable_populated_themes = self.summary_state.populated_theme_list[-1][
-            self.summary_state.populated_theme_list[-1]["question_id"].isin(stable_schema["question_id"])
-        ].copy() if not self.summary_state.populated_theme_list[-1].empty else pd.DataFrame()
+        # Check that there is a populated theme list (i.e. its not the first iteeration)
+        if self.summary_state.populated_theme_list:
+            # Then get the populated themes from the schema
+            stable_populated_themes = (
+                self.summary_state.populated_theme_list[-1][
+                    self.summary_state.populated_theme_list[-1]["question_id"]
+                    .isin(stable_schema["question_id"])
+                ].copy()
+            )
+            stable_populated_themes["stable"] = True
+        # If it doesn't exist set it as empty
+        else:
+            stable_populated_themes = pd.DataFrame()
 
         if stable_populated_themes is not None and not stable_populated_themes.empty:
             stable_populated_themes["stable"] = True
