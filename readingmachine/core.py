@@ -5338,22 +5338,6 @@ class Summarize:
 
             insights = insights_df["insight"].tolist()
             
-            # # --- sample when words in insights exceeds 70000 step ---
-            # MAX_WORDS = 70000           
-
-            # # if total number of words in the insights exceeds the max, then sample
-            # if sum(len(i.split()) for i in insights) > MAX_WORDS:
-            #     insights = utils.sample_to_word_limit(
-            #         insights,
-            #         max_words=MAX_WORDS,
-            #         seed=config.seed
-            #     )
-
-            #     print(
-            #         f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
-            #     )
-
-
             # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
             if len(insights) == 0:
                 no_insight_df = pd.DataFrame([{
@@ -5401,17 +5385,57 @@ class Summarize:
                 }
             }
             # Call the LLM
-            response = utils.call_chat_completion(
+            response, error = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
                 llm_client=self.llm_client,
                 ai_model=self.ai_model,
                 fall_back=fall_back,
                 return_json=True,
-                json_schema=json_schema
+                json_schema=json_schema, 
+                return_with_error=True
             )
             
             # Get the summary from the response and tag with metadata in a dataframe
+            summary_text = response.get("thematic_summary", "")
+
+            if not summary_text.strip():
+
+                print(f"Empty summary generated for theme_id {theme_id}. Error: {error}. Resubmitting for summary on sampled insights")
+                # --- sample when words in insights exceeds 70000 step ---
+                MAX_WORDS = 70000           
+
+                # if total number of words in the insights exceeds the max, then sample
+                
+                insights = utils.sample_to_word_limit(
+                    insights,
+                    max_words=MAX_WORDS,
+                    seed=config.seed
+                )
+
+                print(
+                    f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
+                )
+                insights_str = "\n".join(insights)
+
+                user_prompt = (
+                f"RESEARCH QUESTION: {rq_text}\n"
+                f"THEME LABEL: {theme_label}\n"
+                f"THEME DESCRIPTION: {theme_description}\n"
+                f"INSIGHTS TO SYNTHESIZE:\n"
+                f"{insights_str}\n\n"
+                )
+
+                response = utils.call_chat_completion(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                    llm_client=self.llm_client,
+                    ai_model=self.ai_model,
+                    fall_back=fall_back,
+                    return_json=True,
+                    json_schema=json_schema
+                )
+                    
             thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
             thematic_summary["question_id"] = rq_id
             thematic_summary["theme_id"] = int(theme_id)
