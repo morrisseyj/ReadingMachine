@@ -1111,6 +1111,7 @@ class Prompts:
             "- In these cases, you should prefer splitting or redistributing the conceptual load over incremental adjustment.\n"
             "   - if redistributing, use the current summary length (in words) as a proxy for how close the theme is to this limit. Summaries approaching this length are near capacity and should not be expanded.\n"
             "- Prioritize splitting over expansion when a theme fails the completeness check, unless there is an obvious low word count, completeness test passing theme that can clearly accommodate the failed content.\n"
+            "The 'Other' theme should also be split, if it is failing the completeness check, with the most prominent or coherent sub-theme extracted and elevated to a standalone theme.\n"
             "Use both passing and failing themes to improve conceptual structure. "
             "You are not required to preserve the number, identity, or structure of existing themes. "
             "A correct conceptual partition is more important than continuity with the previous schema.\n"
