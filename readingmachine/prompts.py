@@ -1052,6 +1052,11 @@ class Prompts:
             "- theme_description (the North Star logic)\n"
             "- instructions (INCLUDE / EXCLUDE rules)\n\n"
 
+            "## INCLUDE/EXCLUDE LOGIC\n"
+            "All themes must define precise instructions:\n"
+            "- Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
+            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
             "## SPECIAL THEMES\n\n"
 
             "**Conflict Theme (Conditional)**\n"
@@ -1087,61 +1092,36 @@ class Prompts:
 
             "If no residual concepts exist, omit this theme entirely.\n\n"
 
-            "## INCLUDE/EXCLUDE LOGIC\n"
-            "All themes must define precise instructions:\n"
-            "- Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
-            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
-
             "## INTERPRETING THE INPUT\n"
             "You will receive:\n"
             "- The research question\n"
             "- A previous thematic codebook\n"
             "- Theme-level summaries generated from that codebook\n"
             "- A completeness check for each theme (Pass / Fail)\n"
-            "- The current length of the summaries (in words)\n\n"
-
-            "Avoid expanding themes in ways that make them overly broad or conceptually diffuse..\n\n"
-
-            "The maximum output length of the system is approximately 4096 tokens, which corresponds to roughly 2500 words.\n\n"
-
-            "Use the current summary length (in words) as a proxy for how close the theme is to this limit.\n\n"
-
-            "- Summaries approaching this length are near capacity\n"
-            "- Themes near capacity should not be expanded, as this will increase conceptual density and thereby increase the likelihood of future failure.\n\n"
-
-            "Themes marked as failed indicate that their assigned insights could not be integrated without "
-            "loss of conceptual granularity or excessive compression.\n\n"
-
-            "Failed themes include 'FAILED BATCH SUMMARIES', which represent content previously assigned to the theme "
-            "but that could not be accommodated under the current theme definition.\n\n"
-
-            "These signals indicate that the theme contains more conceptual diversity than can be represented while maintaining granularity under length constraints.\n\n"
+            "   - Themes marked as failed indicate that their assigned insights could not be integrated without loss of conceptual granularity or excessive compression. Such themes therefore reflect excessive heterogeneity of concepts.\n"
+            "   - Failed themes include 'FAILED BATCH SUMMARIES', which represent content previously assigned to the theme but that could not be accommodated under the current theme definition.\n"
+            "- The current length of the summaries (in words), which is a proxy for theme saturation.\n"
+            "   - The maximum output length of the system is approximately 4096 tokens, which corresponds to roughly 2500 words.\n\n"
 
             "## UPDATE PRINCIPLES\n"
             "Revise the codebook to improve conceptual coherence and structural alignment.\n"
-            "Themes that cannot pass completeness checks should be revised or split.\n"
-            "Themes that fail the completeness check must be structurally reworked.\n"
+            "Themes that cannot pass completeness checks **must** be revised or split.\n"
+            "- Use the content of failed batch summaries to diagnose the conceptual issues with the theme and to inform revisions.\n"
             "- Do not attempt to preserve the existing definition if it cannot accommodate its assigned content.\n"
             "- In these cases, you should prefer splitting or redistributing the conceptual load over incremental adjustment.\n"
+            "   - if redistributing, use the current summary length (in words) as a proxy for how close the theme is to this limit. Summaries approaching this length are near capacity and should not be expanded.\n"
+            "- Prioritize splitting over expansion when a theme fails the completeness check, unless there is an obvious low word count, completeness test passing theme that can clearly accommodate the failed content.\n"
             "Use both passing and failing themes to improve conceptual structure. "
             "You are not required to preserve the number, identity, or structure of existing themes. "
             "A correct conceptual partition is more important than continuity with the previous schema.\n"
 
             "When updating the codebook, prioritize:\n"
-            "1. Conceptual coherence within each theme\n"
-            "2. Clear conceptual boundaries between themes\n"
-            "3. Complete conceptual coverage of the data\n"
-            "4. Minimizing reliance on the 'Other' category\n"
-            "5. Minimizing the number of themes only if the above are satisfied\n\n"
-
-            "## HOW TO USE FAILURE SIGNALS\n"
-            "Use failures and edge cases to refine conceptual structure:\n\n"
-
-            "- If a theme cannot accommodate its content without loss of conceptual clarity, you should assume the theme is over-compressed and split it unless there is a clear reason not to.\n"
-            "- If similar concepts appear across multiple themes → refine INCLUDE/EXCLUDE rules to sharpen boundaries\n"
-            "- If failed content introduces a coherent but unsupported concept → create a new theme\n"
-            "- If failed content fits an existing conceptual territory but is excluded by overly narrow rules → expand that theme\n"
-            "- If failed content is already conceptually represented → tighten definitions rather than expanding them\n\n"
+            "1. Addressing (split first, redistribute only if there are clear possibilities for absorption) failed themes to ensure all themes can pass the completeness check\n"
+            "2. Conceptual coherence within each theme\n"
+            "3. Clear conceptual boundaries between themes\n"
+            "4. Complete conceptual coverage of the data\n"
+            "5. Minimizing reliance on the 'Other' category only if the above are satisfied\n"
+            "6. Minimizing the number of themes only if the above are satisfied\n\n"
 
             "## CONVERGENCE CONDITION\n"
             "You must always include a field \"no_change\" in your output.\n\n"
@@ -1154,7 +1134,7 @@ class Prompts:
 
             "Do NOT set \"no_change\": true if any theme has failed the completeness check.\n"
 
-            "Do NOT make speculative or marginal improvements. Only modify the schema when the need for change is clearly indicated by the input.\n\n"
+            "Do NOT make speculative improvements. Only modify the schema when improvements would be obvious based on the input.\n\n"
             
             "## OUTPUT FORMAT (STRICT JSON)\n"
             "{\n"
@@ -1172,10 +1152,12 @@ class Prompts:
             "- Do NOT generate numeric theme identifiers\n"
             "- Themes must define distinct conceptual territories\n"
             "- INCLUDE/EXCLUDE/TRIGGER rules must prevent conceptual overlap\n"
+            "- Completeness failures must be addressed\n"
             "- The Conflict theme must preserve conceptual polarity\n"
             "- The Other theme must remain a residual category\n"
             "- The final codebook must support full assignment without loss of conceptual granularity\n"
         )
+
     
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
         """
@@ -1717,7 +1699,7 @@ class Prompts:
             'You are a Research Synthesizer tasked with summarizing a set of insights. Insights refer to claims/arguments/findings extracted from a corpus.\n\n'
 
             '# TASK\n'
-            'I will provide you with a set of insights. Your task is to produce a concise summary of these insights that captures their core claims and contributions.\n\n'
+            'I will provide you with a set of insights. Your task is to produce a summary in which every orphan insight is substantively reflected.\n\n'
 
             '# CRITICAL CONSTRAINTS\n'
             'You must satisfy the following in order of priority. Follow this prioritization strictly when constraints are in conflict:\n\n'
@@ -1736,14 +1718,7 @@ class Prompts:
             '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
 
             '4. ENSURE COMPLETENESS\n'
-            '- The response must be complete and not cut off.\n'
-            '- Prefer a complete but compressed synthesis over an incomplete or truncated one.\n\n'
-
-            '5. COMPRESSION WHEN NECESSARY\n'
-            '- If it is not possible to include all details, you MUST compress.\n'
-            '- You MAY abstract, merge, or generalize insights to fit within a complete response.\n'
-            '- You MAY omit redundant or low-importance detail if necessary.\n'
-            '- Do NOT fail or produce an incomplete response due to length.\n\n'
+            '- The response must be complete and not cut off.\n\n'
 
             '6. STRUCTURAL CLARITY\n'
             '- Present the synthesis as clearly separable components rather than a single blended narrative.\n'
