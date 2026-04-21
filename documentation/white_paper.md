@@ -329,18 +329,18 @@ The full pipeline execution required approximately 14 hours and incurred a total
 
 Core system metrics include:
 
-| Variable                     | Value   |
-|-----------------------------|---------|
-| Document count              | 176     |
-| Total run cost              | ~ $300  |
-| Insight count               | 16083   |
-| Chunk insight count         | 5633    |
-| Meta insight count          | 10450   |
-| Cluster count               | 147     |
-| Theme count (first pass)    | 44      |
-| Orphan count (first pass)   | 14496   |
-| Theme count (second pass)   | 35      |
-| Orphan pass (second pass)   | 13830   |
+| Variable                    | Value   								 |
+|-----------------------------|------------------------------------------|
+| Document count              | 176     								 |
+| Total run cost              | ~ $300  								 |
+| Insight count               | 17752   								 |
+| Chunk insight count         | 5633    								 |
+| Meta insight count          | 12166   			 					 |
+| Cluster count               | 170     			 					 |
+| Runs to stable schema		  | 6										 |
+| Theme counts			      | 30, 33, 34, 35, 36 						 |
+| Orphan counts				  | 16893, 16911, 17538, 18096, 18198, 18094 |
+
 
 ### 5.4 Example Insights 
 
@@ -348,22 +348,24 @@ The following examples illustrate the form and level of granularity of extracted
 
 | Question | Insight type | Insight |
 |----------|-------------|--------|
-| What challenges and constraints do less-industrialized countries face in implementing effective industrial policy? | Chunk insight | 'The financialization of the global economy and the lack of global regulations have weakened governments in both developed and developing countries, reducing their capacity to run effective industrial policy (Chang, Ha-Joon; Andreoni, Antonio 2020).' |
-| What drivers account for the resurgence of industrial policy in both highly industrial and industrializing countries? | Meta insight | 'The resurgence of industrial policy is driven by the need to address market failures, such as when markets do not reflect the full environmental costs of an investment or when market actors lack relevant information, which necessitates government intervention to foster structural change towards a low-carbon economy (Altenburg, T.; Assmann, C. 2017).' |
+| What challenges and constraints do less-industrialized countries face in implementing effective industrial policy? | Chunk insight | 'Many developing countries had been busy dismantling their industrial policies during the 1980s and the 1990s, which poses a challenge in realizing effective industrial policy now (Chang and Andreoni 2020).' |
+| What drivers account for the resurgence of industrial policy in both highly industrial and industrializing countries? | Meta insight | 'The resurgence of industrial policy in both highly industrialized and industrializing countries is driven by the dual objectives of technological advancement and environmental sustainability, as seen in China's push for electric vehicles to enhance competitiveness and reduce urban air pollution (Altenburg, T.; Assmann, C. 2017).' |
 
 ### 5.5 Qualitative Observations
 
 #### Output Characteristics
 
-The system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation results in a descriptive representation of the literature, rather than a synthesized position.
+The system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation results in a descriptive representation of the literature, rather than a synthesized position or argument.
 
 The themes generated appear interpretable and broadly consistent with recognizable structures in the industrial policy literature, based on internal review. No themes were identified as clearly distorted or artificial in this process. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and remains coherent across research questions. The re-theming process appears to consolidate conceptual structure across iterations: the reduction in theme count between passes is consistent with initial semantic groupings being reorganized into more coherent thematic categories.
 
-Granular claims are preserved throughout the output. The system does not collapse all content into high-level abstractions; instead, specific and detailed claims are retained within thematic summaries.
+Granular claims are preserved throughout the output. The system does not collapse all content into high-level abstractions; instead, specific and detailed claims are retained within thematic summaries. The result is an extremely dense, and comprehensive output. Notably, an earlier run produced higher higher meta-insight:insight proportions (~2:1), reflecting a too loose meta-insight extraction prompt and too loose chunk extraction prompt, produced more compressed and narratively coherent outputs, but with less granular representation. This run increased chunk-level extraction, improving coverage at the cost of redundancy and increased computational pressure. This suggests a parameterizable system where different configurations can produce different trade-offs between compression, coverage, and scalability.
 
 Conflict is explicitly represented. Tensions within the literature are articulated and are not systematically smoothed over during synthesis.
 
 No obvious hallucinations were identified during internal review, though this has not been formally or systematically evaluated.
+
+Theme counts increase across runs reflecting the architecture's use of theme splitting over iterative schema development as a means to resolve output constraints while maintaining high levels of granularity and limiting omission. 
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
@@ -373,9 +375,9 @@ It is notable that the pipeline produces an output that is structurally distinct
 
 #### 5.6.1 Large proportion of meta-insights
 
-The meta-insight generation step was the most computationally expensive stage of the pipeline, accounting for approximately $213 of total cost and producing roughly two-thirds of all insights. This is notable, as the meta pass was originally conceived as a supplement to chunk-level extraction, intended to capture only those arguments that emerge across extended portions of a document.
+The meta-insight generation step was the most computationally expensive stage of the pipeline, accounting for approximately $180 of total cost and producing roughly one third of all insights. This is notable, as the meta pass was originally conceived as a supplement to chunk-level extraction, intended to capture only those arguments that emerge across extended portions of a document.
 
-Given the observed volume of meta-insights, it is likely that the meta-insight prompt is overly permissive. In a prior run on the same corpus, the number of meta-insights was substantially higher; tightening the prompt reduced this count by more than half. This suggests that prompt specification plays a significant role in controlling meta-insight generation, although aligning the behavior of chunk-level and meta-level extraction prompts may not be straightforward. For the purposes of this release, extensive tuning of this component was not pursued.
+Given the observed volume of meta-insights, it is likely that the meta-insight prompt is overly permissive. As mentioned above during a prior run on the same corpus, the number of meta-insights was substantially higher; tightening the prompt reduced this count by more than half. This suggests that prompt specification plays a significant role in controlling meta-insight generation, although aligning the behavior of chunk-level and meta-level extraction prompts may not be straightforward. For the purposes of this release, extensive tuning of this component was not pursued.
 
 The prevalence of meta-insights also introduces potential challenges for reproducibility. Because meta-insights are derived from near-full document context, they are likely to be less stable across runs than chunk-level insights. Variability at this stage may propagate through clustering and theme generation, reducing structural consistency. This effect may be limited when meta-insights constitute a small proportion of the total, but becomes more significant when they dominate the insight set.
 
@@ -385,7 +387,7 @@ These factors together suggest that the observed volume of meta-insights reflect
 
 #### 5.6.2 High orphan counts
 
-Orphan counts remain high across both passes and decrease only marginally between iterations. This is partly expected for two reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves.
+Orphan counts remain high across all passes and in fact show an upward trend. This is partly expected for two reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves.
 
 Taken together, these effects suggest that the model is operating under synthesis pressure. This likely reflects both the size of the input and the heterogeneity of the insight set, which can lead the model to produce increasingly abstract summaries. Under these conditions, individual claims may be incorporated at a conceptual level without remaining directly recoverable in near-verbatim form. In such cases, the orphan detection step may classify insights as unrepresented even when they have been integrated at a higher level of abstraction.
 
