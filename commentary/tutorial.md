@@ -19,7 +19,7 @@ After running ReadingMachine over a large corpus you end up with:
     - retains granular claims
     - maps arguments across documents
 
-You can find an example of the final output of a 176 document corpus run, here: https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/INDUSTRIAL_POLICY.md 
+You can find an example of the final output of a 176 document corpus run, here: https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_v2.md 
 
 ReadingMachine is an experimental, open-source method (https://github.com/morrisseyj/ReadingMachine/). This tutorial walks through how to run the pipeline step by step, explaining what each part of the code is doing along the way. It complements, the [examples documentation in the repo](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/README.md), and the [tool's white paper](https://github.com/morrisseyj/ReadingMachine/blob/main/documentation/white_paper.md).
 
@@ -30,7 +30,7 @@ Conceptually, the methodology formalizes a familiar qualitative research workflo
 reading a corpus → extracting notes → identifying themes → synthesizing those themes → checking for completeness → refining for clarity
 
 ReadingMachine decomposes this process into a more granular and structured sequence of steps. The following pipeline overviews the computational implementation of the above workflow:
-
+```
     [Generate Research Questions]  
                     ↓  
             [Ingest Papers]  
@@ -72,6 +72,7 @@ ReadingMachine decomposes this process into a more granular and structured seque
         [Generate Title, Executive Summary, Question Summaries]  
                      ↓  
         [Render Output]  
+```
 
 The specific steps to run the pipeline are as follows (the below draws heavily on the example pipeline run contained [here](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/run_core_pipeline.py)). 
 
@@ -238,11 +239,11 @@ from readingmachine import utils
 utils.restart_pipeline()
 ```
 
-This will print the most recent complete class, and give you instructions on how to 1) load the last complete state and 2) instantiate the next class in the pipeline. You simply need asign this instantiaion call to a variable to proceed. The corpus_state saves after all the required methods in the class have been run. The summary_state (see below) saves at the completion of each summarize step.
+This will print the most recent complete class, and give you instructions on how to 1) load the last complete state and 2) instantiate the next class in the pipeline. You simply need assign this instantiation call to a variable to proceed. The corpus_state saves after all the required methods in the class have been run. The summary_state (see below) saves at the completion of each summarize step.
 
 ## 2 Start the pipeline: Ingestor class**
 
-Ingestor class is responsible for ingesting papers, pulling metadata, dedpulicating papers and chunking the papers. First we initialize the class.
+Ingestor class is responsible for ingesting papers, pulling metadata, deduplicating papers and chunking the papers. First we initialize the class.
 
 ingestor = core.Ingestor(
     questions=questions_df,
@@ -301,7 +302,7 @@ We move now to generating the insights
 
 ## 3. Generate insights
 
-This class handles insight extraction. First we instantiate the class - passing the final corpus_state attribte from the Ingestor class to the Insights class.
+This class handles insight extraction. First we instantiate the class - passing the final corpus_state attribute from the Ingestor class to the Insights class.
 
 ```
 insights_generator = core.Insights(
@@ -330,7 +331,7 @@ insights_generator.get_meta_insights()
 
 ## 4. Cluster insights
 
-Next we move to clustering the insights. This class handles embeddnig generation, dimensionality reduction and clustering. Instantiate the class as follows:
+Next we move to clustering the insights. This class handles embedding generation, dimensionality reduction and clustering. Instantiate the class as follows:
 
 ```
 cluster = core.Clustering(
@@ -365,9 +366,9 @@ cluster.tune_umap_params(
 )
 ```
 
-You want to select parameters that maximize the silhoette score. 1 is the maximum but because natural language data is messy we don't expect very high scores here (likely closer to ~0.15-0.3). 
+You want to select parameters that maximize the silhouette score. 1 is the maximum but because natural language data is messy we don't expect very high scores here (likely closer to ~0.15-0.3). 
 
-Note this parameter sweep uses research questions as a proxy for estimating the silhoette score. If you have two very multiple research questions that are very similar, this will worsen silhoette scores. You can exclude any rresearch questions from the sweep by passing the parameter: `rq_exclude = [<question_id>]` to the .tune_umap_params() method.
+Note this parameter sweep uses research questions as a proxy for estimating the silhouette score. If you have two very multiple research questions that are very similar, this will worsen silhouette scores. You can exclude any research questions from the sweep by passing the parameter: `rq_exclude = [<question_id>]` to the .tune_umap_params() method.
 
 #### 4.2.2. Apply UMAP
 
@@ -385,7 +386,7 @@ cluster.reduce_dimensions(
 
 ### 4.3. Clustering*
 
-Now we can cluster on the reduced dimensional embeddings. We use HDBSCAN for this. Again we have to select parameters and the tool includes another pramater sweep capability.
+Now we can cluster on the reduced dimensional embeddings. We use HDBSCAN for this. Again we have to select parameters and the tool includes another parameter sweep capability.
 
 #### 4.3.1. HDBSCAN parameter sweeep
 
@@ -420,7 +421,11 @@ cluster.generate_clusters({
 })
 ```
 
-Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers. The approach is to take any clusters for which the size exceeds n and then partition those clusters into k (cluster_size/n) groups. This is done via a density seeded, round robin attribution process. See the white paper for details. 
+Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers. The approach is to take any clusters for which the size exceeds n and then partition those clusters into k (cluster_size/n) groups. This is done via a density seeded, round robin attribution process. See the white paper for details. You can set the cluster size limits via the following keyword arguments:
+- `hdbscan_cluster_size_cap` (default 1000)
+- `outlier_cluster_size_cap` (default is 300)
+If you cluster summarize step fails, you likely need to come back to this step and re-run the clustering process with reduced size caps. 
+
 
 ## 5. Summarize the data
 
@@ -447,9 +452,14 @@ The first step is to have an LLM summarize all the clusters of insights.
 summarize.summarize_clusters()
 ```
 
-Note if your summarize_clusters step produces errors, there are two likely cases:
-1. Context window exceeded. Fix by passing a smaller `context_window_constraint` to **both** `tune_hdbscan_params()` and `generate_clusters()`. The default is 90000 (words). 
-2. LLM output is truncated and not valid json. Fix by passing a smallrer `max_cluster_size_cap` to **both** `tune_hdbscan_params() and `generate_clusters()`. The default is 800 (insights).  
+Note if your summarize_clusters step produces errors, you should reduce the max cluster size in `generate_clusters()` method (from the Clustering class). 
+- If clusters are failing set `hdbscan_cluster_size_cap` (default 1000). 
+- If outliers are failing set `outlier_cluster_size_cap` (default is 300).
+
+## Sidenote: How to resume a run during summary
+
+The Summarize class starts populating the the summary_state object. You can now track your progress by first loading the Summarize object via `utils.restart_pipeline()` (see sidenote above). You can then call `Summarize.summary_state.status()` which will show you were in the Summarize iteration you are, and instruct you on the next operation you should run.
+
 
 ### 5.2. Generate theme schema
 
@@ -485,7 +495,7 @@ summarize.address_orphans()
 
 ## 6. Iterate themes and finalize
 
-Now we have a set of themes containing summaries of the insights allocated to them, along with reinserted orphans. However since the themes were generated on top of compressed cluster summaries the schema may not have accounted for minority insights or edge cases. In those cases the forced orphan reinsertion may destabilize theme boundaries, or break their internal conceptual cohernece. Iteration on themes is a means to restore this coherence. To achieve this practically we pass the current set of summarized themes back to the `gen_theme_schema()` method that will try to generate an improved schema accounting for all the insights that are now reflected in the summaries.
+Now we have a set of themes containing summaries of the insights allocated to them, along with reinserted orphans. However since the themes were generated on top of compressed cluster summaries the schema may not have accounted for minority insights or edge cases. In those cases the forced orphan reinsertion may destabilize theme boundaries, or break their internal conceptual coherence. Further if there is too much heterogenous content in a single theme, the model may error as it can't preserve granularity, prevent omission and stay within the finite output limit of the model. Iteration on themes is a means to restore this coherence and resolve oveloaded themes. To achieve this practically we pass the current set of summarized themes back to the `gen_theme_schema()` method that will try to generate an improved schema accounting for all the insights that are now reflected in the summaries.
 
 ### 6.1. Iterate themes
 
@@ -499,11 +509,11 @@ summarize.populate_themes()
 summarize.address_orphans()
 ```
 
-You can run this iteration as many times as you like but for now running it twice is suggested. 
+We run this step until the model tells us that all the themes have stabilized - i.e. it cannot see any obvious improvements that it could make to the schema. This will, at best happen on the second pass (after orphan insertion)
 
 ### 6.2. Address redundancy
 
-The final step in this class is optional. You can create an updated output that tries to reduce redundacies across themes within each research question. This risks losing insights, but makes the output more readable. 
+The final step in this class is optional. You can create an updated output that tries to reduce redundancies across themes within each research question. This risks losing insights, but makes the output more readable. 
 
 ```
 summarize.address_redundancy()
@@ -566,4 +576,3 @@ renderer.trace_claim(
 That is the complete pipeline. For more details on the methodology see (arxiv whitepaper). 
 
 As mentioned this project is in an experimental phase and it still seeking collaboration, testing and validation. Should you have questions or an interest in collaborating please reach out to: james.morrissey@oxfam.org. 
-
