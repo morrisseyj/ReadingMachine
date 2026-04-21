@@ -8,11 +8,17 @@ The evaluation focuses on the fidelity, coherence, and integrity of ReadingMachi
 
 ## Folder Structure
 
-### output/
+### /industrial_policy_main_run/
 
-Contains the ReadingMachine output(s) being evaluated, including the full structured synthesis generated from the corpus.
+Contains the ReadingMachine output being evaluated, including the full structured synthesis generated from the corpus.
 
-Each output corresponds to a specific run, corpus, and configuration of the system.
+The output is accompanied by notes regarding the run's specifications.
+
+### /industrial_policy_previous_runs/
+
+Contains prior runs of ReadingMachine over the corpus.
+
+The output is accompanied by notes regarding the run's specifications.
 
 ### EVAL_INSTRUCTIONS.md
 
@@ -35,7 +41,7 @@ Results are reported by dimension rather than collapsed into a single score.
 
 Reviews are submitted via a structured, non‑anonymous Google Form:
 
-👉 [LINK TO GOOGLE FORM]
+https://forms.gle/z3Mxpu8mFnj6xoRp8
 
 Partial completion is expected and valid; reviewers are encouraged to assess only those aspects they feel qualified to evaluate.
 

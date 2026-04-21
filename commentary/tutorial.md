@@ -393,7 +393,8 @@ Now we can cluster on the reduced dimensional embeddings. We use HDBSCAN for thi
 cluster.tune_hdbscan_params(
     min_cluster_sizes=[5, 10, 15, 20],
     metrics=["euclidean", "manhattan"],
-    min_sample_ratios=[0.5, 0.25, 0.1, 0.05]
+    min_sample_ratios=[0.5, 0.25, 0.1, 0.05],
+    cluster_selection_method=["eom", "leaf"]
     )
 ```
 
@@ -419,7 +420,7 @@ cluster.generate_clusters({
 })
 ```
 
-Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers, which also get broken up using KMeans.
+Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers. The approach is to take any clusters for which the size exceeds n and then partition those clusters into k (cluster_size/n) groups. This is done via a density seeded, round robin attribution process. See the white paper for details. 
 
 ## 5. Summarize the data
 
