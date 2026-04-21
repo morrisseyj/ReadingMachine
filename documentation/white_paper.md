@@ -350,7 +350,7 @@ Core system metrics include:
 | Meta insight count          | 5633   			 					     |
 | Cluster count               | 170     			 					 |
 | Runs to stable schema		  | 6										 |
-| Theme counts			      | 30, 33, 34, 35, 36 						 |
+| Theme counts			      | 30, 33, 34, 35, 36, 37					 |
 | Orphan counts				  | 16893, 16911, 17538, 18096, 18198, 18094 |
 
 
@@ -397,7 +397,7 @@ These factors together suggest that the observed volume of meta-insights reflect
 
 #### 6.6.2 High orphan counts
 
-Orphan counts remain high across all passes and in fact show an upward trend. This is partly expected for two reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves.
+Orphan counts remain high across all passes and in fact show an upward trend. This is partly expected for three reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves. Third, the theme counts are increasing. Given the above, since orphans are counter per theme as total theme counts increase, total orphans are expected to increase as well. 
 
 Taken together, these effects suggest that the model is operating under synthesis pressure. This likely reflects both the size of the input and the heterogeneity of the insight set, which can lead the model to produce increasingly abstract summaries. Under these conditions, individual claims may be incorporated at a conceptual level without remaining directly recoverable in near-verbatim form. In such cases, the orphan detection step may classify insights as unrepresented even when they have been integrated at a higher level of abstraction.
 
