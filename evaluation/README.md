@@ -10,7 +10,7 @@ The evaluation focuses on the fidelity, coherence, and integrity of ReadingMachi
 
 ### /industrial_policy_main_run/
 
-Contains the ReadingMachine output being evaluated, including the full structured synthesis generated from the corpus.
+Contains the ReadingMachine output being [evaluated](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_v2.md), including the full structured synthesis generated from the corpus.
 
 The output is accompanied by notes regarding the run's specifications.
 
