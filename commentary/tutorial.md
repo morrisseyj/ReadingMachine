@@ -244,13 +244,14 @@ This will print the most recent complete class, and give you instructions on how
 ## 2 Start the pipeline: Ingestor class**
 
 Ingestor class is responsible for ingesting papers, pulling metadata, deduplicating papers and chunking the papers. First we initialize the class.
-
+```
 ingestor = core.Ingestor(
     questions=questions_df,
     papers=insights_df,
     llm_client=llm_client,
     ai_model="gpt-4o"
 )
+```
 
 ### 2.1 Ingest papers*
 
