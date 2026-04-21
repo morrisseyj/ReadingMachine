@@ -193,13 +193,13 @@ To address this, the pipeline regenerates the theme schema using the current the
 
 This theme generation → mapping → orphan handling loop is repeated iteratively. In the current implementation the model is instructed not to make speculative improvements to the schema and only offer an updated schema when the input material shows obvious opportunities for improved structuring. In this respect an ideal schema prioritizes:
 
-```
-1. Conceptual coherence within each theme
-2. Clear conceptual boundaries between themes
-3. Complete conceptual coverage of the data
-4. Minimizing reliance on the 'Other' category only if the above are satisfied"
-5. Minimizing the number of themes only if the above are satisfied
-```
+
+> 1. Conceptual coherence within each theme
+> 2. Clear conceptual boundaries between themes
+> 3. Complete conceptual coverage of the data
+> 4. Minimizing reliance on the 'Other' category only if the above are satisfied"
+> 5. Minimizing the number of themes only if the above are satisfied
+
 
 If the model cannot see obvious improvements for a question's themes, they are all marked as stable. Only unstable themes are passed to future iterations. Once all themes are stable the user is instructed to move to redundancy handling and summarization. In future it likely makes sense to provide some formal measure of schema stability to track how it evolves over time considering: stability of themes, size of Other category, stability of insight allocation to themes, number of orphans etc.
 
