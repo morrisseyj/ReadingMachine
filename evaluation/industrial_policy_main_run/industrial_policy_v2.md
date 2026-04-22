@@ -4,6 +4,8 @@
 
 This document was produced by the [ReadingMachine](https://github.com/morrisseyj/ReadingMachine/) framework. ReadingMachine is designed to generate a high-coverage, structured, traceable mapping of a defined document corpus, organized around a specified set of research questions. The output should be read as a **corpus reading**, not as an argument, position paper, or normative assessment. The system does not determine what is important, correct, or true. It represents what is present in the corpus under the specified research questions.
 
+The paper is written with each research question handled stand-alone. This allows any reader to pick up and read on any question they ar specifically interested in. The cost of this feature is some repetition across sections/research questions. 
+
 ReadingMachine operates as a **tightly bounded reader**. It does not independently determine research questions, define the scope of inquiry, or evaluate the importance or correctness of claims. Reasoning steps—such as the formulation of motivating questions, the definition of the corpus, and the interpretive goals of the analysis—lie with the user. The role of ReadingMachine is to execute a structured reading of the material it is given, according to those externally specified parameters.
 
 For this reason, it is important to state explicitly the research questions that motivated this reading and the process by which the corpus was constructed. These elements define the analytical boundaries within which ReadingMachine operates and, correspondingly, the scope of what this output can be expected to represent.
