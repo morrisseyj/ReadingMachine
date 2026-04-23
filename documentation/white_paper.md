@@ -321,7 +321,7 @@ To support this process, this paper constitutes an open invitation to domain exp
 
 ### 6.2 Experimental Setup
 
-The corpus was constructed using the ReadingMachine *getlit* module, which combines structured search, LLM-assisted retrieval of grey literature, and human filtering. The final corpus consisted of 176 documents. This corpus is intentionally demanding: it is large, spans a diverse literature, and includes multiple document types, including webpages, academic papers, long institutional reports, and books.
+The corpus was constructed using the ReadingMachine *getlit* module, which combines structured search, LLM-assisted retrieval of grey literature, and human filtering. This produced a corpus of 176 documents, of which 153 returned insights. This corpus is intentionally demanding: it is large, spans a diverse literature, and includes multiple document types, including webpages, academic papers, long institutional reports, and books.
 
 The analysis was guided by the following research questions:
 
@@ -343,7 +343,7 @@ Core system metrics include:
 
 | Variable                    | Value   								 |
 |-----------------------------|------------------------------------------|
-| Document count              | 176     								 |
+| Document count              | 153 (176)     								 |
 | Total run cost              | ~ $300  								 |
 | Insight count               | 17752   								 |
 | Chunk insight count         | 12166    								 |
