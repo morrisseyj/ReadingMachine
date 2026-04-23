@@ -365,14 +365,22 @@ The following examples illustrate the form and level of granularity of extracted
 
 ### 6.5 Qualitative Observations
 
-It is immediately noticeable from the output that it does not look like the output of other AI synthesis and question-answer tools. 
+The [output](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_current.md) produced by the system is notable for its scale and density. Even at a glance, it differs from conventional AI-generated summaries in ways that are immediately apparent:
 
+- **Length**: The document is substantially longer than typical AI-generated outputs, often extending to tens of thousands of words.
+- **Density**: Sections are tightly packed with discrete claims, with relatively little compression into high-level generalizations.
+- **Granularity**: Specific mechanisms, conditions, and qualifications are retained rather than absorbed into broader summaries.
+- **Persistence of detail**: The output does not quickly converge to a concise narrative; instead, it maintains a large number of localized statements drawn from across the corpus.
+- **Coherence under scale**: Despite the volume of detail, sections read as continuous, structured prose rather than fragmented or list-like outputs.
+- **Breadth without compression**: The document remains readable while operating at a level of coverage and detail that is atypical of standard summarization or retrieval-based workflows.
 
-The system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation results in a descriptive representation of the literature, rather than a synthesized position or argument.
+Taken together, these properties give the output a character that is immediately distinguishable from query-based or summarization-driven systems, which typically produce shorter, more compressed representations.
 
-The themes generated appear interpretable and broadly consistent with recognizable structures in the industrial policy literature, based on internal review. No themes were identified as clearly distorted or artificial in this process. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and remains coherent across research questions. The re-theming process appears to consolidate conceptual structure across iterations: the reduction in theme count between passes is consistent with initial semantic groupings being reorganized into more coherent thematic categories.
+Looking more closely at the output, the system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation is visible in the descriptive character of the text, which represents the literature without advancing a synthesized position.
 
-Granular claims are preserved throughout the output. The system does not collapse all content into high-level abstractions; instead, specific and detailed claims are retained within thematic summaries. The result is an extremely dense, and comprehensive output. Notably, an earlier run produced higher meta-insight:insight proportions (~2:1), reflecting a too loose meta-insight extraction prompt and too loose chunk extraction prompt, produced more compressed and narratively coherent outputs, but with less granular representation. This run increased chunk-level extraction, improving coverage at the cost of redundancy and increased computational pressure. This suggests a parameterizable system where different configurations can produce different trade-offs between compression, coverage, and scalability.
+The themes generated appear interpretable and broadly consistent with recognizable structures in the industrial policy literature, based on internal review. No themes were identified as clearly distorted or artificial in this process of internal review. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and remains coherent across research questions. The re-theming process appears to consolidate conceptual structure across iterations: the reduction in theme count between passes is consistent with initial semantic groupings being reorganized into more coherent thematic categories.
+
+Granular claims are preserved throughout the output. The system does not collapse content into high-level abstractions; instead, specific and detailed claims remain visible within thematic summaries, contributing to the overall density of the document.
 
 Conflict is explicitly represented. Tensions within the literature are articulated and are not systematically smoothed over during synthesis.
 
@@ -382,7 +390,7 @@ Theme counts increase across runs reflecting the architecture's use of theme spl
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
-It is notable that the pipeline produces an output that is structurally distinct from that of conventional AI systems, including query-conditioned and summarization-based approaches. As a result, direct comparison with these systems is non-trivial, even where the goal is to assess whether the design reduces omission or improves scalability.
+The pipeline produces an output that is structurally distinct from conventional AI systems, including query-conditioned and summarization-based approaches. As a result, direct comparison with these systems is non-trivial, even where the goal is to assess whether the design reduces omission or improves scalability.
 
 ### 6.6 Failure Modes and Issues
 
@@ -390,7 +398,7 @@ It is notable that the pipeline produces an output that is structurally distinct
 
 The meta-insight generation step was the most computationally expensive stage of the pipeline, accounting for approximately $180 of total cost and producing roughly one third of all insights. This is notable, as the meta pass was originally conceived as a supplement to chunk-level extraction, intended to capture only those arguments that emerge across extended portions of a document.
 
-Given the observed volume of meta-insights, it is likely that the meta-insight prompt is overly permissive. As mentioned above during a prior run on the same corpus, the number of meta-insights was substantially higher; tightening the prompt reduced this count by more than half. This suggests that prompt specification plays a significant role in controlling meta-insight generation, although aligning the behavior of chunk-level and meta-level extraction prompts may not be straightforward. For the purposes of this release, extensive tuning of this component was not pursued.
+Given the observed volume of meta-insights, it is likely that the meta-insight prompt is overly permissive. Notably, an earlier run produced higher meta-insight:insight proportions (~2:1), reflecting a too loose meta-insight extraction prompt and a too restrictive chunk extraction prompt. Overall this prior run produced more compressed and narratively coherent output, but with less granular representation. The current run relaxed instructions for chunk-level extraction, and tightened those for meta-insight extraction. The result was better coverage at the cost of redundancy and increased computational pressure. This suggests two important reflections: 1) the system presents as parameterizable where different configurations can produce different trade-offs between compression, coverage, and scalability. 2) Prompt specification likely plays a significant role in controlling insight generation. This allows for system tuning, but might make model swapping more complicated, and raises the possibility that simultaneously tuning meta-insight extraction and chunk insight extraction to complementary points may be non-trivial. For the purposes of this release, extensive tuning of this component was not pursued.
 
 The prevalence of meta-insights also introduces potential challenges for reproducibility. Because meta-insights are derived from near-full document context, they are likely to be less stable across runs than chunk-level insights. Variability at this stage may propagate through clustering and theme generation, reducing structural consistency. This effect may be limited when meta-insights constitute a small proportion of the total, but becomes more significant when they dominate the insight set.
 
