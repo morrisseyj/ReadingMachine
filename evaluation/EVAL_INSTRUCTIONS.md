@@ -4,7 +4,7 @@
 
 This evaluation assesses the epistemic fidelity of ReadingMachine’s structured corpus reading. 
 
-**The paper for evaluation can be found [here](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_v2.md).**
+**The paper for evaluation can be found [here](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_current.md).**
 
 **The form for completing the evaluation can be found [here](https://forms.gle/z3Mxpu8mFnj6xoRp8)**
 
