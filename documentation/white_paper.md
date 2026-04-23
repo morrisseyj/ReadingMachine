@@ -365,6 +365,9 @@ The following examples illustrate the form and level of granularity of extracted
 
 ### 6.5 Qualitative Observations
 
+It is immediately noticeable from the output that it does not look like the output of other AI synthesis and question-answer tools. 
+
+
 The system produces a structured mapping of the corpus rather than a single narrative argument. The separation of reading (insight extraction and organization) from downstream interpretation results in a descriptive representation of the literature, rather than a synthesized position or argument.
 
 The themes generated appear interpretable and broadly consistent with recognizable structures in the industrial policy literature, based on internal review. No themes were identified as clearly distorted or artificial in this process. The overall output reads more like an academic literature review than a conventional LLM summary or question-answering response, and remains coherent across research questions. The re-theming process appears to consolidate conceptual structure across iterations: the reduction in theme count between passes is consistent with initial semantic groupings being reorganized into more coherent thematic categories.
