@@ -305,7 +305,7 @@ Individually, some of these components draw on existing techniques from qualitat
 
 The results from ReadingMachine should be understood as a demonstration of system behavior at scale, rather than a formal evaluation of performance. To date, evaluation consists of a single large-scale corpus run and internal qualitative review.
 
-The system was applied to a corpus of 176 documents on industrial policy. The corpus is heterogeneous, including academic papers, institutional reports (including long-form documents exceeding 400 pages), books, and web-based materials. The analysis was guided by research questions developed through Oxfam America’s formal research processes, reflecting real organizational priorities.
+The system was applied to a [corpus](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/corpus.md) of 153 documents on industrial policy. The corpus is heterogeneous, including academic papers, institutional reports (including long-form documents exceeding 400 pages), books, and web-based materials. The analysis was guided by research questions developed through Oxfam America’s formal research processes, reflecting real organizational priorities.
 
 The resulting output was reviewed internally by research staff at Oxfam America. The outputs were assessed as substantively coherent and broadly aligned with existing domain understanding. This review indicates that the system produces plausible and interpretable representations of the corpus. However, it does not constitute a systematic or independent evaluation of performance.
 
