@@ -162,7 +162,7 @@ ingestor.drop_duplicates()
 #
 # After editing the CSV files run:
 
-ingestor.update_state("potential_duplicates.csv")
+ingestor.update_state("duplicate_check.csv")
 
 # Break each document into bounded segments (~paragraph scale)
 # This ensures the LLM reads manageable text windows
