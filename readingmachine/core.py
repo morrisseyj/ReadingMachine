@@ -2873,12 +2873,14 @@ class Clustering:
         """
         mask = cluster_labels != -1
         num_outliers = np.sum(~mask)
+
         filtered_embeddings = embeddings_matrix[mask]
         filtered_labels = cluster_labels[mask]
+
         if len(set(filtered_labels)) < 2:
-            return(pd.NA, num_outliers)
+            return np.nan, num_outliers
         db_score = davies_bouldin_score(filtered_embeddings, filtered_labels)
-        return db_score, num_outliers
+        return float(db_score), num_outliers
 
     def _estimate_max_cluster_sizes(self, context_window_constraint, hdbscan_cluster_size_cap):
         """
