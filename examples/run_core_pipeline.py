@@ -258,7 +258,8 @@ cluster.reduce_dimensions(
 cluster.tune_hdbscan_params(
     min_cluster_sizes=[5, 10, 15, 20],
     metrics=["euclidean", "manhattan"],
-    min_sample_ratios=[0.5, 0.25, 0.1, 0.05]
+    min_sample_ratios=[0.5, 0.25, 0.1, 0.05], 
+    cluster_selection_method=["eom", "leaf"]
     )
 
 # Inspect the tuning results a choose params that balance cluster coherence with coverage - question-by-question
@@ -266,11 +267,11 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 # Apply clustering
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"},
-    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom"},
-    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom"}
+    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5},
+    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 5},
+    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5},
+    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 5},
+    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 5}
 })
 
 
@@ -297,6 +298,10 @@ summarize = core.Summarize(
 
 summarize.summarize_clusters()
 
+# Note if your summarize_clusters step produces errors, you should reduce the cluster size parameters:
+# 1. If clusters are showing errors you should re-run generate_clusters() method (Clustering class) and lower the hdbscan_cluster_size_cap parameter (default is 1000). 
+# 2. If outliers are showing errors upon summarization you should re-run  generate_clusters() method (Clustering class) and lower the outlier_cluster_size_cap parameter (default is 300). 
+
 # ----------------------------------------------------------
 # Theme generation
 # ----------------------------------------------------------
@@ -322,6 +327,8 @@ summarize.gen_theme_schema()
 summarize.map_insights_to_themes()
 summarize.populate_themes()
 summarize.address_orphans()
+
+# Iterate until the model indicates that there are no obvious improvements to the schema to be offered. 
 
 # Reduce redundancy across themes
 summarize.address_redundancy()
