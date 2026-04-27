@@ -46,6 +46,7 @@ import hashlib
 import re
 import uuid
 import random
+from itertools import combinations
 
 def validate_format(
     corpus_state: Optional["CorpusState"] = None, 
