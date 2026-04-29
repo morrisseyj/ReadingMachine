@@ -38,6 +38,8 @@ This white paper introduces ReadingMachine as both a technical framework and a m
 
 The paper makes four contributions: (1) it introduces structured corpus reading as a methodological framing for large-scale synthesis; (2) it describes ReadingMachine, an open-source pipeline implementing this approach; (3) it demonstrates the system on a 153-document industrial policy corpus; and (4) it identifies observed scaling constraints and failure modes, including orphan persistence, context-pressure effects, and late-stage reinflation.
 
+Because the system produces a corpus map rather than a query response  or short summary, direct comparison with RAG or standard summarization  systems is not straightforward: the relevant evaluation question is not  only whether the final prose is better, but whether the intermediate  representation improves coverage, traceability, disagreement preservation, and downstream usefulness.
+
 ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations. The properties described in this paper—such as improved coverage, omission detection, and traceability—should be understood as design objectives and observed behaviors in a single large-scale run, rather than as formally validated performance characteristics. Support on evaluation and testing of the tool is actively encouraged.
 
 ## 2. The Problem
@@ -645,16 +647,3 @@ The method does not eliminate interpretation, does not replace human judgment, a
 
 As both a technical framework and a methodological proposal, ReadingMachine represents a step toward industrial-scale reading that preserves the structure and diversity of the underlying corpus.
 
-## References
-- Philippe Laban, Alexander Fabbri, Caiming Xiong, and Chien-Sheng Wu. 2024. Summary of a Haystack: A Challenge to Long-Context LLMs and RAG Systems. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing, pages 9885–9903, Miami, Florida, USA. Association for Computational Linguistics.
-- McInnes, L. Healy, J and Astels, S. 2017. hdbscan: Hierarchical density based clustering. Journal of Open Source Software, 2(11), 205, doi:10.21105/joss.00205
-- McInnes, Healy and Melville 2018. UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction, arXiv:1802.03426 [stat.ML]
-- Arksey, H., & O’Malley, L. 2005. Scoping studies: towards a methodological framework. International Journal of Social Research Methodology, 8(1), 19–32. https://doi.org/10.1080/1364557032000119616
-- Braun, V. & Clarke, V. 2006. *Using thematic analysis in psychology*, Qualitative Research in Psychology, 3(2), 77–101. https://doi.org/10.1191/1478088706qp063oa
-- Grootendorst 2022. *BERTopic: Neural topic modeling with a class-based TF-IDF procedure*, arXiv:2203.05794 [cs.CL]
-- Lewis et al., 2020. *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*, arXiv:2005.11401 [cs.CL]
-- Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. 2024. Lost in the Middle: How Language Models Use Long Contexts. Transactions of the Association for Computational Linguistics, 12:157–173.
-- Cohen et al., 2018. *A Discourse-Aware Attention Model for Abstractive Summarization*, arXiv:1804.05685 [cs.CL]  
-- Narayan et al., 2018. *Don’t Give Me the Details, Just the Summary*, arXiv:1808.08745 [cs.CL]  
-- Yao et al., 2023. *ReAct: Synergizing Reasoning and Acting in Language Models*, arXiv:2210.03629 [cs.CL]  
-- He et al., 2025. TRAJECT-Bench: A Trajectory-Aware Benchmark for Evaluating Agentic Tool Use, arXiv:2510.04550 [cs.AI]
