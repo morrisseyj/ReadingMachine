@@ -402,7 +402,7 @@ Theme counts increase across runs reflecting the architecture's use of theme spl
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
-The pipeline produces an output that is structurally distinct from conventional AI systems, including query-conditioned and summarization-based approaches. As a result, direct comparison with these systems is non-trivial, even where the goal is to assess whether the design reduces omission or improves scalability.
+The pipeline produces an output that is structurally distinct from conventional AI systems, including query-conditioned and summarization-based approaches. Direct comparison with systems such as RAG is therefore not straightforward, as the outputs differ in form and objective; even where comparisons are possible (e.g., coverage or traceability), the central evaluation question is whether separating reading from reasoning in this way leads to better downstream reasoning, sufficient to justify the additional cost, latency, and complexity.
 
 ### 7.6 Failure Modes and Issues
 
