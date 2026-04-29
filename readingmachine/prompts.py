@@ -615,6 +615,8 @@ class Prompts:
         )
 
 
+
+
     def gen_meta_insights(self, paper_context):
         """
         Generate a prompt for extracting paper-level meta-insights.
@@ -1159,7 +1161,6 @@ class Prompts:
             "- The final codebook must support full assignment without loss of conceptual granularity\n"
         )
 
-    
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
         """
         Generate the system prompt for mapping insights to themes.
@@ -1279,7 +1280,6 @@ class Prompts:
             "- Never return null, a single string, or an empty array.\n"
             f"- Valid theme_id values: [{allowed_ids_str}].\n\n"
         )
-
 
     def populate_themes(self, theme_len: int, theme_type: str):
 
@@ -1538,7 +1538,7 @@ class Prompts:
             '}\n\n'
         )
     
-    def integrate_orphans(self, max_length: int):
+    def integrate_orphans(self):
         """
         Generate the system prompt for reintegrating orphan insights.
 
@@ -1742,7 +1742,8 @@ class Prompts:
             '  "summary": "The insight synthesis..."\n'
             '}\n'
         )
-    
+
+
     def address_redundancy(self):
         """
         Generate the system prompt for redundancy reduction across themes.
@@ -1770,7 +1771,7 @@ class Prompts:
             System prompt instructing the model to perform redundancy
             reduction and return the refined theme text as strict JSON.
         """
-        return (
+        return(
             "# ROLE\n"
             "You are a Research Editor performing a structural redundancy reduction pass on a set of themes.\n\n"
 
