@@ -8,7 +8,7 @@ The volume of written material produced across modern institutions now far excee
 
 This paper introduces ReadingMachine, a computational methodology for structured corpus reading that reframes large language models as systems for executing bounded reading operations alongside their use as generators of answers. Rather than producing synthesis in a single step, the method decomposes large-scale reading into a sequence of constrained, inspectable tasks—including insight extraction, semantic clustering, thematic schema construction, and iterative omission detection—prior to synthesis. By delaying irreversible compression and explicitly tracking intermediate representations, the approach prioritizes coverage, traceability, and the preservation of disagreement across large corpora. The approach is characterized by several design choices, including insight-level representation as the unit of synthesis, the use of clustering as scaffolding rather than determinant of themes, and explicit omission detection through orphan tracking, which together enable coverage-oriented, self-correcting synthesis under scale.
 
-The system is demonstrated on a heterogeneous corpus of 153 documents on industrial policy, producing over 17,500 atomic insights and a structured thematic mapping. We report system costs, runtime, qualitative characteristics of the output, and observed failure modes, including challenges related to synthesis under scale and omission detection. While formal comparative evaluation remains future work, the results illustrate how structured corpus reading produces outputs that are substantively and epistemically distinct from conventional AI-based summarization.
+The system is demonstrated on a heterogeneous corpus of 153 documents on industrial policy, producing over 17,500 atomic insights and a structured thematic mapping. We report system costs, runtime, qualitative characteristics of the output, and observed failure modes, including challenges related to synthesis under scale and omission detection. While formal comparative evaluation remains future work, a descriptive account of the results illustrate how structured corpus reading produces outputs that are substantively and epistemically distinct from conventional AI-based summarization.
 
 ReadingMachine is released as an open-source, experimental framework intended to support systematic qualitative synthesis and downstream, explicitly constrained reasoning over stable corpus representations. The paper positions structured corpus reading as a complementary mode of knowledge production, distinct from retrieval-based and agentic AI systems. The results should be understood as a demonstration of system behavior at scale rather than a validated assessment of performance, and collaboration on evaluation is actively encouraged.
 
@@ -36,6 +36,8 @@ This reframing has several implications. First, the marginal cost of reading—b
 
 This white paper introduces ReadingMachine as both a technical framework and a methodological intervention. It outlines the architectural design of the system, the analytical assumptions it encodes, and the trade-offs it makes in shifting from selective, human-limited synthesis toward structured, inspectable corpus mapping. More broadly, it situates the approach within an information landscape where the central challenge is no longer producing knowledge, but ensuring that it can be systematically read, organized, and understood at scale.
 
+The paper makes four contributions: (1) it introduces structured corpus reading as a methodological framing for large-scale synthesis; (2) it describes ReadingMachine, an open-source pipeline implementing this approach; (3) it demonstrates the system on a 153-document industrial policy corpus; and (4) it identifies observed scaling constraints and failure modes, including orphan persistence, context-pressure effects, and late-stage reinflation.
+
 ReadingMachine is released as an experimental method and open-source implementation (https://github.com/morrisseyj/ReadingMachine/). It is not presented as a finalized solution to large-scale synthesis, but as a structured approach that can be inspected, modified, and evaluated across different contexts and configurations. The properties described in this paper—such as improved coverage, omission detection, and traceability—should be understood as design objectives and observed behaviors in a single large-scale run, rather than as formally validated performance characteristics. Support on evaluation and testing of the tool is actively encouraged.
 
 ## 2. The Problem
@@ -44,7 +46,7 @@ The production of written language has scaled dramatically over time. From the p
 
 Large language models appear, at first glance, to resolve this constraint. They can process and summarize text at speeds and volumes far beyond human capability, and perform reliably on many comprehension and synthesis tasks. However, current approaches to applying these systems to large corpora inherit important limitations from their underlying architectures (Narayan et al., 2018).
 
-Retrieval-augmented generation (RAG), the dominant paradigm, operates by selecting subsets of a corpus in response to a query. Documents are chunked, indexed, and retrieved based on estimated relevance, with only the retrieved material entering the model’s context. This introduces a fundamental limitation: material that is not retrieved is not analyzed, and the system has no visibility into what has been excluded. As a result, omission is both common and difficult to detect. As corpora grow, this problem is compounded by context constraints. Increasing the number of retrieved passages places pressure on the model’s attention, leading to known degradation effects such as the “missing middle,” where portions of the input receive less effective processing (Liu et al. 2023).
+Retrieval-augmented generation (RAG), the dominant paradigm, operates by selecting subsets of a corpus in response to a query. Documents are chunked, indexed, and retrieved based on estimated relevance, with only the retrieved material entering the model’s context (Lewis et. al. 2020). This introduces a fundamental limitation: material that is not retrieved is not analyzed, and the system has no visibility into what has been excluded. As a result, omission is both common and difficult to detect. As corpora grow, this problem is compounded by context constraints. Increasing the number of retrieved passages places pressure on the model’s attention, leading to known degradation effects such as the “missing middle,” where portions of the input receive less effective processing (Liu et al. 2023).
 
 Hierarchical summarization pipelines take a different approach, but encounter related issues. By compressing documents into summaries and then recursively summarizing those summaries, these systems introduce information loss early in the process. Minority or low-frequency claims are often dropped, disagreements are smoothed, and the resulting representations tend toward generalization at the expense of specificity. Each stage of compression reduces the recoverability of the original material (Cohen et al. 2021).
 
@@ -64,17 +66,19 @@ The architecture also implements explicit mechanisms to ensure coverage and to p
 
 ## 4. Methodology
 
-ReadingMachine is designed to operate over a wide range of natural-language corpora, including academic literature, policy reports, organizational documents, legal materials, and qualitative data sources. While its performance across highly heterogeneous corpora remains an area of ongoing evaluation, it is particularly well suited to structured synthesis tasks such as literature reviews. For the purposes of this paper, it is assumed that the user provides a defined corpus.
+ReadingMachine operates over a wide range of natural-language corpora, including academic literature, policy reports, organizational documents, legal materials, and qualitative data. It is designed for structured synthesis tasks over a defined corpus.
 
-The system is implemented in Python and organized as a sequence of classes, each corresponding to a distinct stage in the reading process. These classes operate over a shared state object, with each stage transforming that state in a controlled and sequential manner. This design enforces execution order while allowing runs to be resumed, supporting long or iterative analyses.
+Methodologically, the approach is closer to a scoping study than a systematic review. Following Arksey and O’Malley (2005), the aim is to map the extent, range, and structure of a body of literature rather than to answer a narrowly specified question through quality-filtered evidence synthesis. ReadingMachine extends this logic computationally by performing a structured reading pass over the entire corpus and producing a thematic map of its contents without adjudicating evidentiary quality.
 
-Conceptually, the methodology formalizes a familiar qualitative research workflow into a computational pipeline, with large language models performing bounded reading and synthesis tasks. In abstract form, this workflow can be understood as:
+At the same time, the pipeline draws on the logic of reflexive thematic analysis (Braun and Clarke 2006), particularly the progression from coding to theme development, review, and refinement. Extracted insights function as computational analogues of codes, while theme construction and iteration are implemented as explicit, inspectable stages.
 
-reading a corpus → extracting notes → identifying themes → synthesizing those themes → checking for completeness → refining for clarity
+In abstract form, the workflow can be understood as:
 
-ReadingMachine decomposes this process into a more granular and structured sequence of steps. Each step isolates a specific analytical function—such as insight extraction, clustering, or thematic synthesis—so that transformations remain inspectable and omission can be detected and corrected. It should be noted that the system does not eliminate interpretive bias; rather, it limits that bias to that which is necessary for reading while it externalizes and structures other interpretative acts, making them available for inspection and comparison across runs.
+reading a corpus → extracting insights → organizing them into themes → synthesizing → checking for completeness → refining structure
 
-Thus the qualitative research workflow is implemented computationally via the following pipeline (each step is described in detail below):
+This process is implemented as a sequence of constrained, inspectable transformations. Each stage isolates a specific analytical function—such as insight extraction, clustering, or thematic synthesis—so that intermediate representations remain visible and omissions can be detected and corrected. Interpretive judgments are not removed, but they are externalized and structured, allowing them to be inspected and compared across runs.
+
+The resulting pipeline is shown below:
 ```
 [Generate Research Questions]  
 		↓  
@@ -119,7 +123,7 @@ Thus the qualitative research workflow is implemented computationally via the fo
 [Render Output]  
 ```
 
-Because the pipeline consists of a sequence of computational calls to language models, its behavior is determined by the analytical specification encoded within it. This includes the definition of insights, extraction instructions, clustering parameters, and theme construction rules. These components are fixed, inspectable, and version-controlled. As with any formal method, they shape the resulting synthesis. ReadingMachine makes these assumptions explicit and available for inspection, rather than embedding them implicitly within a single opaque step. The full pipeline is described below.
+The system is implemented, in Python, as a sequential pipeline in which each stage transforms a shared state object. Analytical choices—such as the definition of insights, extraction instructions, clustering parameters, and theme construction rules—are fixed, inspectable, and version-controlled, making the structure of the synthesis explicit rather than embedded in a single opaque step.
 
 ### 4.1 Generate Research Questions
 
@@ -151,7 +155,7 @@ This dual approach captures both localized claims and broader arguments that spa
 
 Extracted insights are organized using unsupervised learning techniques to group semantically similar claims. Clustering is not a replacement for a conceptual mapping, but serves as scaffolding to the process of conceptual theme generation—see below. This is necessary to afford the model a structured representation of the corpus, upon which to build themes.
 
-Each insight is first converted into a vector representation (embedding). Because these embeddings exist in a high-dimensional space, dimensionality reduction is applied using UMAP to improve clusterability and mitigate sparsity effects associated with high-dimensional data.
+Clustering proceeds in a fashion similar to that used in BERTopic (Grootendorst 2022) Each insight is first converted into a vector representation (embedding). Because these embeddings exist in a high-dimensional space, dimensionality reduction is applied using UMAP, due to its speed and flexibility (McInnes, Healy and Melville 2020), to improve clusterability and mitigate sparsity effects associated with high-dimensional data.
 
 Clustering is then performed using HDBSCAN, which groups insights based on density while allowing for the identification of outliers. The system includes parameter sweep functionality to support selection of appropriate configurations. UMAP parameters are evaluated using silhouette scores, with research questions used as reference labels to assess separation (the user can exclude subsets of research questions in cases of conceptually overlapping questions). HDBSCAN configurations are assessed using a combination of Davies–Bouldin scores and outlier minimization. Note that while clustering generates the semantic surface that theme generation operates over (see below), it does not fundamentally determine themes. Themes are instead iteratively refined via an orphan reinsertion and re-theming loop (see below).
 
@@ -161,7 +165,7 @@ This design introduces some redundancy across the overall report, as similar ins
 
 ### 4.5 Theme Generation
 
-Clusters group insights by semantic similarity, providing a useful approximation of structure within the corpus. However, semantic proximity does not necessarily correspond to conceptual organization. To move from semantic groupings to analytically meaningful categories, the system generates themes through a two-stage process.
+Clusters group insights by semantic similarity, providing a useful approximation of structure within the corpus. However, semantic proximity does not necessarily correspond to conceptual organization. This distinction is important methodologically. In Braun and Clarke’s (2008) account, themes are not simply discovered as pre-existing clusters in the data; they are actively constructed through analytic judgment. ReadingMachine preserves this distinction by using clustering only as scaffolding for thematic interpretation, rather than treating clusters themselves as themes.To move from semantic groupings to analytically meaningful categories, the system generates themes through a two-stage process.
 
 First, each cluster of insights is summarized. Clusters are processed in an order determined by the shortest path between cluster centroids in the embedding space. This ordering places semantically similar clusters adjacent to one another. As each cluster is summarized, the last five generated summaries are provided as frozen context for subsequent steps. This allows for local coherence without risking anchoring on initial clusters summaries (which could happen if global context was frozen). All clusters, including outliers, are included in this process.
 
@@ -197,7 +201,7 @@ The initial theme schema is generated from cluster summaries, which introduces a
 
 To address this, the pipeline regenerates the theme schema using the current theme summaries as input. This second pass operates over a representation that now includes all insights, allowing the model to refine, split, or reorganize themes to better reflect the underlying material. Following schema regeneration, insights are remapped to themes, summaries are regenerated, and orphan handling is applied again.
 
-This theme generation → mapping → orphan handling loop is repeated iteratively. In the current implementation the model is instructed not to make speculative improvements to the schema and only offer an updated schema when the input material shows obvious opportunities for improved structuring. In this respect an ideal schema prioritizes:
+This theme generation → mapping → orphan handling loop is repeated iteratively. This iterative review process parallels the theme review and refinement phases described by Braun and Clarke (2008), in which candidate themes are checked against the underlying data and revised where they fail to adequately capture the dataset. In ReadingMachine, orphan detection operationalizes this by identifying insights that have not been substantively represented in the current thematic synthesis. In the current implementation the model is instructed not to make speculative improvements to the schema and only offer an updated schema when the input material shows obvious opportunities for improved structuring. In this respect an ideal schema prioritizes:
 
 
 > 1. Conceptual coherence within each theme
@@ -643,6 +647,12 @@ As both a technical framework and a methodological proposal, ReadingMachine repr
 
 ## References
 
+- McInnes, Healy and Melville 2020. UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction, arXiv:1802.03426 [stat.ML]
+
+- Arksey, H., & O’Malley, L. 2005. Scoping studies: towards a methodological framework. International Journal of Social Research Methodology, 8(1), 19–32. https://doi.org/10.1080/1364557032000119616
+- Braun, V. & Clarke, V. 2008. *Using thematic analysis in psychology*, Qualitative Research in Psychology, 3(2), 77–101. https://doi.org/10.1191/1478088706qp063oa
+- Grootendorst 2022. *BERTopic: Neural topic modeling with a class-based TF-IDF procedure*, arXiv:2203.05794 [cs.CL]
+- Lewis et al., 2020. *Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*, arXiv:2005.11401 [cs.CL]
 - Liu et al., 2023. *Lost in the Middle: How Language Models Use Long Contexts*, arXiv:2307.03172 [cs.CL]  
 - Cohen et al., 2018. *A Discourse-Aware Attention Model for Abstractive Summarization*, arXiv:1804.05685 [cs.CL]  
 - Narayan et al., 2018. *Don’t Give Me the Details, Just the Summary*, arXiv:1808.08745 [cs.CL]  
