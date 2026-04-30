@@ -116,7 +116,7 @@ git clone https://github.com/morrisseyj/ReadingMachine
 
 ### 1.2. Install uv
 
-Dependency management is done via uv to handle conflicts. It is strongly recommended you use the uv.lock file to set up the environment. So install uv with instructions from [here](https://docs.astral.sh/uv/getting-started/installation/)
+Dependency management is done via uv to handle conflicts. It is strongly recommended you use the uv.lock file to set up the environment. Install uv with instructions from [here](https://docs.astral.sh/uv/getting-started/installation/)
 
 ### 1.3. Set up the environment
 
@@ -127,11 +127,11 @@ In a terminal in /ReadingMachine/
 uv sync
 ```
 
-You will need to access this virtual environment and inialize a python instance there in order to execute python code. The steps for doing this depend on where you running the code and how your IDE operates.
+You will need to access this virtual environment and initialize a python instance there in order to execute python code. The steps for doing this depend on where you running the code and how your IDE operates.
 
 ### 1.4. Upload your corpus
 
-ReadingMachine can read any corpus (though its capacities across different types of corpuses are still being determined). You should therefore put the documents that you want to read in `/ReadingMachine/data/corpus/`. If you have research questions and want to retrieve literature to answer them there is a [getlit.py](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/run_getlit_pipeline.py) tool that can support that process. For this tutorial a list of open access publications relevant to the example research questions used below is available [here](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/toy_corpus.md).
+ReadingMachine can read any corpus (though its capacities across different types of corpora are still being determined). You should therefore put the documents that you want to read in `/ReadingMachine/data/corpus/`. If you have research questions and want to retrieve literature to answer them there is a [getlit.py](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/run_getlit_pipeline.py) tool that can support that process. For this tutorial a list of open access publications relevant to the example research questions used below is available [here](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/toy_corpus.md).
 
 ### 1.5. Create your secrets
 
@@ -150,11 +150,12 @@ Now we move to a python script, with most code now executing in a single python 
 This step imports the libraries you need to access the modules and execute the code.
 
 ```
-from readingmachine import core, render, config
 from dotenv import load_dotenv
 from openai import OpenAI
 import os
 import pandas as pd
+
+from readingmachine import core, render, config
 
 ```
 ### 1.7. Load your secrets from .env and set up your LLM client object
@@ -406,7 +407,7 @@ The clustering parameters are calculated per question. The easiest way to inspec
 cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 ```
 
-You want to select parameter combinations that simultanously balance: small db score, small outliers and small total final groups to summarize. As a heuristic try and keep the small total groups to summarize to between 40-60, and then optimize for cluster quality (db score) and coverage (low outliers). Note that unlike other ML approaches, outliers here are not discarded (they will be worked into themes) so minimizing them should likely recieve less emphasis than is normal in other approaches. 
+You want to select parameter combinations that simultanously balance: small db score and small outliers. Note that unlike other ML approaches, outliers here are not discarded (they will be worked into themes) so minimizing them should likely receive less emphasis than is normal in other approaches. 
 
 #### 4.3.2. Cluster with HDBSCAN
 
@@ -414,15 +415,15 @@ With the parameters selected we now cluster with HDBSCAN
 
 ```
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 10, "metric": "euclidean", "min_samples": "5"},
-    "question_1": {"min_cluster_size": 5, "metric": "manhattan", "min_samples": "5"},
-    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "min_samples": "4"},
-    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "min_samples": "5"},
-    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "min_samples": "10"}
+    "question_0": {"min_cluster_size": 20, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_1": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 5},
+    "question_2": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2}
 })
 ```
 
-Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of ouliers. The approach is to take any clusters for which the size exceeds n and then partition those clusters into k (cluster_size/n) groups. This is done via a density seeded, round robin attribution process. See the white paper for details. You can set the cluster size limits via the following keyword arguments:
+Note: this approach imposes a limit on the max cluster size (to prevent the context window being overwhelmed when we summarize clusters). This includes limiting the size of outliers. The approach is to take any clusters for which the size exceeds n and then partition those clusters into k (cluster_size/n) groups. This is done via a density seeded, round robin attribution process. See the [white paper](https://github.com/morrisseyj/ReadingMachine/blob/main/documentation/white_paper.md) for details. You can set the cluster size limits via the following keyword arguments:
 - `hdbscan_cluster_size_cap` (default 1000)
 - `outlier_cluster_size_cap` (default is 300)
 If you cluster summarize step fails, you likely need to come back to this step and re-run the clustering process with reduced size caps. 
