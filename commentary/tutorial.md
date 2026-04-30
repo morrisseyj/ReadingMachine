@@ -380,7 +380,7 @@ With the parameters selected we now reduce the dimensions.
 
 ```
 cluster.reduce_dimensions(
-    n_neighbors=5,
+    n_neighbors=100,
     min_dist=0.5,
     n_components=5,
     metric="cosine",
