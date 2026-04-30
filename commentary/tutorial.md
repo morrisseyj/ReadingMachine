@@ -256,7 +256,9 @@ ingestor = core.Ingestor(
 
 ### 2.1 Ingest papers*
 
-Then we pull all the papers into the system. Currently .html and .pdf are supported filetypes
+Then we pull all the papers into the system. Currently .html and .pdf are supported filetypes.
+Before running this code you must add papers to the correct directory (`/data/corpus`). If you want to test this on a toy corpus you can use these [five example open access papers](https://github.com/morrisseyj/ReadingMachine/blob/main/examples/toy_corpus.md), which are relevant to the research questions posed above.
+
 ```
 ingestor.ingest_papers()
 
