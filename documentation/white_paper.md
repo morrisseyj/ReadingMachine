@@ -377,7 +377,7 @@ The following examples illustrate the form and level of granularity of extracted
 
 ### 7.5 Qualitative Observations
 
-The [output](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_current.md) produced by the system is notable for its scale and density. Even at a glance, it differs from conventional AI-generated summaries in ways that are immediately apparent:
+The [output](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/industrial_policy_current.md) produced by the system is notable for its scale and density; readers are encouraged to inspect it directly. Even at a glance, it differs from conventional AI-generated summaries in ways that are immediately apparent:
 
 - **Length**: The document is substantially longer than typical AI-generated outputs, often extending to tens of thousands of words.
 - **Density**: Sections are tightly packed with discrete claims, with relatively little compression into high-level generalizations.
