@@ -417,11 +417,11 @@ With the parameters selected we now cluster with HDBSCAN
 
 ```
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 20, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_1": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 5},
-    "question_2": {"min_cluster_size": 10, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_0": {"min_cluster_size": 20, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 10},
+    "question_1": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 4},
+    "question_2": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 4},
     "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_4": {"min_cluster_size": 5, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2}
+    "question_4": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2}
 })
 ```
 
