@@ -243,9 +243,9 @@ cluster.tune_umap_params(
 
 # Reduce dimensions using chosen parameters
 cluster.reduce_dimensions(
-    n_neighbors=5,
+    n_neighbors=100,
     min_dist=0.5,
-    n_components=10,
+    n_components=5,
     metric="cosine",
     random_state=config.seed
 )
