@@ -327,7 +327,7 @@ Formal evaluation remains an open area of work. Key directions include:
 - Formal benchmarking of system behavior
 - Evaluation of the practical usefulness of the outputs
 
-To support this process, this paper constitutes an open invitation to domain experts to [review the industrial policy output](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/README.md). Reviews may be submitted via a structured evaluation form and will be published in the project’s GitHub repository as part of an open review archive. Further collaboration on systematic evaluation, including cross-domain testing and benchmarking, is actively invited.
+To support this process, this paper constitutes an open invitation to domain experts to [review the industrial policy output]([https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/README.md](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/EVAL_INSTRUCTIONS.md)). Reviews may be submitted via a structured evaluation form and will be published in the project’s GitHub repository as part of an open review archive. Further collaboration on systematic evaluation, including cross-domain testing and benchmarking, is actively invited.
 
 ### 7.2 Experimental Setup
 
