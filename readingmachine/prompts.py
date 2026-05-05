@@ -1477,6 +1477,7 @@ class Prompts:
             • its core claim appears in the summary
             • its contribution is preserved within a synthesized claim
             • it is represented at an appropriate level of abstraction
+            • its citation/provenance is preserved in the summary
 
         Insights that are not reflected are considered "orphans" and must
         be reintroduced into the thematic synthesis.
@@ -1512,24 +1513,29 @@ class Prompts:
             '- Its core claim, finding, or argument is clearly represented in the summary, even if expressed at a higher level of abstraction.\n'
             '- It meaningfully contributes to a synthesized claim in the summary, even if not individually distinguishable.\n'
             '- It is incorporated as part of a broader grouping of similar insights, where the shared mechanism, relationship, or implication is clearly represented.\n'
-            '- The "core claim" refers to the central mechanism, relationship, or implication of the insight, not its exact phrasing or contextual detail.\n\n'
+            '- The "core claim" refers to the central mechanism, relationship, or implication of the insight, not its exact phrasing or contextual detail.\n'
+            '- Its citation, author, or source provenance is explicitly preserved in the summary, either attached to the relevant synthesized claim or included among the citations supporting that claim.\n\n'
 
             'An insight is NOT reflected if:\n'
             '- The specific claim, finding, or argument is absent from the summary.\n'
             '- The summary contradicts the insight without explicitly acknowledging that tension.\n'
-            '- The insight is reduced to a vague generalization that erases its substantive contribution.\n\n'
+            '- The insight is reduced to a vague generalization that erases its substantive contribution.\n'
+            '- The insight\'s core claim is represented, but its citation, author, or source provenance is missing from the relevant citation set in the summary.\n\n'
 
             '# IMPORTANT\n'
             '- Reflection requires substantive representation, not mere topic overlap.\n'
+            '- Reflection also requires citation/provenance preservation.\n'
             '- You may infer inclusion when a generalized or synthesized claim clearly captures the core mechanism or implication of the insight.\n'
             '- Multiple insights may be reflected by a single synthesized statement if they share a common underlying mechanism, relationship, or implication.\n'
+            '- When multiple insights are reflected by a single synthesized statement, the citation set for that statement must preserve the contributing citations, authors, or source provenance of those insights.\n'
             '- Do not mark an insight as reflected if its core contribution is missing.\n'
-            '- However, abstraction alone is not grounds for exclusion if the underlying mechanism, relationship, or implication is clearly preserved.\n\n'
+            '- Do not mark an insight as reflected if its core contribution is represented but its citation, author, or source provenance is missing.\n'
+            '- However, abstraction alone is not grounds for exclusion if the underlying mechanism, relationship, or implication is clearly preserved and the insight\'s citation/provenance is also preserved.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
             '- The object must contain a single key "mentioned_insight_ids" containing an array of strings.\n'
-            '- Only include IDs from the provided list that are substantively reflected in the summary.\n'
+            '- Only include IDs from the provided list that are substantively reflected in the summary and whose citation/provenance is preserved in the summary.\n'
             '- Do not provide explanations or commentary.\n\n'
 
             '# JSON SCHEMA\n'
@@ -1621,11 +1627,13 @@ class Prompts:
             'An orphan insight is reflected if:\n'
             '- Its core claim, finding, or argument is clearly represented in the revised summary.\n'
             '- It contributes meaningfully to a synthesized claim.\n'
-            '- Its substantive contribution is preserved, even if expressed at a higher level of abstraction.\n\n'
+            '- Its substantive contribution is preserved, even if expressed at a higher level of abstraction.\n'
+            '- Its citation, author, or source provenance is explicitly preserved in the revised summary.\n\n'
 
             'An orphan insight is NOT reflected if:\n'
             '- It is only loosely implied without preserving its conceptual contribution.\n'
-            '- It is reduced to a vague generalization that erases its distinct meaning.\n\n'
+            '- It is reduced to a vague generalization that erases its distinct meaning.\n'
+            '- Its core claim is represented but its citation, author, or source provenance is missing.\n\n'
 
             '# INTEGRATION GUIDELINES\n'
             '- You are REWRITING the entire summary, not appending to it.\n'
@@ -1635,11 +1643,15 @@ class Prompts:
             '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
             '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
             '- Preserve all citations exactly as they appear in the source insights.\n'
-            '- Multiple insights may be synthesized together ONLY if their distinct meaning is preserved.\n\n'
+            '- When multiple insights are synthesized into a single claim, ALL contributing citations/authors must be retained.\n'
+            '  Example: (Das 2020; Aidt 2016; Wade 2003)\n'
+            '- Do NOT drop, replace, or reduce citations when abstracting or merging insights.\n'
+            '- Multiple insights may be synthesized together ONLY if their distinct meaning is preserved. In such cases, their distinct citations must be retained together in parentheses.\n\n'
 
             '# CONVERGENCE REQUIREMENT\n'
             'The revised summary must satisfy both:\n'
             '- All orphan insights are represented\n'
+            '- All orphan insight citations/provenance are represented\n'
             '- The response is complete and not truncated\n\n'
 
             '# OUTPUT PROTOCOL\n'
