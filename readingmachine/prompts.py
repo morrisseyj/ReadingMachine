@@ -1460,8 +1460,6 @@ class Prompts:
             "}\n"
         )
 
-    
-
     def identify_orphans(self):
         """
         Generate the system prompt for identifying orphan insights.
@@ -1847,83 +1845,37 @@ class Prompts:
     ####
 
     def stylistic_rewrite(self, style:str , label: str, index: int):
-        """
-        Generate the system prompt for stylistic refinement of thematic summaries.
 
-        This prompt instructs the model to improve the narrative quality of a
-        thematic summary while preserving all underlying information and citations.
-
-        The refinement process focuses on:
-
-            - improving narrative flow
-            - reducing repetitive phrasing
-            - Address rhetorical padding and mechanical language
-            - strengthening transitions between themes
-            - maintaining a specified stylistic tone
-
-        The prompt dynamically selects stylistic guidance depending on the
-        type of theme being edited.
-
-        Theme categories
-        ----------------
-        dominant
-            Themes representing the central analytical findings of the corpus.
-
-        other
-            Themes capturing residual or lower-frequency insights.
-
-        conflict
-            Themes describing structured disagreement or interpretive tension.
-
-        Parameters
-        ----------
-        style : str
-            Narrative style to be applied (e.g., academic, journalistic).
-
-        label : str
-            Theme label used to determine the stylistic category.
-
-        index : int
-            Position of the theme within the research question sequence.
-            Used to rotate stylistic framing guidance.
-
-        Returns
-        -------
-        str
-            System prompt instructing the model to produce a refined thematic
-            summary while preserving all substantive content.
-            """
-        
         style_guidelines = {
             "dominant": [
-                "Focus on the weight of evidence (e.g., 'The most prominent narrative identified across the corpus...')",
-                "Use a structural framing (e.g., 'A primary pillar of the analysis concerns...')",
-                "Use an evidentiary lens (e.g., 'The material most densely clusters around...')",
-                "Use a centralizing opener (e.g., 'At the core of the discussion lies...')",
-                "Focus on frequency of observation (e.g., 'A recurring point of emphasis across the record is...')",
-                "Use a foundational approach (e.g., 'Fundamental to this body of work is...')",
-                "Highlight a consistent pattern (e.g., 'A highly consistent pattern emerges regarding...')",
-                "Frame as a primary driver (e.g., 'The analysis suggests that a central driver of this theme is...')"
+                "Emphasize the weight of evidence without using stock phrases.",
+                "Open from the central mechanism or argument, not a template.",
+                "Begin with the densest substantive finding.",
+                "Start from the core conceptual relationship.",
+                "Highlight recurrence only if it is substantively meaningful.",
+                "Frame the theme from its foundational logic.",
+                "Surface consistent patterns through content, not phrasing.",
+                "Anchor the opening in the primary driver of the theme."
             ],
             "other": [
-                "Frame as divergent material (e.g., 'While not forming part of the dominant narrative, several distinct strands also emerge...')",
-                "Use a breadth framing (e.g., 'The analysis also captures a series of less central but substantively meaningful positions...')",
-                "Frame as complementary nuance (e.g., 'Beyond the primary thematic clusters, the material also reflects...')",
-                "Use a niche framing (e.g., 'Less frequent, but nonetheless analytically significant, are discussions of...')",
-                "Frame as localized insight (e.g., 'A subset of the corpus provides more focused insight into...')",
-                "Frame as an emerging or isolated perspective (e.g., 'Isolated but noteworthy strands also highlight...')",
-                "Use a peripheral framing (e.g., 'On the periphery of the dominant themes, the record also indicates...')",
-                "Frame as granular detail (e.g., 'Providing additional granularity, specific contributions note...')"
+                "Introduce secondary material without formulaic contrast phrases.",
+                "Frame additional strands through content, not rhetorical signals.",
+                "Integrate nuance without announcing it as such.",
+                "Surface less frequent ideas through specificity.",
+                "Introduce focused contributions directly.",
+                "Present isolated perspectives without labeling them.",
+                "Integrate peripheral material naturally into the narrative.",
+                "Add granularity through detail, not framing language."
             ],
             "conflict": [
-                "Frame as structured tension (e.g., 'The literature reveals a significant tension concerning...')",
-                "Use an internal friction lens (e.g., 'A notable point of contradiction emerges where...')",
-                "Use a divergence framing (e.g., 'The material reflects a clear divergence regarding...')",
-                "Focus on the complexity of disagreement (e.g., 'The record presents a complex landscape of competing interpretations of...')",
-                "Frame as lack of consensus (e.g., 'Consensus is noticeably absent on the question of...')",
-                "Use a dual-position framing (e.g., 'The debate is characterized by a clear division between...')",
-                "Frame as interpretative disagreement (e.g., 'The analysis highlights conflicting accounts concerning...')",
-                "Highlight competing priorities (e.g., 'A friction emerges between competing priorities, specifically...')"
+                "Introduce tension directly through the substance of disagreement.",
+                "Surface contradictions without formulaic signaling.",
+                "Present divergence through contrasting claims, not labels.",
+                "Show competing interpretations through content structure.",
+                "Indicate lack of consensus through argument, not phrasing.",
+                "Structure opposing positions without announcing them.",
+                "Surface interpretive disagreement through claims.",
+                "Highlight competing priorities through their implications."
             ]
         }
 
@@ -1934,17 +1886,16 @@ class Prompts:
             category = "conflict"
         else:
             category = "dominant"
-        
-        guidelines = style_guidelines[category][index % len(style_guidelines[category])]  # Rotate through style guidelines for the category
+
+        guidelines = style_guidelines[category][index % len(style_guidelines[category])]
 
         return (
             '# ROLE\n'
             f'You are a Research Editor. Your task is to refine a {category.upper()} thematic summary into a cohesive, dynamic narrative in an {style} style.\n\n'
 
             '# TASK\n'
-            'You will receive a thematic summary that potentially contains monotonous or mechanical phrasing and prose. '
-            'Your task is to refine the thematic summary into a cohesive, dynamic narrative.\n'
-            'To achieve this task you will receive previously cleaned up summaries as frozen context as well as the summary to clean.\n'
+            'You will receive a thematic summary that may contain mechanical or repetitive phrasing. '
+            'Refine it into a coherent, readable narrative while preserving all content.\n\n'
 
             '# INPUT FORMAT\n'
             'CURRENT RESEARCH QUESTION: <question_text>\n'
@@ -1955,24 +1906,27 @@ class Prompts:
             '<thematic summary to clean>\n\n'
 
             "OUTPUT FORMAT:\n"
-                '{\n'
-                '  "refined_summary": "<Your refined thematic summary text here>"\n'
-                '}\n\n'
+            '{\n'
+            '  "refined_summary": "<Your refined thematic summary text here>"\n'
+            '}\n\n'
 
-            '# MANDATORY OPENING STYLE\n'
-            f'Begin this theme using a refined framing inspired by the following stylistic guidance: {guidelines}. Ensure the phrasing feels natural and integrated into the narrative.\n\n'
+            '# OPENING STYLE\n'
+            f'Use the following guidance as a directional constraint, not wording to imitate: {guidelines} '
+            'Begin directly from the substance of the theme. Do NOT use stock phrases or reusable templates.\n\n'
 
             '# EDITORIAL GUIDELINES\n'
-            '- **Zero Information Loss**: Every data point, finding, and citation from the ORIGINAL THEME must be retained. Do not prune.\n'
+            '- **Zero Information Loss**: Retain every data point, finding, and citation exactly.\n'
             '- Maintain approximate length parity with the original summary.\n'
             '- Do not compress, expand, or alter substantive meaning.\n'
-            '- **Explicit Linkage**: Use the FROZEN CONTEXT (previously written themes) to create narrative bridges. If information is repeated, do not delete it; instead, make the connection explicit (e.g., "As noted in the previous section..." or "Consistent with earlier findings...").\n'
-            '- **Dynamic Tone**: Use varied, professional prose. Avoid monotonic "Theme X is..." structures and repeated phrasing.\n'
-            '- **Citation Integrity**: Preserve all citations (author date) exactly as they appear.\n\n'
+            '- **Explicit Linkage**: Use FROZEN CONTEXT to create natural continuity. If repetition exists, connect rather than delete.\n'
+            '- **Dynamic Tone**: Vary sentence structure and phrasing. Avoid repeated rhetorical constructions.\n'
+            '- **No Template Language**: Do not use phrases like "A recurring point of emphasis...", "The material most densely clusters...", etc.\n'
+            '- **Content-First Writing**: Sentences should emerge from claims and mechanisms, not framing devices.\n'
+            '- **Citation Integrity**: Preserve all citations exactly as written.\n\n'
 
             '# NOTES\n'
-            '- This is a refinement process, not a rewrite. The core content must remain intact; your role is to enhance prose while maintaining coherence and keeping to the specified style.\n'
-            '- If there is no frozen context (i.e., this is the first theme), simply follow the opening style guidance and ensure a strong, engaging introduction to the theme.\n\n'
+            '- This is refinement, not rewriting. Content must remain intact.\n'
+            '- If no frozen context exists, simply ensure a strong, natural opening grounded in the content.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object with the key "refined_summary".\n'
