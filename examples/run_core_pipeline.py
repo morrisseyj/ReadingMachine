@@ -177,10 +177,12 @@ ingestor.chunk_sanity_check()
 # ==========================================================
 
 # If a run is interrupted, you can call:
-#
+# from readingmachine import utils
 # utils.restart_pipeline()
 #
-# This prints the most recent saved state and tells you how to resume.
+# This prints the most recent saved state and tells you how to resume. You may have to also run
+# from readingmachine import state
+# in order to load the most recent state object into memory before resuming the pipeline
 
 
 # ==========================================================
