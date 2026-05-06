@@ -124,7 +124,6 @@ pipeline, allowing large-scale machine reading to be organized into a
 structured and inspectable analytical workflow.
 """
 
-
 # Import custom libraries
 from . import config
 
@@ -139,9 +138,9 @@ import ast
 from pathlib import Path
 import shutil
 import hashlib
-import json
 import pprint
-
+from uuid import uuid4
+import time
 
 class CorpusState:
     """
@@ -874,55 +873,70 @@ class SummaryState:
         """
         Persist the current SummaryState to disk.
 
-        All synthesis artifacts are written as Parquet files inside the
-        configured summary directory.
+        Writes all synthesis artifacts to a temporary directory, then replaces
+        the previous summary directory using safer Windows-compatible renames.
 
-        The save procedure is atomic:
-
-        1. Write all files to a temporary directory
-        2. Delete the previous directory
-        3. Rename the temporary directory to the target location
-
-        This prevents partially written state from corrupting the pipeline
-        if execution is interrupted.
-
-        Notes
-        -----
-        Each synthesis pass is stored as a separate file, allowing
-        full reconstruction of the pipeline history.
+        The old directory is not deleted until the new one has been successfully
+        moved into place.
         """
+        # rename retry util
+        def rename_with_retry(src: Path, dst: Path, attempts: int = 60) -> None:
+            """
+            Rename a path, retrying on transient Windows PermissionError locks.
+            """
+            last_error = None
 
+            for i in range(attempts):
+                try:
+                    src.rename(dst)
+                    return
+                except PermissionError as e:
+                    print(f"Rename attempt {i+1}/{attempts} failed due to PermissionError. Retrying...")
+                    last_error = e
+                    time.sleep(min(0.1 * (i + 1), 2.0))
+
+            raise last_error
+    
+        # Main function
         save_path = Path(self.summary_save_location)
 
-        # Ensure parent directory exists
+        #Check parent path exists
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create a true temporary directory next to target
-        temp_path = save_path.parent / f"{save_path.name}_tmp"
-
-        # If temp exists from previous crash, clean it
-        if temp_path.exists():
-            shutil.rmtree(temp_path)
+        #create the temp path and backup path
+        temp_path = save_path.parent / f"{save_path.name}_tmp_{uuid4().hex}"
+        backup_path = save_path.parent / f"{save_path.name}_old_{uuid4().hex}"
 
         temp_path.mkdir()
 
-        # Write all summary state lists into temp directory
-        for name in config.summary_state_prefix.values():
-            data_list = getattr(self, name)
-            
-            # Check the data integrity to id any issues. 
-            self._assert_state_integrity(data_list, context=f"Saving: {name}")
 
-            for idx, df in enumerate(data_list, start=1):
-                filename = f"{name}_{idx}.parquet"
-                df.to_parquet(temp_path / filename, index=False)
+        try:
+            for name in config.summary_state_prefix.values():
+                data_list = getattr(self, name)
 
+                self._assert_state_integrity(data_list, context=f"Saving: {name}")
 
-        # Now atomically replace old directory
-        if save_path.exists():
-            shutil.rmtree(save_path)
+                for idx, df in enumerate(data_list, start=1):
+                    filename = f"{name}_{idx}.parquet"
+                    df.to_parquet(temp_path / filename, index=False)
 
-        temp_path.rename(save_path)
+            if save_path.exists():
+                rename_with_retry(save_path, backup_path)
+
+            rename_with_retry(temp_path, save_path)
+
+            if backup_path.exists():
+                shutil.rmtree(backup_path, ignore_errors=True)
+
+        except Exception:
+            if temp_path.exists():
+                shutil.rmtree(temp_path, ignore_errors=True)
+
+            # Restore prior good state if replacement failed after backup rename
+            if backup_path.exists() and not save_path.exists():
+                rename_with_retry(backup_path, save_path)
+
+            raise
 
         print(f"Summary outputs saved successfully to {save_path}.")
         
