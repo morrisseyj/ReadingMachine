@@ -143,11 +143,11 @@ Insights are formally defined in the prompt as:
 
 > “any explicit claims, arguments, findings, or statements in the text that bear on [the] question[s]… An explicit claim includes: stated findings or conclusions, causal statements (e.g. X leads to Y), explanations of mechanisms or processes, descriptive statements that clearly assert a relationship, condition or effect. They are not restricted to formal conclusions [as] many valid claims appear as descriptive or explanatory statements. Each [insight] must be concise (one sentence or short phrase) and preserve wording as much as possible."
 
+To complement this chunk-level pass, the system performs a second, document-level pass. In this stage, the full document (or the largest portion that fits within the model’s context window) is processed with each research question individually. The model is provided with the previously extracted chunk-level insights and instructed to identify additional insights without repetition.
+
 Insights are distinguished from meta-insights as follows in the prompt:
 
 > "[meta-insighs are] higher-level, traceable arguments or conclusions that span across multiple parts of a text ... Chunk-level insights capture localized claims. [meta-]insights ... ONLY become visible when combining information across multiple parts of the document. [meta-insights] must introduce a substantively new claim that only becomes visible when considering multiple parts of the document together"
-
-To complement this chunk-level pass, the system performs a second, document-level pass. In this stage, the full document (or the largest portion that fits within the model’s context window) is processed with each research question individually. The model is provided with the previously extracted chunk-level insights and instructed to identify additional insights without repetition.
 
 This dual approach captures both localized claims and broader arguments that span multiple sections of a document, reducing the likelihood that cross-cutting ideas are missed during chunk-level processing.
 
