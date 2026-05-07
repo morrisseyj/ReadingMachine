@@ -6059,22 +6059,20 @@ class Summarize:
         total_batches_all_themes = 0
 
         # ---- Capacity parameters (tune once) ----
-        MODEL_INPUT_WORD_LIMIT = 28000   # practical integration limit (well below 128k hard cap)
+        MODEL_INPUT_WORD_LIMIT = 22000   # practical integration limit (well below 128k hard cap)
         # ----------------------------------------
 
         # Packs as many insights as possible into a single batch without exceeding capacity
         # This maximizes efficiency (few passes) while avoiding model overload
-        def pack_batch(insights, available_words):
-            batch = []
-            running = 0
-            for text in insights:
-                w = len(text.split())
-                # Stop before exceeding available capacity (hard boundary)
-                if running + w > available_words:
-                    break
-                batch.append(text)
-                running += w
-            return batch
+        def pack_batch(insights_df, available_words):
+            # Calculate word counts for all rows at once
+            word_counts = insights_df["insight"].str.split().str.len()
+            
+            # Calculate running total and find where it exceeds the limit
+            running_total = word_counts.cumsum()
+            
+            # Filter for rows that stay under the limit
+            return insights_df[running_total <= available_words]
 
         # Iterate over each theme (one row per theme summary)
         for _, row in unstable_populated_themes.iterrows():
@@ -6105,34 +6103,63 @@ class Summarize:
                     self.corpus_state.insights["insight_id"].isin(theme_orphans["insight_id"])
                 ]
 
-                # Convert to list for batching
-                orphan_texts = [r["insight"] for _, r in orphan_data.iterrows()]
-
                 # ---- iterative large-batch integration ----
                 # We process all orphans, but in a few large capacity-safe batches
-                remaining = orphan_texts.copy()
+                remaining = orphan_data.copy()
                 updated_summary = thematic_summary
 
                 # Setup per theme batch counter
                 batch_count = 0
-                total_orphans = len(remaining)
+                total_orphans = remaining.shape[0]
 
                 failed_batch_summaries = []
 
-                while remaining:
+                while not remaining.empty:
 
                     batch = pack_batch(remaining, MODEL_INPUT_WORD_LIMIT)
 
                     # Edge case: single very long insight → force it through
-                    if not batch:
-                        batch = [remaining[0]]
+                    if batch.empty:
+                        batch = remaining.iloc[[0]]
 
                     # increment batch counter
                     batch_count += 1
                     total_batches_all_themes += 1
 
                     # Format batch for prompt (bullet list preserves separability)
-                    orphan_batch_str = "\n".join([f"- {i}" for i in batch])
+                    batch = batch.copy() # Avoid SettingWithCopyWarning
+
+                    # get back sensible citations
+                    def format_citation(r):
+                        author = str(r.get("paper_author", "")).strip()
+                        date = r.get("paper_date", "")
+
+                        if pd.isna(date):
+                            date = ""
+                        elif isinstance(date, float) and date.is_integer():
+                            date = str(int(date))
+                        else:
+                            date = str(date).strip()
+
+                        if date.lower() in ["nan", "none", ""]:
+                            return author
+
+                        if author.lower() in ["nan", "none", ""]:
+                            return date
+
+                        return f"{author} {date}"
+
+                    # Format citations for the batch, ensuring uniqueness and cleanliness
+                    batch["citations"] = batch.apply(format_citation, axis=1)
+                    batch_citations_unique = list(dict.fromkeys(
+                        c for c in batch["citations"].tolist()
+                        if c and c.lower() not in ["nan", "none"]
+                    ))
+                    
+                    # Convert to string as bulleted list
+                    batch_citations_str = "\n".join([f"- {c}" for c in batch_citations_unique])
+                    # get the insights text as bulleted list
+                    batch_insights_str = "\n".join([f"- {i}" for i in batch["insight"].tolist()])
 
                     # Build LLM prompt
                     sys_prompt = Prompts().integrate_orphans()
@@ -6143,8 +6170,10 @@ class Summarize:
                         f"{theme_description}\n"
                         "ORIGINAL SUMMARY:\n"
                         f"{updated_summary}\n"
+                        "REQUIRED ORPHAN CITATIONS/AUTHORS:\n"
+                        f"{batch_citations_str}\n\n"
                         "ORPHAN INSIGHTS:\n"
-                        f"{orphan_batch_str}\n\n"
+                        f"{batch_insights_str}\n\n"
                     )
 
                     # Fallback ensures no regression if model fails
@@ -6181,7 +6210,7 @@ class Summarize:
                     if error is not None or response["updated_summary"] == "":
                         print(f"WARNING: Orphan integration failed for theme {theme_id} batch {batch_count}. Capturing summary of failed batch for diagnostics and proceeding with original summary.\nError details: {error if error else 'No error message returned.'}")
                         failed_batch_summary = self._summarize_failed_orphan_batch(
-                            orphans=orphan_batch_str,
+                            orphans=batch_insights_str,
                             question_text=question_text,
                             theme_label=theme_label
                         )
@@ -6200,7 +6229,7 @@ class Summarize:
                         updated_summary = response.get("updated_summary", updated_summary)
 
                     # Remove processed insights from remaining obligation set
-                    remaining = remaining[len(batch):]
+                    remaining = remaining.iloc[len(batch):].copy()
 
                 avg_batch_size = total_orphans / batch_count if batch_count > 0 else 0
                 print(
