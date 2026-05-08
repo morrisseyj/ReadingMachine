@@ -6115,7 +6115,7 @@ class Summarize:
                 failed_batch_summaries = []
 
                 # cumulative list of orphan citations/authors
-                required_citation_seen = []
+                required_citations_seen = []
 
                 while not remaining.empty:
 
