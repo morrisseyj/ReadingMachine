@@ -6114,6 +6114,9 @@ class Summarize:
 
                 failed_batch_summaries = []
 
+                # cumulative list of orphan citations/authors
+                required_citation_seen = []
+
                 while not remaining.empty:
 
                     batch = pack_batch(remaining, MODEL_INPUT_WORD_LIMIT)
@@ -6156,8 +6159,14 @@ class Summarize:
                         if c and c.lower() not in ["nan", "none"]
                     ))
                     
-                    # Convert to string as bulleted list
-                    batch_citations_str = "\n".join([f"- {c}" for c in batch_citations_unique])
+
+                    # Accumulate citations/authors across batches for this theme
+                    required_citations_seen = list(dict.fromkeys(
+                        required_citations_seen + batch_citations_unique
+                    ))
+
+                    # Convert cumulative citation list to string as bulleted list
+                    batch_citations_str = "\n".join([f"- {c}" for c in required_citations_seen])
                     # get the insights text as bulleted list
                     batch_insights_str = "\n".join([f"- {i}" for i in batch["insight"].tolist()])
 
