@@ -1582,13 +1582,13 @@ class Prompts:
         """
         return (
             '# ROLE\n'
-            'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected.\n\n'
+            'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected. This update is part of a batched orphan insertion process.\n\n'
 
             '# TASK\n'
             'I will provide you with:\n'
             '1. THEMATIC CONTEXT: The Theme Label, Theme Description, and Research Question.\n'
             '2. ORIGINAL SUMMARY: The current version of the summary.\n'
-            '3. REQUIRED ORPHAN CITATIONS/AUTHORS: A list of citations/authors that must be appear in the revised summary.\n'
+            '3. REQUIRED ORPHAN CITATIONS/AUTHORS: A cumulative list across orphan-insertion batches of citations/authors that must remain represented in this full-summary rewrite.\n'
             '4. ORPHAN INSIGHTS: A list of insights that must be integrated.\n\n'
 
             '# INPUT FORMAT\n'
@@ -1653,17 +1653,20 @@ class Prompts:
             '- DO NOT preserve original wording if it prevents integration.\n'
             '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
             '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
-            '- Preserve citations/authors sufficient to substantiate claims and maintain visible grounding in the literature.\n'
             '- Multiple insights may be synthesized together when their substantive meaning is similar or overlapping.\n'
             '- You do NOT need to attach every relevant citation/author to every synthesized claim.\n'
-            '- However, all citations/authors listed under REQUIRED ORPHAN CITATIONS/AUTHORS must appear somewhere in the revised summary.\n'
+            '- Preserve every citation/author already present in the ORIGINAL SUMMARY at least once somewhere in the revised summary.\n'
+            '- In addition, every citation/author listed under REQUIRED ORPHAN CITATIONS/AUTHORS must appear at least once somewhere in the revised summary.\n'
+            '- You may shorten redundant citation lists attached to individual claims, but only if any removed citation/author still appears elsewhere in the revised summary.\n'
+            '- Preserve citations/authors sufficient to maintain visible grounding in the literature.\n'
             '- Distinct, minority, or conflicting perspectives should retain explicit provenance.\n'
-            '- Do NOT remove citations/authors in ways that obscure the origin or grounding of substantive claims.\n\n'
+            '- No claim needs to be substantiated by more than four references.\n'
+            '- Do NOT remove citations/authors in ways that obscure the origin, grounding, or representational breadth of substantive claims.\n\n'
 
             '# CONVERGENCE REQUIREMENT\n'
             'The revised summary must satisfy both:\n'
             '- All orphan insights are represented\n'
-            '- All orphan insight citations/provenance are represented\n'
+            '- All REQUIRED ORPHAN CITATIONS/AUTHORS appear at least once\n'
             '- The response is complete and not truncated\n\n'
 
             '# OUTPUT PROTOCOL\n'
