@@ -300,9 +300,9 @@ Under this design, orphan handling serves not only to address omission and refin
 
 ### 5.5 Performative Repair
 
-Step 2, above, was initially attempted as a single LLM call. This did not work reliably: the schema repair pass repeatedly reproduced the same failing themes even when given explicit instructions to materially amend them. Providing additional context, including the full history of prior schemas, efforts at population, including failed repair attempts, did not resolve the issue. An accountability-reporting requirement was then added, requiring the model to explain what repairs it had made. This also failed: the model sometimes retained the unchanged failing themes while reporting that repairs had been implemented.
+Step 2, above, was initially attempted as a single LLM call. This did not work reliably: the schema repair pass repeatedly reproduced the same failing themes even when given explicit instructions to materially amend them. Providing additional context, including the full history of prior schemas, efforts at population, including failed repair attempts, did not resolve the issue. An self-reported repair accountability mechanism was then added, requiring the model to explain what repairs it had made. This also failed: the model sometimes retained the unchanged failing themes while reporting that repairs had been implemented.
 
-This failure mode suggests that, under schema-repair pressure, The model could satisfy the rhetorical form of repair without performing the underlying structural transformation required to resolve the failure. One interpretation is that the model preferentially stabilized conceptually coherent schemas even when those schemas were operationally incompatible with bounded synthesis constraints.
+This failure mode suggests that, under schema-repair pressure, the model could satisfy the rhetorical form of repair without performing the underlying structural transformation required to resolve the failure. One interpretation is that the model preferentially stabilized conceptually coherent schemas even when those schemas were operationally incompatible with bounded synthesis constraints.
 
 The eventual solution was to separate repair diagnosis from repair implementation. In the first pass, the model generated a schema repair plan based on the history of failed schemas and incomplete themes. In the second pass, a separate call implemented that plan against only the most recent schema, without access to the prior summaries or accountability narratives. This separation reduced anchoring and allowed the iterative schema repair loop to converge on a viable thematic structure.
 
@@ -324,6 +324,7 @@ Within this method the following novel methodological contributions to large‑s
 - **Formal semantic clustering as scaffolding for qualitative thematization**, with clustering used to expose structure rather than to determine themes.
 - **Scale‑aware synthesis techniques**, including shortest-path cluster ordering and density-seeded partitioning to preserve semantic neighborhoods under bounded context windows.
 - **Orphan‑based omission detection**, which treats synthesis gaps as explicit signals and uses them to iteratively refine thematic schemas under coverage constraints.
+- **External auditing of iterative LLM synthesis**, using explicit conservation checks for coverage, provenance, thematic coherence, and citation retention across repeated generative transformations.
 
 Individually, some of these components draw on existing techniques from qualitative analysis and NLP. Their novelty lies in being operationalized together as a single, inspectable pipeline for corpus‑level reading that prioritizes coverage, traceability, and self‑correction under scale.
 
@@ -462,11 +463,11 @@ This limitation could be addressed in future iterations by linking each insight_
 
 For meta-insights in particular, tracing may return large portions of text even when a single insight_id is queried. This reduces the precision of traceability and reinforces the need to further refine the meta-insight extraction process.
 
-#### 7.6.5 Instability on theme generation
+<!-- #### 7.6.5 Instability on theme generation
 
 This run revealed instability in the iterative theme generation process. The pipeline proceeded through eight passes before producing a theme schema that could be populated and survive the orphan insertion loop without failure. However, when that resulting theme structure was passed back to the theme schema generator for further refinement, a new schema was produced that reduced the number of themes. This increased compressive pressure on the synthesis stage, resulting in truncated outputs during subsequent orphan reinsertion. An additional iteration was attempted, but this likewise generated a non-completing schema. As a result, the last fully completing schema was selected as the basis for the final output.
 
-The most likely resolution is improved tuning of the schema generation prompt so that the model is more conservative about modifying stable schemas unless clear improvements are identifiable, while also encouraging more aggressive theme splitting where synthesis pressure remains high. As with other components of the system, extensive prompt tuning was not pursued for the purposes of this architectural demonstration.
+The most likely resolution is improved tuning of the schema generation prompt so that the model is more conservative about modifying stable schemas unless clear improvements are identifiable, while also encouraging more aggressive theme splitting where synthesis pressure remains high. As with other components of the system, extensive prompt tuning was not pursued for the purposes of this architectural demonstration. -->
 
 ### 7.7 Interpretation and Next Steps
 
@@ -562,7 +563,7 @@ The quantity of external structure required for ReadingMachine to maintain cover
 
 In this respect, ReadingMachine can be understood in part as an external auditing architecture for iterative LLM synthesis. Mechanisms such as schema development, insight mapping, orphan handling and citation verification act as external conservation controls, ensuring that coverage, provenance, and structural fidelity are not silently lost during repeated generative transformations.
 
-Notably, the auditing requirements observed in ReadingMachine are largely orthogonal to current dominant scaling strategies in LLM development, such as context-window expansion. The behavior observed in the development of ReadingMachine suggests that increasing context windows may increase rather than eliminate the need for externalized auditing. Larger synthesis contexts amplify omission pressure, abstraction pressure, citation drift, and instability in maintaining coherent representational structure across repeated transformations. In this respect, visibility over larger amounts of text should not be conflated with stable integration of that text into a faithful synthesis.
+Notably, the auditing requirements observed in ReadingMachine are largely orthogonal to current dominant scaling strategies in LLM development, such as context-window expansion. The behavior observed in the development of ReadingMachine suggests that increasing context windows may increase rather than eliminate the need for externalized auditing. Larger synthesis contexts likely amplify omission pressure, abstraction pressure, citation drift, and instability in maintaining coherent representational structure across repeated transformations. In this respect, visibility over larger amounts of text should not be conflated with stable integration of that text into a faithful synthesis.
 
 While the instability documented here concerns synthesis and comprehension tasks, the same underlying generative dynamics are likely relevant to reasoning processes, which also operate through iterative transformations over bounded texts. To the extent that reasoning depends on preserving assumptions, constraints, provenance, or intermediate conclusions across extended inference trajectories, similar forms of representational drift may emerge. This suggests that long-horizon reasoning systems may also benefit from external auditing architectures in cases where completeness, consistency, traceability, or preservation of epistemic structure are important.
 
