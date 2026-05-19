@@ -298,6 +298,24 @@ d) The theme is marked as incomplete (themes with no failed batches are marked a
 
 Under this design, orphan handling serves not only to address omission and refine the thematic structure, but also to operationalize synthesis under bounded output constraints.
 
+### 5.5 Performative Repair
+
+Step 2, above, was initially attempted as a single LLM call. This did not work reliably: the schema repair pass repeatedly reproduced the same failing themes even when given explicit instructions to materially amend them. Providing additional context, including the full history of prior schemas, efforts at population, including failed repair attempts, did not resolve the issue. An accountability-reporting requirement was then added, requiring the model to explain what repairs it had made. This also failed: the model sometimes retained the unchanged failing themes while reporting that repairs had been implemented.
+
+This failure mode suggests that, under schema-repair pressure, The model could satisfy the rhetorical form of repair without performing the underlying structural transformation required to resolve the failure. One interpretation is that the model preferentially stabilized conceptually coherent schemas even when those schemas were operationally incompatible with bounded synthesis constraints.
+
+The eventual solution was to separate repair diagnosis from repair implementation. In the first pass, the model generated a schema repair plan based on the history of failed schemas and incomplete themes. In the second pass, a separate call implemented that plan against only the most recent schema, without access to the prior summaries or accountability narratives. This separation reduced anchoring and allowed the iterative schema repair loop to converge on a viable thematic structure.
+
+### 5.6 Dropped citations
+
+The demands on orphan insertion (large numbers of orphans) eroded citation retention. Citations for papers that produced insights would drop out of the final summary altogether. This raises the possibility that underlying insights were also being lost during iterative synthesis, although the batched orphan architecture suggests citation erosion was more common than complete insight deletion. To handle this:
+
+1. After theme population an LLM call on the theme summary identifies all current citations
+2. With each orphan batch the list of required citations is sent to the LLM, along with the batch of orphan insights to be incorporated. The instructions are to incorporate orphans and ensure that all the citations in the list appear in the theme. 
+3. This is bootstrapped by a final citation check where the set of citations for the insights mapped to the theme is compared with the insights currently appearing in the theme. For any missing citations, all the insights for those citations for the theme, are then sent to an LLM with instructions to insert distinct citations at least once. 
+
+The issue of dropped citations raises a question about the role we expect citations to play in the synthesis. It would be technically possible to have every claim list every citation that supports it in the paper, but this would undermine readability and erode token budgets where the hard constraint on operationalizing the pipeline is bounded output length. A compromise was therefore adopted that looks something more like human review. All claims should be cited, with no claim needing more than four citations, prioritizing the most prominent. At the same time, all authors that produce insights for a theme should appear at least once in the theme. The result is a readable output, where claims are substantiated and all covered authors are reflected in the final synthesis. 
+
 ## 6. Methodological Contributions
 
 Within this method the following novel methodological contributions to large‑scale qualitative corpus analysis are worth highlighting:
@@ -396,7 +414,7 @@ Conflict is explicitly represented. Tensions within the literature are articulat
 
 No obvious hallucinations were identified during internal review, though this has not been formally or systematically evaluated.
 
-Theme counts increase across runs reflecting the architecture's use of theme splitting over iterative schema development as a means to resolve output constraints while maintaining high levels of granularity and limiting omission. 
+Theme counts increase across runs reflecting the architecture's use of theme splitting over iterative schema development as a means to resolve output constraints while maintaining high levels of granularity and limiting omission. That said, theme stability was not emergent (see below).
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
@@ -443,6 +461,12 @@ Insights are currently referenced using an author–date–year format. As a res
 This limitation could be addressed in future iterations by linking each insight_id directly to its source span, with human-readable author–date references layered on top. The implementation of such functionality is dependent on the output format—for example, HTML hover interactions versus jump links in PDF or Word documents.
 
 For meta-insights in particular, tracing may return large portions of text even when a single insight_id is queried. This reduces the precision of traceability and reinforces the need to further refine the meta-insight extraction process.
+
+#### 7.6.5 Instability on theme generation
+
+This run revealed instability in the iterative theme generation process. The pipeline proceeded through eight passes before producing a theme schema that could be populated and survive the orphan insertion loop without failure. However, when that resulting theme structure was passed back to the theme schema generator for further refinement, a new schema was produced that reduced the number of themes. This increased compressive pressure on the synthesis stage, resulting in truncated outputs during subsequent orphan reinsertion. An additional iteration was attempted, but this likewise generated a non-completing schema. As a result, the last fully completing schema was selected as the basis for the final output.
+
+The most likely resolution is improved tuning of the schema generation prompt so that the model is more conservative about modifying stable schemas unless clear improvements are identifiable, while also encouraging more aggressive theme splitting where synthesis pressure remains high. As with other components of the system, extensive prompt tuning was not pursued for the purposes of this architectural demonstration.
 
 ### 7.7 Interpretation and Next Steps
 
@@ -531,6 +555,16 @@ As noted above, beyond synthesis, ReadingMachine creates opportunities for epist
 In this sense, the system can be used not only to map a corpus, but also to study the process of mapping itself—providing a structured basis for critical analysis of how interpretations are formed. Under this approach, differences across model runs expose model biases, not as errors requiring correction, but as signals that provide insight into how different systems structure and represent knowledge. Rather than converging on a single “correct” interpretation, the method enables comparison across alternative, internally coherent representations of the same material.
 
 Together, these properties suggest a shift from selective, narrative synthesis toward structured, inspectable corpus mapping as a distinct mode of knowledge production.
+
+### 8.10 The need for external LLM auditing
+
+The quantity of external structure required for ReadingMachine to maintain coverage, granularity, citation provenance, and thematic coherence under scale suggests that unconstrained LLM synthesis does not naturally conserve these properties. Throughout development, multiple forms of representational drift were observed, including dropped insights, disappearing citations, unstable theme structures, and incomplete repairs. Notably, these failures emerged not during complex reasoning tasks, but during comparatively bounded comprehension, synthesis, and rewriting operations.
+
+In this respect, ReadingMachine can be understood in part as an external auditing architecture for iterative LLM synthesis. Mechanisms such as schema development, insight mapping, orphan handling and citation verification act as external conservation controls, ensuring that coverage, provenance, and structural fidelity are not silently lost during repeated generative transformations.
+
+Notably, the auditing requirements observed in ReadingMachine are largely orthogonal to current dominant scaling strategies in LLM development, such as context-window expansion. The behavior observed in the development of ReadingMachine suggests that increasing context windows may increase rather than eliminate the need for externalized auditing. Larger synthesis contexts amplify omission pressure, abstraction pressure, citation drift, and instability in maintaining coherent representational structure across repeated transformations. In this respect, visibility over larger amounts of text should not be conflated with stable integration of that text into a faithful synthesis.
+
+While the instability documented here concerns synthesis and comprehension tasks, the same underlying generative dynamics are likely relevant to reasoning processes, which also operate through iterative transformations over bounded texts. To the extent that reasoning depends on preserving assumptions, constraints, provenance, or intermediate conclusions across extended inference trajectories, similar forms of representational drift may emerge. This suggests that long-horizon reasoning systems may also benefit from external auditing architectures in cases where completeness, consistency, traceability, or preservation of epistemic structure are important.
 
 ## 9. Limitations
 
