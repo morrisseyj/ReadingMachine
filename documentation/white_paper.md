@@ -210,7 +210,6 @@ This theme generation → mapping → orphan handling loop is repeated iterative
 > 4. Minimizing reliance on the 'Other' category only if the above are satisfied"
 > 5. Minimizing the number of themes only if the above are satisfied
 
-
 If the model cannot see obvious improvements for a question's themes, they are all marked as stable. Only unstable themes are passed to future iterations. Once all themes are stable the user is instructed to move to redundancy handling and summarization. In future it likely makes sense to provide some formal measure of schema stability to track how it evolves over time considering: stability of themes, size of Other category, stability of insight allocation to themes, number of orphans etc.
 
 ### 4.9 Redundancy Pass
@@ -300,11 +299,13 @@ Under this design, orphan handling serves not only to address omission and refin
 
 ### 5.5 Performative Repair
 
-Step 2, above, was initially attempted as a single LLM call. This did not work reliably: the schema repair pass repeatedly reproduced the same failing themes even when given explicit instructions to materially amend them. Providing additional context, including the full history of prior schemas, efforts at population, including failed repair attempts, did not resolve the issue. An self-reported repair accountability mechanism was then added, requiring the model to explain what repairs it had made. This also failed: the model sometimes retained the unchanged failing themes while reporting that repairs had been implemented.
+Step 2, above, was initially attempted as a single LLM call. This did not work reliably: the schema repair pass repeatedly reproduced the same failing themes even when given explicit instructions to materially amend them. Providing additional context, including the full history of prior schemas, efforts at population, including failed repair attempts, did not resolve the issue. A self-reported repair accountability mechanism was then added, requiring the model to explain what repairs it had made. This also failed: the model sometimes retained the unchanged failing themes while reporting that repairs had been implemented.
 
 This failure mode suggests that, under schema-repair pressure, the model could satisfy the rhetorical form of repair without performing the underlying structural transformation required to resolve the failure. One interpretation is that the model preferentially stabilized conceptually coherent schemas even when those schemas were operationally incompatible with bounded synthesis constraints.
 
-The eventual solution was to separate repair diagnosis from repair implementation. In the first pass, the model generated a schema repair plan based on the history of failed schemas and incomplete themes. In the second pass, a separate call implemented that plan against only the most recent schema, without access to the prior summaries or accountability narratives. This separation reduced anchoring and allowed the iterative schema repair loop to converge on a viable thematic structure.
+An initial solution was to separate repair diagnosis from repair implementation. In the first pass, the model generated a schema repair plan based on the history of failed schemas and incomplete themes. In the second pass, a separate call implemented that plan against only the most recent schema, without access to the prior summaries or accountability narratives. The model priors towards producing conceptually coherent synthesis object however was so strong that the repair planner became too averse to splitting conceptually coherent themes even when the system was clearly being shown that they were conceptually overloaded and could not pass orphan reinsertion. 
+
+The eventual solution was to split the repair pass first into a decomposition prompt where the sole aim was to break up failing themes into smaller unit, by taking out the largest coherent cluster of concepts that could stand alone as a theme without itself resulting in conceptual overload. This pass had to make no mention of conceptual elegance. Only after a theme was decomposed to that it would survive orphan insertion without errors was it passed it to an optimization prompt which was instructed to recombine coherent conceptual groups and clarify boundaries, so long as this did not risk recreating conceptual overload for any theme. After optimization themes are passed again through the orphan insertion loop to see if they remain viable. If the optimizer can see no obvious opportunities for improvement it defines the schema for the question as "stable". Once all question schema are stable, the iterative process completes. 
 
 ### 5.6 Dropped citations
 
@@ -370,18 +371,19 @@ The full pipeline execution required approximately 14 hours and incurred a total
 
 Core system metrics include:
 
-| Variable                    | Value   								 |
-|-----------------------------|------------------------------------------|
-| Document count              | 153 (176)     								 |
-| Total run cost              | ~ $300  								 |
-| Insight count               | 17752   								 |
-| Chunk insight count         | 12166    								 |
-| Meta insight count          | 5633   			 					     |
-| Cluster count               | 170     			 					 |
-| Runs to stable schema		  | 6										 |
-| Theme counts			      | 30, 33, 34, 35, 36, 37					 |
-| Orphan counts				  | 16893, 16911, 17538, 18096, 18198, 18094 |
-
+| Variable                    | Value   			|
+|-----------------------------|---------------------|
+| Document count              | 153 (176)     		|
+| Total run cost              | ~ $300  			|
+| Insight count               | 17752   			|
+| Chunk insight count         | 12166    			|
+| Meta insight count          | 5633   			 	|
+| Cluster count               | 170     			|
+| Runs to stable schema		  | 3					|
+| Theme counts			      | 28, 30, 30			|
+| Orphan counts				  | 16244, 16942, 16901 |
+| Failed theme counts		  | 3, 1, 0				|
+|-----------------------------|---------------------|
 
 ### 7.4 Example Insights 
 
@@ -415,7 +417,7 @@ Conflict is explicitly represented. Tensions within the literature are articulat
 
 No obvious hallucinations were identified during internal review, though this has not been formally or systematically evaluated.
 
-Theme counts increase across runs reflecting the architecture's use of theme splitting over iterative schema development as a means to resolve output constraints while maintaining high levels of granularity and limiting omission. That said, theme stability was not emergent (see below).
+Theme counts initially increase across runs, reflecting the architecture's initial use of theme splitting (repair) to address failing themes, before stabilizing as optimization passes dominate. This suggests the iterative approach is working to resolve output constraints while maintaining high levels of granularity and limiting omission. That said, theme stability was not emergent (see below).
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
@@ -462,12 +464,6 @@ Insights are currently referenced using an author–date–year format. As a res
 This limitation could be addressed in future iterations by linking each insight_id directly to its source span, with human-readable author–date references layered on top. The implementation of such functionality is dependent on the output format—for example, HTML hover interactions versus jump links in PDF or Word documents.
 
 For meta-insights in particular, tracing may return large portions of text even when a single insight_id is queried. This reduces the precision of traceability and reinforces the need to further refine the meta-insight extraction process.
-
-<!-- #### 7.6.5 Instability on theme generation
-
-This run revealed instability in the iterative theme generation process. The pipeline proceeded through eight passes before producing a theme schema that could be populated and survive the orphan insertion loop without failure. However, when that resulting theme structure was passed back to the theme schema generator for further refinement, a new schema was produced that reduced the number of themes. This increased compressive pressure on the synthesis stage, resulting in truncated outputs during subsequent orphan reinsertion. An additional iteration was attempted, but this likewise generated a non-completing schema. As a result, the last fully completing schema was selected as the basis for the final output.
-
-The most likely resolution is improved tuning of the schema generation prompt so that the model is more conservative about modifying stable schemas unless clear improvements are identifiable, while also encouraging more aggressive theme splitting where synthesis pressure remains high. As with other components of the system, extensive prompt tuning was not pursued for the purposes of this architectural demonstration. -->
 
 ### 7.7 Interpretation and Next Steps
 
