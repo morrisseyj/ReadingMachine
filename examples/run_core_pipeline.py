@@ -164,6 +164,9 @@ ingestor.drop_duplicates()
 
 ingestor.update_state("duplicate_check.csv")
 
+# Generate the citations that you want to appear in the final report - this is generated from the metadata - and will be what appears in the final report in the form (author date).
+ingestor.gen_unique_citations()
+
 # Break each document into bounded segments (~paragraph scale)
 # This ensures the LLM reads manageable text windows
 ingestor.chunk_papers()

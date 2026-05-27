@@ -156,6 +156,8 @@ to be inspected or reused across runs.
 """
 # import custom libraries
 
+import json
+
 from . import config, utils
 from .state import CorpusState, SummaryState
 from .prompts import Prompts
@@ -1179,6 +1181,157 @@ class Ingestor:
         # Note we don't save as we are now going to chunk this in the same class
         # Return for inspection
         return self.corpus_state.insights
+
+    @staticmethod
+    def _make_unique_list(x: list) -> list:
+        """
+        Helper to make a unique complete list. 
+        Achieved by appending an integer to duplicates: item, item_1, item_2, etc. in the form of author date, where there may be multiple papers by the same author in the same year. This function ensures that each citation is unique by appending an integer to duplicates.
+        """
+        # First iterate a dict to count items
+        totals = {}
+
+        for item in x:
+            totals[item] = totals.get(item, 0) + 1
+
+        # Then iterate again to create the unique list, using the totals to append integers to duplicates
+        seen = {}
+        result = []
+
+        for item in x:
+            if totals[item] == 1:
+                result.append(item)
+            else:
+                seen[item] = seen.get(item, 0) + 1
+                result.append(f"{item}_{seen[item]}")
+
+        return result   
+
+    def gen_unique_citations(self) -> None:
+        """
+        Generates a unique citation string for each citation in the paper. 
+        This will take the form author date
+        For matching author date the system will append and interger to the citation: author date_1, author date_2, etc. This is to handle cases where there are multiple papers by the same author in the same year.
+        This function mutates the state by adding a unique citation dataframe, it also adds a paper id and converts the current paper id field to the filename_stub field
+        """
+        # Make a copy of working insights so that we only mutate at the end and don't change things in stages if code crashes
+        working_insights = self.corpus_state.insights.copy()
+        # First we change the paper_id field to filename_stub to reflect that it is no longer the paper id but the original filename stub that we have for each paper, which is what we will use to link the unique citations to the papers. We then create a new paper_id field which is the unique citation. We generate the unique citation by combining the author and date fields, and then we check for duplicates and append an integer if there are duplicates. Finally we save this as a new dataframe in the state called unique_citations.
+        working_insights = working_insights.rename(columns={"paper_id": "filename_stub"})
+        # Now we create the paper_id field by combining the author and dat fields and then checking for uniqueness
+        # First check whether there are any empty author or date values, if so throw an error:
+        mask = working_insights["paper_author"].isna() | working_insights["paper_date"].isna() | (working_insights["paper_author"] == "") | (working_insights["paper_date"] == "")
+        
+        if mask.any():
+            raise ValueError(
+                "Missing author or date values found in insights. Please ensure all papers have author and date metadata before generating unique citations.\n\n" \
+                "To do this update the file at data/potential_duplicates/ and re run the update_state function to update the insights with the correct metadata, then run this function again.\n\n"
+                )
+
+        # if mask succeeds convert paper_date to numeric to keep the data model clean
+        working_insights["paper_date"] = pd.to_numeric(working_insights["paper_date"], errors="coerce")
+    
+        # Now generate the unique citation by combining the author and date fields
+        # Clean the citations
+        paper_date = (
+            working_insights["paper_date"]
+            .fillna(-1)
+            .astype(int)
+            .astype(str)
+            .replace("-1", "nd")
+        )
+        
+        paper_author = (
+            working_insights["paper_author"]
+            .str.split(",")
+            .str[0]
+            .str.replace(" ", "", regex=False)
+            .str.strip()
+        )
+
+        working_insights["paper_id"] = (
+            paper_author + paper_date
+        )
+
+        working_insights["paper_id"] = self._make_unique_list(
+            working_insights["paper_id"].tolist()
+        )
+
+        # Now we get the unique citations back from the LLM
+        # First create a dictionary of paper_id keys and citation values
+        citations = working_insights["paper_author"] + " " + paper_date
+        citations_dict = {}
+        for paper_id, citation in zip(working_insights["paper_id"], citations):
+            citations_dict[paper_id] = citation
+
+        out_clean_citations = []
+        step = 10
+        total_batches = math.ceil(len(citations_dict) / step)
+        citation_keys = list(citations_dict.keys())
+        count = 0
+
+        for i in range(0, len(citations_dict), step):
+            count += 1
+            print(f"Processing batch {count} of {total_batches}...")
+            batch = {
+                key: citations_dict[key] for key in citation_keys[i:i+step]
+            }
+            citations_json = json.dumps(batch, indent=2)
+            user_prompt = citations_json
+            sys_prompt = Prompts().gen_in_text_citation()
+            json_schema = {
+                "name": "formatted_citations",
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+
+            fall_back = {}
+
+            response, error = utils.call_chat_completion(
+                llm_client=self.llm_client,
+                ai_model=self.ai_model,
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                return_json=True,
+                json_schema=json_schema,
+                fall_back=fall_back, 
+                return_with_error = True
+            )
+
+            if error:
+                print(f"Error processing batch {count}: {error}. Some citations will be missing.")
+
+            clean_citations = pd.DataFrame(
+                response.items(), 
+                columns=["paper_id", "in_text_citation"]
+            )
+
+            out_clean_citations.append(clean_citations)
+
+
+        # Now we concat all the results
+        out_clean_citations_df = pd.concat(out_clean_citations, ignore_index=True)
+        # Now we get unique values for the citations
+        out_clean_citations_df["unique_in_text_citation"] = self._make_unique_list(out_clean_citations_df["in_text_citation"].tolist())
+
+        # Now merge on paper_id to make sure everything matches
+        working_insights = (
+            working_insights
+            .merge(
+                out_clean_citations_df[["paper_id", "unique_in_text_citation"]],
+                how="left",
+                on="paper_id"
+            )
+            .rename(columns={"unique_in_text_citation": "in_text_citation"})
+        )
+
+        # Mutate the state at the end of this
+        self.corpus_state.insights = working_insights
+        print(self.corpus_state.insights[["paper_id", "in_text_citation"]].head())
 
     @staticmethod
     def _drop_duplicate_chunks(df: pd.DataFrame) -> pd.DataFrame:

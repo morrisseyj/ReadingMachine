@@ -526,6 +526,52 @@ class Prompts:
             '    "paper_date": "<YYYY>"\n'
             '}\n'
         )
+
+    def gen_in_text_citation(self):
+        """
+        Generate a prompt for extracting in-text citations.
+
+        This prompt instructs the model to identify and format in-text citations
+        for a given set of papers.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to extract and return in-text citations
+            in a structured format.
+        """
+        return (
+            "## ROLE\n"
+            "You are a specialized citation formatting tool.\n\n"
+
+            "## TASK\n"
+            "Convert author and year metadata into standardized in-text citations.\n"
+            "You will receive a JSON object where:\n"
+            "- keys are paper_id values\n"
+            "- values contain author and year information\n\n"
+
+            "## RULES\n"
+            "1. Return exactly one output entry for every input paper_id.\n"
+            "2. Do not omit, modify, reorder, or invent paper_id values.\n"
+            "3. Return ONLY valid JSON.\n"
+            "4. Do not include explanations, markdown, comments, or additional text.\n"
+            "5. Use general academic practices:\n"
+            "   - Use author last names only.\n"
+            "   - Use the format 'Author Year' e.g. 'Smith 2020'.\n"
+            "   - For two authors use 'and' e.g. 'Smith and Jones 2020'.\n"
+            "   - For three authors use commas and 'and' e.g. 'Smith, Jones, and Lee 2020'.\n"
+            "   - For more than three authors use 'et al.' e.g. 'Smith et al. 2020'.\n"
+            "   - For institutions use the institutional name e.g. 'World Bank 2020'.\n"
+            "   - For no date or nd/n.d./n.d use n.d. e.g. 'Smith n.d.'.\n"
+            "   - if dates are formatted as floats (e.g. 2020.0), convert to integers (e.g. 2020).\n"
+            "13. Do not use parentheses.\n"
+            "14. If formatting is uncertain, return the closest reasonable citation rather than omitting the entry.\n\n"
+
+            "## OUTPUT FORMAT\n"
+            "{\n"
+            '  "<paper_id>": "<formatted citation>"\n'
+            "}\n"
+        )
     
     ####
     # /END INGESTOR
