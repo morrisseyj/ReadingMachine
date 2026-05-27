@@ -921,10 +921,16 @@ class Prompts:
             "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n"
             "If no minority or residual concepts exist, omit this theme entirely.\n\n"
 
-            "4. **Establish Precise Instructions:** Every category must have bespoke instructions. "
+            "4. **Establish Precise Instructions:** Every category must have bespoke operational assignment instructions. "
             "Use the following logic styles:\n"
-            "   - For Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
+            "   - For Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
             "   - For Conflicts: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+            "INCLUDE rules define the conceptual territory assigned to the theme.\n"
+            "EXCLUDE rules must explicitly reference conceptual territories that belong to OTHER THEMES in the schema.\n"
+            "Do NOT write EXCLUDE rules as the inverse of the INCLUDE rule.\n"
+            "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
+            "A strong EXCLUDE rule identifies conceptually distinct material that should instead be routed to neighboring themes.\n\n"
 
             "## IDEAL CODEBOOK PROPERTIES\n"
             "An effective thematic codebook will:\n\n"
@@ -966,9 +972,11 @@ class Prompts:
             "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
             "This provides the conceptual narrative for the theme and serves as the North Star logic "
             "for downstream tagging and summary population.\n"
-            "- **Conceptual Mutuality (Themes):** Themes must have distinct boundaries. "
-            "The 'EXCLUDE' criteria for a theme should explicitly reference the territories of other themes "
-            "to prevent conceptual overlap.\n"
+            "- **Conceptual Mutuality (Themes):** Themes must operate as a mutually constraining partition. "
+            "Each theme should define both:\n"
+            "   - what conceptual territory belongs inside the theme, and\n"
+            "   - what conceptual territories belong to OTHER THEMES.\n"
+            "EXCLUDE rules should therefore actively route conceptually distinct material toward neighboring themes rather than merely restating the inverse of the INCLUDE rule.\n"
             "- **Relational Flagger (Conflict):** The theme whose \"theme_label\" is \"Conflict\" "
             "is a secondary overlay. It must NOT use standard 'EXCLUDE' logic. "
             "Use DETECTION TRIGGERS to define the precise dimension along which "
@@ -988,79 +996,718 @@ class Prompts:
             "You are not tethered to the original structure of the provided text."
         )
 
+    def gen_theme_schema_repair_instructions(self):
+        return(
+            "## ROLE\n"
+            "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
 
-    def gen_theme_schema_orphan_source(self):
+            "## THE TASK\n"
+            "You are working as part of an iterative loop to refine a thematic codebook.\n"
+            "That iterative loop works as follows: " \
+            "1. Generate a thematic codebook.\n" 
+            "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n" 
+            "3. Attempt to synthesize the content assigned to each theme under bounded output constraints.\n"
+            "4. Check whether synthesis included all the assigned content\n"
+            "5. Forcibly reinsert any content that was lost\n"
+            "   - Insertion is done in batches to ensure full insertion considering stress on the LLM context window\n"
+            "   - If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
+            "6. Update the codebook to partition failing themes into smaller independently synthesizable claim-families so that synthesis and reinsertion can pass.\n\n"
+
+            "You are currently at step 6 of this process."
+            "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n\n"
+
+            "## UNDERSTANDING THE CODEBOOK STRUCTURE\n"
+            "### STRUCTURE\n"
+            "Each theme defines an operational synthesis region using:\n"
+            "- theme_label\n"
+            "- theme_description (the North Star logic)\n"
+            "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+
+            "### INCLUDE/EXCLUDE LOGIC\n"
+            "All themes define precise operational assignment rules:\n"
+            "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
+            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+            "INCLUDE rules define the conceptual material assigned to the synthesis region.\n"
+            "EXCLUDE rules define conceptual material that must be routed to neighboring synthesis regions.\n"
+            "EXCLUDE rules should not be the simple inverses of the INCLUDE rule.\n"
+            "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining assignment partition.\n"
+            "When generating the scope logic in the repair plan, provide sufficient specificity to allow for subsequent EXCLUDE rules to be written that can:\n"
+            "- identify the neighboring themes most likely to overlap with the current theme\n"
+            "- explicitly exclude those conceptual territories\n"
+            "- route ambiguous material toward the appropriate neighboring themes\n\n"
+
+            "### SPECIAL THEMES\n"
+            "**Conflict Theme (Conditional)**\n"
+            "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains "
+            "substantively incompatible interpretations, claims, or prescriptions that cannot be "
+            "maintained within a single coherent conceptual frame.\n\n"
+
+            "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
+
+            "Do NOT create a Conflict theme if the material merely:\n"
+            "- Presents reinforcing critiques\n"
+            "- Describes layered constraints or interacting factors\n"
+            "- Articulates trade-offs within a shared conceptual frame\n"
+            "- Expresses variation in emphasis without incompatible positions\n\n"
+
+            "A Conflict theme requires identifiable polarity between positions.\n\n"
+
+            "Instructions for conflict will invoke DETECTION TRIGGERS (not INCLUDE/EXCLUDE). If scope logic amends conflict it must be sufficiently specific to allow subsequent rules to:\n"
+            "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
+            "- Preserve opposing positions as distinct\n"
+            "- Avoid harmonizing or resolving disagreement\n\n"
+
+            "**'Other' Theme (Conditional)**\n"
+            "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
+            "without fragmenting the schema into excessively fine-grained themes.\n\n"
+
+            "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+
+            "The 'Other' theme should:\n"
+            "- Capture valid but low-frequency or residual concepts\n"
+            "- Not contain a coherent or dominant conceptual grouping\n"
+            "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+
+            "If no residual concepts exist, omit this theme entirely.\n\n"
+
+            "## INPUT\n"
+            "You will receive:\n"
+            "1. The research question\n"
+            "2. Efforts at previous schema development to date, which will include:\n"
+            "   - Prior schema\n"
+            "   - The theme summaries those schema generated\n"
+            "       - For failing themes, these summaries will include the 'FAILED BATCH SUMMARIES' that identify the content from any batch (numbered by batch) that exceeded the bounded input constraint when being forcibly reinserted.\n"
+            "   - The pass/fail status of each theme reflecting the result of complete reinsertion.\n"
+            "   - The word count of all currently passing themes.\n"
+            "   - Themes with `word_count = null` failed during reinsertion. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
+            "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. \n"
+            "The most recent codebook is flagged as such. This should be the focus of your revision.\n"
+            "Each codebook is flagged as to whether **all** the themes passed completion checks.\n\n"
+
+            "## UNDERSTANDING FAILURES\n"
+            "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
+            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+            "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
+            "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+            "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
+            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
+            "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
+
+            "## REQUIRED STRUCTURAL REPAIR\n"
+            "If 'schema_has_failures' = True for the most recent iteration, every failing non-Conflict theme must be decomposed.\n"
+            "For each failing theme, identify the largest independently synthesizable claim-family by representational load currently assigned to that theme.\n"
+            "An independently synthesizable claim-family is a recurring group of claims with its own mechanism, actor system, policy instrument, causal structure, constraint type, or argumentative logic that can be synthesized as a bounded unit.\n\n"
+
+            "By 'largest', prioritize the claim-family that:\n"
+            "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
+            "2. recurs across multiple sources or batches;\n"
+            "3. can plausibly function as an independent bounded synthesis region;\n"
+            "4. can plausibly be synthesized within bounded output constraints (4096 tokens/~2500 words).\n\n"
+
+            "Extract that claim-family from the failed source theme by assigning it to a new theme, unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
+            "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
+            "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
+
+            "Do not write final theme descriptions or final INCLUDE/EXCLUDE prose. Provide scope logic that a second-stage schema rewriter can use to generate labels, descriptions, and operational INCLUDE/EXCLUDE rules.\n"
+            "The scope logic must be specific enough to support future INCLUDE rules for retained/new/receiving themes and future EXCLUDE rules that prevent extracted content from drifting back into the narrowed source theme.\n"
+            "Scope logic should identify neighboring themes most likely to overlap, the conceptual territory to route away from the source theme, and the destination for that territory.\n\n"
+
+            "## USING FAILED BATCH SUMMARIES and CURRENT SUMMARY LENGTHS in repair decisions.\n"
+            "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+            "- Treat content in failed batch summaries as conceptual content correctly assigned to this theme under its existing instructions.\n"
+            "- Use the synthesized theme content **and** FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
+
+            "## USING PRIOR ITERATIONS\n"
+            "- Use prior iterations only to identify recurring instability patterns, repeated failures, and ineffective prior repairs. Do not optimize older iterations independently from the current schema state.\n"
+            "- Do not repeat failed conceptual aggregations from prior iterations, defined by their inclusion/exclusion instructions.\n\n"
+   
+            "## UPDATE PRINCIPLES\n"
+            "Do not generate repair plans that repeat failed conceptual aggregations from prior iterations, including semantically similar rearticulations.\n"
+            "A repair plan may preserve a similar broad topic only if the resulting assignment behavior will materially change through extraction and narrowed scope logic.\n"
+            "Do not overload passing themes merely to avoid creating additional themes.\n"
+            "Do not return repair plans that merely polish boundaries, rename themes, or clarify wording without materially reducing representational load.\n"
+            "A repair is insufficient if it removes only minor examples, edge cases, citation-specific details, or already-covered neighboring concepts.\n"
+            "When narrowing a failed theme, the scope logic must reduce included territory and identify excluded territory so extracted material is not reassigned back in later iterations.\n\n"
+           
+           "## OUTPUT FORMAT (STRICT JSON)\n"
+            "{\n"
+            "  \"repair_plan\": {\n"
+            "    \"theme_repairs\": [\n"
+            "      {\n"
+            "        \"source_theme_id\": <integer>,\n"
+            "        \"source_theme_label\": <string>,\n"
+            "        \"completeness_check\": \"fail\",\n"
+            "        \"concepts_ranked_by_representational_load\": [\n"
+            "          {\n"
+            "            \"concept\": <string>,\n"
+            "            \"estimated_load\": \"high\" | \"medium\" | \"low\",\n"
+            "            \"evidence_from_summary_or_failed_batches\": <string>,\n"
+            "            \"independently_synthesizable\": <boolean>\n"
+            "          }\n"
+            "        ],\n"
+            "        \"extractions\": [\n"
+            "          {\n"
+            "            \"concept\": <string>,\n"
+            "            \"action\": \"new_theme\" | \"move_to_existing_theme\",\n"
+            "            \"target_theme_id\": <integer | null>,\n"
+            "            \"new_theme_label\": <string | null>,\n"
+            "            \"new_theme_core_scope\": <string | null>,\n"
+            "            \"new_theme_inclusions\": [<string>],\n"
+            "            \"new_theme_exclusions\": [<string>],\n"
+            "            \"receiving_theme_scope_update\": <string | null>,\n"
+            "            \"reason\": <string>\n"
+            "          }\n"
+            "        ],\n"
+            "        \"source_theme_resolution\": {\n"
+            "          \"outcome\": \"rename_and_narrow\" | \"dissolve_and_reallocate\",\n"
+            "          \"residual_label\": <string | null>,\n"
+            "          \"residual_core_scope\": <string | null>,\n"
+            "          \"residual_inclusions\": [<string>],\n"
+            "          \"residual_exclusions\": [<string>],\n"
+            "          \"residual_expected_to_pass\": <boolean>,\n"
+            "          \"dissolution_reason\": <string | null>\n"
+            "        },\n"
+            "        \"repair_narrative\": <string>\n"
+            "      }\n"
+            "    ],\n"
+            "    \"schema_repairs\": [\n"
+            "      {\n"
+            "        \"affected_theme_ids\": [<integer>],\n"
+            "        \"repair_narrative\": <string>\n"
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "}\n\n"
+
+            "Field definitions:\n"
+            "- repair_plan: contains decomposition operations needed for the second-stage schema rewrite.\n"
+            "- theme_repairs: one decomposition plan for each failed non-Conflict theme.\n"
+            "- source_theme_id: the input theme_id of the failed theme being decomposed.\n"
+            "- source_theme_label: the input label of the failed theme being decomposed.\n"
+            "- concepts_ranked_by_representational_load: major claim-families inside the failed theme, ordered from largest to smallest expected synthesis burden.\n"
+            "- concept: a distinct claim-family, mechanism, actor system, policy instrument, causal structure, or constraint type.\n"
+            "- estimated_load: rough estimate of how much synthesis capacity this concept consumes.\n"
+            "- evidence_from_summary_or_failed_batches: concise evidence that this concept recurs in the current summary or failed batch summaries.\n"
+            "- independently_synthesizable: true if the concept can plausibly function as a bounded synthesis region.\n"
+            "- extractions: claim-families removed from the failed source theme.\n"
+            "- action: use \"new_theme\" when extracted material should become a new theme; use \"move_to_existing_theme\" only when an existing theme has clear conceptual fit and spare representational capacity.\n"
+            "- target_theme_id: existing receiving theme_id, or null if action is \"new_theme\".\n"
+            "- new_theme_label: proposed label when action is \"new_theme\", otherwise null.\n"
+            "- new_theme_core_scope: proposed conceptual scope when action is \"new_theme\", otherwise null.\n"
+            "- new_theme_inclusions: concepts that should be included in the new theme.\n"
+            "- new_theme_exclusions: neighboring concepts that should be excluded from the new theme.\n"
+            "- receiving_theme_scope_update: scope update required for an existing receiving theme, or null if action is \"new_theme\".\n"
+            "- reason: concise explanation for why this extraction reduces representational load.\n"
+            "- source_theme_resolution: describes what happens to the original failed theme after extractions.\n"
+            "- outcome: use \"rename_and_narrow\" when a bounded successor to the source theme remains; use \"dissolve_and_reallocate\" when no coherent bounded residual remains.\n"
+            "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
+            "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
+            "- residual_inclusions: concepts that remain assigned to the narrowed residual theme.\n"
+            "- residual_exclusions: extracted or neighboring concepts that must be excluded from the residual theme.\n"
+            "- residual_expected_to_pass: whether the residual is expected to synthesize within bounded output constraints.\n"
+            "- dissolution_reason: required if outcome is \"dissolve_and_reallocate\", otherwise null.\n"
+            "- repair_narrative: one concise sentence explaining the decomposition.\n"
+            "- schema_repairs: schema-level repairs affecting relationships across multiple themes.\n"
+            "- affected_theme_ids: input theme_ids affected by the schema-level repair.\n\n"
+
+            "Validation rules:\n"
+            "- Every theme repair must include at least one extraction.\n"
+            "- Every failed non-Conflict theme must appear exactly once in theme_repairs.\n"
+            "- Every theme repair must identify concepts_ranked_by_representational_load.\n"
+            "- Every theme repair must extract at least the largest independently synthesizable high-load claim-family.\n"
+            "- If the residual is still likely to fail, extract additional claim-families until the residual is expected to pass or dissolve the source theme.\n"
+            "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"
+            "- Do NOT use move_to_existing_theme unless the receiving theme has both clear conceptual fit and spare representational capacity.\n"
+            "- Do NOT output final INCLUDE/EXCLUDE prose; provide scope logic only.\n"
+            "- Do NOT claim a new theme is needed unless at least one extraction uses action='new_theme' with that exact new_theme_label.\n"
+            "- Do NOT output a rewritten schema.\n"
+            "- Do NOT output polished final theme prose.\n"
+            "- Output only decomposition operations and conceptual reallocations.\n"
+            "- Cosmetic edits do NOT count as repairs.\n"
+            "- The Conflict theme must preserve conceptual polarity.\n"
+            "- The Other theme must remain a residual category.\n"
+            "- The repaired codebook must support full assignment of the conceptual content.\n"
+        )
+
+
+    # def gen_theme_schema_repair_instructions(self):
+    #     """
+    #     Generate the system prompt for iterative refinement of a thematic schema.
+
+    #     This prompt instructs the model to revise an existing thematic codebook
+    #     based on the results of a synthesis and completeness-checking process.
+    #     It uses both successful and failed theme summaries to diagnose structural
+    #     issues and improve conceptual alignment.
+
+    #     The model receives:
+    #         - the current codebook
+    #         - theme-level summaries
+    #         - pass/fail completeness indicators
+    #         - summaries of content that could not be integrated ("FAILED BATCH SUMMARIES")
+    #         - summary lengths as a proxy for representational load
+
+    #     Failures are interpreted as signals of conceptual overload:
+    #         - the theme contains more distinct ideas than can be represented
+    #         without loss of granularity under length constraints
+
+    #     The model must refine the schema by:
+    #         - splitting overloaded themes
+    #         - tightening or expanding inclusion boundaries
+    #         - reallocating content where appropriate
+    #         - introducing new themes when necessary
+
+    #     The goal is to produce a stable conceptual partition that:
+    #         - maintains internal coherence
+    #         - has clear boundaries between themes
+    #         - supports full coverage of the data
+    #         - avoids excessive reliance on "Other"
+    #         - avoids over-expansion of already dense themes
+
+    #     A convergence flag is required:
+    #         - "no_change": true if no clear improvements are needed
+    #         - "no_change": false if any structural modification is made
+
+    #     Returns
+    #     -------
+    #     str
+    #         System prompt instructing the LLM to return an updated thematic
+    #         codebook and convergence flag in strict JSON format.
+
+    #     Notes
+    #     -----
+    #     - This is a corrective step that operates on an existing conceptual schema.
+    #     - It uses integration failures as a structural diagnostic, not as
+    #     classification errors.
+    #     - The prompt enforces conservative updates: changes should only be made
+    #     when clearly justified by the input.
+    #     - This step is part of an iterative loop that converges toward a stable,
+    #     capacity-compatible schema.
+    #     """
+    #     return(
+    #         "## ROLE\n"
+    #         "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
+    #         "You are working as part of an iterative loop to refine a thematic codebook based on the results of a synthesis and completeness-checking process. "
+    #         "Your task is to articulate refinements to an existing Thematic Codebook so that it:\n"
+    #         "1. Can be successfully operationalized in subsequent calls to an LLM (i.e. complete without theme failures) - first priority\n"
+    #         "2. Maintains strong conceptual coherence\n"
+    #         "3. Accurately partitions the conceptual landscape of the data\n\n"
+
+    #         "## CODEBOOK STRUCTURE\n"
+    #         "Each theme defines a conceptual territory using:\n"
+    #         "- theme_label\n"
+    #         "- theme_description (the North Star logic)\n"
+    #         "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+
+    #         "## INCLUDE/EXCLUDE LOGIC\n"
+    #         "All themes must define precise operational assignment rules:\n"
+    #         "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
+    #         "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+    #         "INCLUDE rules define the bounded conceptual territory assigned to the theme.\n"
+    #         "EXCLUDE rules must define conceptual territories that belong to OTHER THEMES in the current schema.\n"
+    #         "Do NOT write EXCLUDE rules as simple inverses of the INCLUDE rule.\n"
+    #         "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
+    #         "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining conceptual partition.\n"
+    #         "When writing EXCLUDE rules:\n"
+    #         "- identify the neighboring themes most likely to overlap with the current theme\n"
+    #         "- explicitly exclude those conceptual territories\n"
+    #         "- route ambiguous material toward the appropriate neighboring themes\n\n"
+
+    #         "## SPECIAL THEMES\n"
+    #         "**Conflict Theme (Conditional)**\n"
+    #         "Create a theme where \"theme_label\" is exactly \"Conflict\" ONLY if the data contains "
+    #         "substantively incompatible interpretations, claims, or prescriptions that cannot be "
+    #         "maintained within a single coherent conceptual frame.\n\n"
+
+    #         "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
+
+    #         "Do NOT create a Conflict theme if the material merely:\n"
+    #         "- Presents reinforcing critiques\n"
+    #         "- Describes layered constraints or interacting factors\n"
+    #         "- Articulates trade-offs within a shared conceptual frame\n"
+    #         "- Expresses variation in emphasis without incompatible positions\n\n"
+
+    #         "A Conflict theme requires identifiable polarity between positions.\n\n"
+
+    #         "Instructions must use DETECTION TRIGGERS (not INCLUDE/EXCLUDE), and must:\n"
+    #         "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
+    #         "- Preserve opposing positions as distinct\n"
+    #         "- Avoid harmonizing or resolving disagreement\n\n"
+
+    #         "**'Other' Theme (Conditional)**\n"
+    #         "Create a theme where \"theme_label\" is exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
+    #         "without fragmenting the schema into excessively fine-grained themes.\n\n"
+
+    #         "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+
+    #         "The 'Other' theme should:\n"
+    #         "- Capture valid but low-frequency or residual concepts\n"
+    #         "- Not contain a coherent or dominant conceptual grouping\n"
+    #         "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+
+    #         "If no residual concepts exist, omit this theme entirely.\n\n"
+
+    #         "## INTERPRETING THE INPUT\n"
+    #         "You will receive:\n"
+    #         "1. The research question\n"
+    #         "2. Efforts at previous schema development to date, which will include:\n"
+    #         "   - Prior schema\n"
+    #         "   - The theme summaries those schema generated\n"
+    #         "   - The pass/fail status of each theme reflecting the result of a completeness check on the theme.\n"
+    #         "   - The word count of all currently passing themes.\n"
+    #         "   - Themes with `word_count = null` failed before synthesis completed. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
+    #         "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. The most recent codebook is flagged as such. This should be the focus of your revision.\n"
+    #         "Each codebook is flagged as to whether all the themes passed completion checks.\n\n"
+
+    #         "## UNDERSTANDING FAILURES\n"
+    #         "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
+    #         "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+    #         "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
+    #         "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+    #         "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
+    #         "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
+    #         "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
+
+    #         ###############################################
+    #         "## REQUIRED STRUCTURAL REPAIR\n"
+    #         "If 'schema_has_failures' = True for the most recent iteration, the current schema contains failing themes. Therefore, you **MUST** return a repair plan that would produce a structurally changed schema.\n"
+    #         "A structurally changed schema means that **for every failing theme** ('completeness_check' = 'fail') you should at least:\n"
+    #         "   - Identify the largest major concept cluster that is separable from the theme's core conceptual territory.\n"
+    #         "       - By 'largest', prioritize the cluster that:\n"
+    #         "           1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
+    #         "           2. recurs across multiple sources or batches;\n"
+    #         "           3. could plausibly function as an independent theme;\n"
+    #         "           4. could plausibly be synthesized as a coherent standalone theme within bounded output constraints;\n"
+    #         "   - Move that cluster out of the failed theme by creating a new theme unless there is an existing receiving theme with both clear conceptual fit and spare representational capacity.\n"
+    #         "   - Update the theme labels, descriptions and instructions for all affected themes (new and source) in order to maintain clear conceptual boundaries and ensure the full schema behaves as a mutually constraining partition.\n"
+    #         "   - If removing the largest conceptual cluster fundamentally breaks the coherence of the source theme and leaves only a small residual, address the residual by either merging it with another theme or creating a new theme for it.\n"
+    #         "   - If one extracted cluster is unlikely to reduce the failed theme below operational capacity, extract additional separable major clusters until the remaining source theme is coherent and likely to pass the completion requirement.\n"
+    #         "**DO NOT** return the same schema when the current schema contains failures.\n"
+    #         "A repair is insufficient if it removes only a minor example, edge case, citation-specific detail, or already-covered neighboring concept. The removed cluster must be large enough that its extraction would materially reduce the number of distinct claims assigned to the failed theme in the next iteration.\n"
+    #         "When repairing a failed theme, revise both INCLUDE and EXCLUDE rules so future assignment behavior changes materially.\n"
+    #         "When reducing the number of concepts in a failed theme, this process should include reducing the set of concepts that are included AND expanding the set of concepts that are excluded. This is necessary to avoid reintroducing conceptually distinct material into a narrowed theme during future reassignment.\n"
+
+    #         #############################################################
+
+    #         "## IDEAL CODEBOOK PROPERTIES\n"
+    #         "An effective thematic codebook/schema will:\n\n"
+    #         "- Allow for the successful expression of all assigned conceptual content, without loss of granularity, under the constraints on output length (i.e. no failing themes).\n"
+    #         "- Define themes that are internally conceptually coherent\n"
+    #         "- Ensure clear conceptual boundaries between themes\n"
+    #         "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
+    #         "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
+    #         "- Minimize reliance on the 'Other' category\n\n"
+
+    #         "## PRIORITIZATION RULE\n"
+    #         "When resolving conflicts between the imperatives to 1) address failed themes and 2) minimize theme counts, maximize conceptual coherence and minimize reliance on the 'Other' category; you must prioritize addressing failed themes and resolving completeness failures first.\n"
+    #         "Only once failures are addressed, should you optimize toward the other ideal properties defined above.\n\n"
+
+    #         "## UPDATE PRINCIPLES\n"
+    #         "Revise the codebook to advance its ideal form as stated above.\n"
+    #         "Always diagnose and revise the CURRENT ITERATION.\n"
+    #         "Historical iterations should be used to identify recurring instability patterns, repeated failures, and ineffective prior repairs.\n"
+    #         "Do not optimize older iterations independently from the current schema state.\n"
+    #         "Do not repeat articulations of themes that failed in previous iterations - substantively similar (i.e. only semantically distinct) rearticulations are not acceptable.\n"
+    #         "A revised theme may retain a similar conceptual label or broad topic if appropriate, but the assignment behavior of the rules must change substantively and materially (both inclusion and exclusion criteria).\n"
+    #         "When updating a schema, INCLUDE/EXCLUDE rules should change for both the failed theme and any receiving themes to which content is reassigned, so that the full schema behaves as a mutually constraining conceptual partition.\n" \
+    #         "If an 'Other' theme is failing you should either expand some themes to accommodate its content, or create a new theme based on the most coherent subset of the 'Other' content, rather than simply expanding the 'Other' theme to accommodate more content.\n\n"
+
+    #        "#### Use FAILED BATCH SUMMARIES and current summary lengths to determine how failed themes should be revised.\n"
+    #         "- Do not reuse previously failed INCLUDE/EXCLUDE rules or DETECTION TRIGGERS.\n"
+    #         "- Do not rely on theme_id continuity when interpreting prior iterations; themes may be renamed, reordered, merged, or split.\n"
+    #         "- Repeated failure indicates that the underlying conceptual aggregation is structurally too broad for bounded synthesis.\n"
+    #         "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+    #         "- Use FAILED BATCH SUMMARIES together with current summary lengths to decide whether failed material should be reassigned to existing themes or split into narrower new themes.\n"
+    #         "- Reallocate failed material to an existing theme only when there is BOTH clear conceptual alignment and clear representational capacity in the receiving theme.\n"
+    #         "   - If either conceptual alignment or representational capacity is uncertain, create a narrower new theme instead of reallocating.\n"
+    #         "- When content is reassigned, update the receiving theme's instructions to explicitly accommodate it and narrow the originating theme so boundaries remain clear and non-overlapping.\n"
+    #         "- Do not overload passing themes merely to avoid creating additional themes.\n\n"
+
+    #         "## REPEATED FAILURE PATTERNS\n"
+    #         "Identify repeated failure patterns when substantially similar conceptual territories continue to appear inside themes that fail across iterations, even if the themes are renamed, reordered, merged, or split.\n"
+    #         "Repeated failure indicates that the underlying conceptual aggregation is operationally invalid for bounded synthesis, regardless of how conceptually elegant, comprehensive, or theoretically coherent the theme may appear.\n"
+    #         "When a conceptual territory repeatedly fails:\n"
+    #         "- do NOT preserve the broad aggregation through minor reformulation\n"
+    #         "- do NOT prioritize conceptual elegance over operational viability\n"
+    #         "- strongly prefer narrower, less elegant, more operationally bounded themes instead\n"
+    #         "- treat successful bounded synthesis as more important than preserving high-level conceptual integration\n\n"
+
+    #         "### Improve overall schema quality and conceptual coherence.\n"
+    #         "- Only prioritize conceptual coherence on boundary clarity after making efforts to resolve failures. An elegant and coherent schema is desirable but secondary to operational viability.\n"
+    #         "- Use both passing and failing themes as evidence for improving overall conceptual structure and capacity balance.\n"
+    #         "- If the current schema has no failing themes, treat the passing schema conservatively and do not optimize it speculatively.\n"
+    #         "- If the current schema has any failing themes, do not let individually passing themes prevent structural repair; passing themes may be narrowed, split, or reorganized when needed to resolve failures and rebalance conceptual load.\n"            
+    #         "- A correct and operationally viable conceptual partition is more important than continuity with the previous schema.\n"
+    #         "- Avoid unnecessary restructuring ONLY when the current schema already resolves completeness failures.\n\n"
+
+    #         "You may revise multiple parts of the schema simultaneously when attempting to resolve failed themes or improve conceptual coherence and theme distinction.\n\n"
+
+    #         "## CONVERGENCE CONDITION\n"
+    #         "You must always include a field \"no_change\" in your output.\n\n"
+
+    #         "HARD RULE:\n"
+    #         "- If the most recent iteration contains any theme with \"completeness_check\": \"fail\", you MUST set \"no_change\": false.\n\n"
+
+    #         "- Set \"no_change\": true ONLY if:\n"
+    #         "   - all themes in the most recent iteration pass the completeness check, AND\n"
+    #         "   - there are no obvious unresolved opportunities to improve conceptual partitioning without risking new cases of theme overload.\n\n"
+
+    #         "Do NOT set \"no_change\": true if any theme has failed the completeness check.\n"
+    #         "Do NOT make speculative improvements. Only propose repairs when improvements would be obvious based on the input.\n\n"
+            
+    #        "## OUTPUT FORMAT (STRICT JSON)\n"
+    #         "{\n"
+    #         "  \"repair_plan\": {\n"
+    #         "    \"theme_repairs\": [\n"
+    #         "      {\n"
+    #         "        \"source_theme_id\": <integer>,\n"
+    #         "        \"source_theme_label\": <string>,\n"
+    #         "        \"completeness_check\": \"fail\",\n"
+    #         "        \"repair_action\": \"retain_and_shrink\" | \"remove_and_redistribute\",\n"
+    #         "        \"receiving_theme_ids\": [<integer>],\n"
+    #         "        \"new_theme_needed\": <boolean>,\n"
+    #         "        \"new_theme_label\": <string | null>,\n"
+    #         "        \"label_change\": <string | null>,\n"
+    #         "        \"description_change\": <string>,\n"
+    #         "        \"include_change\": <string>,\n"
+    #         "        \"exclude_change\": <string>,\n"
+    #         "        \"trigger_change\": <string | null>,\n"
+    #         "        \"reallocated_concepts\": [\n"
+    #         "          {\n"
+    #         "            \"concept\": <string>,\n"
+    #         "            \"from_theme_id\": <integer>,\n"
+    #         "            \"to_theme_id\": <integer | null>,\n"
+    #         "            \"to_new_theme_label\": <string | null>\n"
+    #         "          }\n"
+    #         "        ],\n"
+    #         "        \"repair_narrative\": <string>\n"
+    #         "      }\n"
+    #         "    ],\n"
+    #         "    \"schema_repairs\": [\n"
+    #         "      {\n"
+    #         "        \"affected_theme_ids\": [<integer>],\n"
+    #         "        \"repair_narrative\": <string>\n"
+    #         "      }\n"
+    #         "    ]\n"
+    #         "  },\n"
+    #         "  \"no_change\": <boolean>\n"
+    #         "}\n\n"
+
+    #         "Field definitions:\n"
+    #         "- repair_plan: contains all repair operations needed for the second-stage schema rewrite.\n"
+    #         "- theme_repairs: theme-level repair operations for failed non-Conflict themes.\n"
+    #         "- source_theme_id: the input theme_id of the failed theme being repaired.\n"
+    #         "- source_theme_label: the input label of the failed theme being repaired.\n"
+    #         "- repair_action: use \"retain_and_shrink\" if the failed theme remains in narrower form; use \"remove_and_redistribute\" if no substantially equivalent successor remains.\n"
+    #         "- receiving_theme_ids: existing theme_ids that must receive reallocated content. Use [] if all reallocated content goes to new themes.\n"
+    #         "- new_theme_needed: true if any removed content should become a new theme.\n"
+    #         "- new_theme_label: proposed label for the new theme, or null if no new theme is needed.\n"
+    #         "- label_change: the revised label for the source theme, or null if unchanged or removed.\n"
+    #         "- description_change: how the source theme description should change.\n"
+    #         "- include_change: how the source theme INCLUDE rule should change.\n"
+    #         "- exclude_change: how the source theme EXCLUDE rule should change, including where excluded content should be routed.\n"
+    #         "- trigger_change: only for Conflict themes; otherwise null.\n"
+    #         "- reallocated_concepts: specific conceptual territories removed from failed themes and assigned elsewhere.\n"
+    #         "- repair_narrative: one concise sentence explaining the substantive repair.\n"
+    #         "- schema_repairs: schema-level repair operations that affect relationships or boundaries across multiple themes.\n"
+    #         "- affected_theme_ids: theme_ids affected by the schema-level repair.\n"
+    #         "- no_change: whether no repair is needed for the current schema.\n\n"
+
+    #         "Important:\n"
+    #         "- If no_change=true, repair_plan.theme_repairs and repair_plan.schema_repairs must both be empty arrays.\n"
+    #         "- If no_change=false, every failed non-Conflict theme must appear exactly once in repair_plan.theme_repairs.\n"
+
+    #         "- Every newly proposed conceptual territory must either:\n"
+    #         "   - identify an existing receiving theme_id, or\n"
+    #         "   - specify new_theme_needed=true with a concrete new_theme_label.\n"
+
+    #         "- If repair_action='retain_and_shrink', at least one of:\n"
+    #         "   - label_change\n"
+    #         "   - include_change\n"
+    #         "   - exclude_change\n"
+    #         "must materially alter the conceptual partition of the theme.\n"
+
+    #         "- Do NOT claim a new theme is needed unless at least one reallocated_concepts item uses to_new_theme_label with that exact label.\n"
+
+    #         "- Do NOT output a rewritten schema.\n"
+    #         "- Do NOT output polished final theme prose.\n"
+    #         "- Output only repair operations and conceptual reallocations.\n"
+    #         "- The repair plan must be operationally executable by a second-stage schema rewrite system.\n"
+    #         "- Every failed non-Conflict theme must appear exactly once in repair_plan.\n"
+    #         "- Cosmetic edits do NOT count as repairs.\n"
+    #         "- If a theme is retained_and_shrunk, the repair plan must explicitly identify conceptual territory removed from the theme.\n"
+    #         "- If content is reassigned to an existing theme, identify the receiving theme_id.\n"
+    #         "- If content requires a new theme, set new_theme_needed=true and provide new_theme_label.\n"
+
+    #         "## CONSTRAINTS\n"
+    #         "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"            "- The Conflict theme must preserve conceptual polarity\n"
+    #         "- The Other theme must remain a residual category\n"
+    #         "- The final codebook after repair must support full assignment of the conceptual content\n"
+    #     )
+
+
+    def implement_schema_repairs(self):
         """
-        Generate the system prompt for iterative refinement of a thematic schema.
-
-        This prompt instructs the model to revise an existing thematic codebook
-        based on the results of a synthesis and completeness-checking process.
-        It uses both successful and failed theme summaries to diagnose structural
-        issues and improve conceptual alignment.
-
-        The model receives:
-            - the current codebook
-            - theme-level summaries
-            - pass/fail completeness indicators
-            - summaries of content that could not be integrated ("FAILED BATCH SUMMARIES")
-            - summary lengths as a proxy for representational load
-
-        Failures are interpreted as signals of conceptual overload:
-            - the theme contains more distinct ideas than can be represented
-            without loss of granularity under length constraints
-
-        The model must refine the schema by:
-            - splitting overloaded themes
-            - tightening or expanding inclusion boundaries
-            - reallocating content where appropriate
-            - introducing new themes when necessary
-
-        The goal is to produce a stable conceptual partition that:
-            - maintains internal coherence
-            - has clear boundaries between themes
-            - supports full coverage of the data
-            - avoids excessive reliance on "Other"
-            - avoids over-expansion of already dense themes
-
-        A convergence flag is required:
-            - "no_change": true if no clear improvements are needed
-            - "no_change": false if any structural modification is made
-
-        Returns
-        -------
-        str
-            System prompt instructing the LLM to return an updated thematic
-            codebook and convergence flag in strict JSON format.
-
-        Notes
-        -----
-        - This is a corrective step that operates on an existing conceptual schema.
-        - It uses integration failures as a structural diagnostic, not as
-        classification errors.
-        - The prompt enforces conservative updates: changes should only be made
-        when clearly justified by the input.
-        - This step is part of an iterative loop that converges toward a stable,
-        capacity-compatible schema.
         """
         return(
             "## ROLE\n"
-            "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
-            "Your task is to refine an existing Thematic Codebook so that it maintains strong conceptual coherence "
-            "and accurately partitions the conceptual landscape of the data.\n\n"
+            "You are a Schema Rewrite Engine.\n"
+            "Your task is to mechanically implement a previously generated decomposition repair plan onto an existing thematic codebook.\n"
+            "You are NOT performing conceptual diagnosis, optimization, reinterpretation, or strategic reasoning.\n"
+            "You must only implement the supplied repair operations faithfully and consistently.\n\n"
+
+            "## INPUTS\n"
+            "You will receive:\n"
+            "1. The current research question\n"
+            "2. The current schema\n"
+            "3. A validated repair_plan generated by a prior planning stage\n"
+            "4. The most recent thematic summaries, including any FAILED BATCH SUMMARIES\n"
+            " - FAILED BATCH SUMMARIES describe content that could not be reinserted into a theme without exceeding bounded synthesis constraints. Treat them as evidence of representational load and as context for implementing the repair_plan, not as a reason to invent additional repairs.\n\n"
+
+            "## REPAIR PLAN FIELD DEFINITIONS\n"
+            "- repair_plan: contains decomposition operations that must be implemented in the rewritten schema.\n"
+            "- theme_repairs: one decomposition plan for each failed non-Conflict theme.\n"
+            "- source_theme_id: the theme_id in the input schema that the repair operation targets.\n"
+            "- source_theme_label: the original label of the targeted theme.\n"
+            "- concepts_ranked_by_representational_load: major claim-families inside the failed theme, ordered from largest to smallest expected synthesis burden. Use this as context only; implement the extractions.\n"
+            "- extractions: claim-families that must be removed from the failed source theme.\n"
+            "- concept: the claim-family being extracted.\n"
+            "- action: if \"new_theme\", create a new theme for the extracted concept; if \"move_to_existing_theme\", update the existing target_theme_id to receive it.\n"
+            "- target_theme_id: existing theme_id that receives the extracted concept, or null if action is \"new_theme\".\n"
+            "- new_theme_label: label to use for a newly created theme, or null if the concept moves to an existing theme.\n"
+            "- new_theme_core_scope: conceptual scope of the new theme.\n"
+            "- new_theme_inclusions: concepts that must be included in the new theme's INCLUDE rule.\n"
+            "- new_theme_exclusions: concepts that must be excluded from the new theme's EXCLUDE rule.\n"
+            "- receiving_theme_scope_update: scope update that must be incorporated into an existing receiving theme.\n"
+            "- source_theme_resolution: specifies whether the original failed theme becomes a narrowed successor or is dissolved.\n"
+            "- outcome: if \"rename_and_narrow\", keep a narrowed successor theme using the residual fields; if \"dissolve_and_reallocate\", remove the source theme entirely.\n"
+            "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
+            "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
+            "- residual_inclusions: concepts that must remain included in the narrowed residual theme.\n"
+            "- residual_exclusions: concepts that must be excluded from the narrowed residual theme, especially extracted concepts that should not drift back in.\n"
+            "- dissolution_reason: explanation for dissolution; use it only to understand intent, not as output text.\n"
+            "- schema_repairs: schema-level repairs affecting relationships across multiple themes.\n"
+            "- affected_theme_ids: theme_ids whose descriptions or instructions may need adjustment for a schema-level repair.\n\n"
+
+            "## TASK\n"
+            "Apply the repair_plan to rewrite the schema.\n\n"
+
+            "You must:\n"
+            "- create new themes for extractions with action='new_theme'\n"
+            "- update receiving themes for extractions with action='move_to_existing_theme'\n"
+            "- narrow source themes when source_theme_resolution.outcome='rename_and_narrow'\n"
+            "- remove source themes when source_theme_resolution.outcome='dissolve_and_reallocate'\n"
+            "- convert residual_core_scope, residual_inclusions, and residual_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
+            "- convert new_theme_core_scope, new_theme_inclusions, and new_theme_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
+            "- convert receiving_theme_scope_update into updated descriptions and INCLUDE/EXCLUDE rules for receiving themes\n\n"
+
+            "## IMPLEMENTATION RULES\n"
+            "- Implement the repair plan exactly.\n"
+            "- The repair_plan remains authoritative. If summaries suggest additional possible improvements, ignore them unless required to faithfully implement the repair_plan.\n"
+            "- Do NOT reinterpret the repair plan.\n"
+            "- Do NOT preserve broad conceptual aggregations that the repair plan decomposes.\n"
+            "- Do NOT reintroduce extracted claim-families into narrowed source themes.\n"
+            "- Do NOT optimize for elegance, theoretical completeness, or conceptual compression beyond the repair plan.\n"
+            "- Do NOT invent additional restructurings not implied by the repair plan.\n"
+            "- Do NOT make speculative improvements.\n"
+            "- Preserve unchanged themes unless the repair plan requires modification.\n\n"
+
+            "## INCLUDE/EXCLUDE REQUIREMENTS\n"
+            "All substantive themes must use:\n"
+            "'INCLUDE if ...; EXCLUDE if ...'\n\n"
+
+            "INCLUDE rules must reflect the scope logic in the repair plan, including residual_inclusions, new_theme_inclusions, and receiving theme additions where applicable.\n\n"
+
+            "EXCLUDE rules must:\n"
+            "- explicitly route neighboring conceptual material toward named destination themes whenever possible\n"
+            "- reflect residual_exclusions and new_theme_exclusions from the repair plan\n"
+            "- explicitly exclude extracted claim-families from narrowed source themes\n"
+            "- prevent extracted content from drifting back into source themes in later assignment\n"
+            "- preserve non-overlapping assignment behavior\n\n"
+
+            "Preferred EXCLUDE form:\n"
+            "'EXCLUDE if discussing <excluded territory>, which should be routed to <theme_label>.'\n\n"
+
+            "Do NOT write generic, inverse, or vague exclusions.\n\n"
+
+            "## CONFLICT THEME\n"
+            "If a Conflict theme exists:\n"
+            "- preserve the label exactly as \"Conflict\"\n"
+            "- preserve conceptual polarity\n"
+            "- use DETECTION TRIGGERS instead of INCLUDE/EXCLUDE\n\n"
+
+            "## OTHER THEME\n"
+            "If an Other theme exists:\n"
+            "- preserve it as a residual category only\n"
+            "- do NOT allow it to absorb coherent conceptual groupings that should become substantive themes\n\n"
+
+            "## IMPORTANT\n"
+            "- This is an implementation task, not a planning task.\n"
+            "- The repair plan is the authoritative source of structural change.\n"
+            "- Your job is to produce a clean rewritten schema that faithfully realizes the repair plan.\n"
+            "- Every extraction in the repair plan must be visibly implemented in the resulting schema.\n\n"
+
+            "## OUTPUT FORMAT (STRICT JSON)\n"
+            "{\n"
+            "  \"themes\": [\n"
+            "    {\n"
+            "      \"theme_label\": <string>,\n"
+            "      \"theme_description\": <string>,\n"
+            "      \"instructions\": <string>\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+
+            "## CONSTRAINTS\n"
+            "- Do NOT generate numeric identifiers\n"
+            "- Do NOT output explanations\n"
+            "- Do NOT output repair narratives\n"
+            "- Do NOT output markdown\n"
+            "- Output only the rewritten schema JSON\n"
+        )
+    
+    def gen_theme_schema_optimize(self):
+        """
+        """
+        return(
+            "## ROLE\n"
+            "You are a Schema Optimization Engine.\n"
+
+            "## TASK\n"
+            "You are part of an iterative loop of schema refinement. Your task is to propose improvements to the current schema that would enhance its overall quality and coherence without reintroducing completeness failures.\n\n"
+
+            "## INPUTS\n"
+            "You will receive:\n"
+            "1. The current research question\n"
+            "2. The history of schema iterations, including the thematic summaries they produced.\n"
+            "   - Each iteration is marked with the highest iteration number representing the most recent version of the schema.\n"
+            "   - Prior iterations include both efforts to partition themes to ensure all themes pass a completeness check and efforts to optimize the schema by improving conceptual coherence, boundary clarity, and overall quality without risking new failures.\n"
+            "   - Iterations with different objectives are marked as such.\n"
+            "   - The most recent iteration is flagged as such and should be the focus of your optimization efforts.\n"
 
             "## CODEBOOK STRUCTURE\n"
-            "Each theme defines a conceptual territory using:\n"
+             "Each theme defines a conceptual territory using:\n"
             "- theme_label\n"
             "- theme_description (the North Star logic)\n"
             "- instructions (INCLUDE / EXCLUDE rules)\n\n"
 
             "## INCLUDE/EXCLUDE LOGIC\n"
-            "All themes must define precise instructions:\n"
-            "- Substantive Themes or Other: 'INCLUDE if <logic>; EXCLUDE if <logic>.'\n"
+            "All themes must define precise operational assignment rules:\n"
+            "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
             "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
 
-            "## SPECIAL THEMES\n\n"
+            "INCLUDE rules define the bounded conceptual territory assigned to the theme.\n"
+            "EXCLUDE rules must define conceptual territories that belong to OTHER THEMES in the current schema.\n"
+            "Do NOT write EXCLUDE rules as simple inverses of the INCLUDE rule.\n"
+            "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
+            "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining conceptual partition.\n"
+            "When writing EXCLUDE rules:\n"
+            "- identify the neighboring themes most likely to overlap with the current theme\n"
+            "- explicitly exclude those conceptual territories\n"
+            "- route ambiguous material toward the appropriate neighboring themes\n\n"
 
+            "## SPECIAL THEMES\n"
             "**Conflict Theme (Conditional)**\n"
             "Create a theme where \"theme_label\" is exactly \"Conflict\" ONLY if the data contains "
             "substantively incompatible interpretations, claims, or prescriptions that cannot be "
@@ -1094,82 +1741,70 @@ class Prompts:
 
             "If no residual concepts exist, omit this theme entirely.\n\n"
 
-            "## INTERPRETING THE INPUT\n"
-            "You will receive:\n"
-            "- The research question\n"
-            "- A previous thematic codebook\n"
-            "- Theme-level summaries generated from that codebook\n"
-            "- A completeness check for each theme (Pass / Fail)\n"
-            "   - Themes marked as failed indicate that their assigned insights could not be integrated without loss of conceptual granularity or excessive compression. Such themes therefore reflect excessive heterogeneity of concepts.\n"
-            "   - Failed themes include 'FAILED BATCH SUMMARIES', which represent content previously assigned to the theme but that could not be accommodated under the current theme definition.\n"
-            "- The current length of the summaries (in words), which is a proxy for theme saturation.\n"
-            "   - The maximum output length of the system is approximately 4096 tokens, which corresponds to roughly 2500 words.\n\n"
+            "## UNDERSTANDING FAILURES\n"
+            "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
+            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+            "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
+            "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+            "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
+            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
+            "All previously failed themes will be marked as such.\n\n"
 
-           "## UPDATE PRINCIPLES\n"
-            "Revise the codebook to improve conceptual coherence, boundary clarity, and capacity-compatible synthesis.\n"
-            "Failed themes must be addressed through a schema-level adjustment, not merely by editing the failed theme in isolation.\n"
-            "- You may revise multiple parts of the schema simultaneously when necessary to resolve failed themes while preserving overall conceptual coherence and capacity balance.\n"
-            "- A failed theme indicates that assigned content could not be synthesized under the current theme structure without loss of granularity, excessive compression, or output failure.\n"
-            "- Failed themes often indicate excessive conceptual heterogeneity or representational overload under bounded synthesis constraints.\n"
-            "- Use FAILED BATCH SUMMARIES together with current summary lengths to determine whether the failed theme should be split, narrowed, or partially redistributed into another existing theme.\n"
-            "- Treat summary length as an approximate proxy for representational capacity under bounded output constraints. Summaries approaching the system limit are near capacity and should be expanded cautiously.\n"
-            "- Addressing a failed theme may require splitting it, narrowing its scope, creating a new theme, or revising another existing theme so conceptually aligned content can be reassigned there.\n"
-            "- Do not preserve an existing theme definition if it cannot coherently and stably accommodate its assigned conceptual territory.\n"
-            "- When content is reassigned, update the receiving theme to explicitly accommodate it and narrow the originating theme so boundaries remain clear and non-overlapping.\n"
-            "- Redistribute failed content to another existing theme only when there is clear conceptual alignment and sufficient representational capacity.\n"
-            "- Do not overload passing themes simply to avoid creating a new theme.\n"
-            "- When uncertain whether another theme can coherently and safely absorb failed content, prefer splitting or creating a new theme over expanding a near-capacity theme.\n"
-            "- Use both passing and failing themes as evidence for improving overall conceptual structure and capacity balance.\n"
-            "- Treat passing themes conservatively. Do not substantially reorganize them unless the input reveals a clear issue with coherence, redundancy, or conceptual boundaries that can be materially improved without risking overload in other themes.\n"
-            "- A correct conceptual partition is more important than continuity with the previous schema, but unnecessary restructuring should be avoided.\n\n"
+            "## USING CURRENT SUMMARY LENGTHS IN OPTIMIZATION DECISIONS\n"
+            "- Treat summary length as an approximate proxy for representational capacity. Themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
 
-            "## IDEAL CODEBOOK PROPERTIES\n"
-            "An effective thematic codebook/schema will:\n\n"
+            "## COMPRESSION DISCIPLINE\n"
+            "Optimization must not rely on future synthesis compression to make overloaded or near-overloaded themes viable.\n"
+            "When considering merges, reallocations, or broader theme scopes, assume each substantively distinct claim-family, mechanism, causal logic, actor system, policy instrument, implication, minority view, or contradiction must remain separately representable in later synthesis.\n"
+            "Paraphrases, near-duplicates, repeated examples, and differently cited versions of the same claim may be consolidated.\n"
+            "Distinct mechanisms, causal logics, actor systems, policy instruments, contradictions, minority positions, geographies, sectors, or implications must not be collapsed merely to create a more elegant schema.\n"
+            "If an optimization would require collapsing distinct claim-families into generalized statements to remain within bounded synthesis constraints, do not make that optimization.\n\n"
+              
+            "## OPTIMIZATION OBJECTIVES\n"
+            "The ideal codebook/schema will:\n\n"
+            "- Allow for the successful expression of all assigned conceptual content, without loss of granularity, under the constraints on output length (i.e. no failing themes).\n"
             "- Define themes that are internally conceptually coherent\n"
             "- Ensure clear conceptual boundaries between themes\n"
             "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
             "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
             "- Minimize reliance on the 'Other' category\n\n"
 
-            "## PRIORITIZATION RULE\n"
-            "When resolving conflicts between completeness repair and the ideal codebook properties below, prioritize restoring capacity-compatible synthesis and resolving completeness failures first.\n"
-            "Once failures are addressed, optimize toward the ideal codebook properties defined above.\n"
-            "Do not preserve a compact or aesthetically simple schema at the cost of persistent overload, conceptual compression, or loss of granularity.\n\n"
+            "## OPTIMIZATION CONSTRAINTS\n"
+            "Only the current schema iteration is relevant for your optimization task. Use prior iterations only as context for understanding the history of schema development, not as targets for optimization.\n"
+            "When proposing improvements, you must ensure that the revised schema:\n"
+            "- does NOT contain any themes that fail the completeness check\n"
+            "- does NOT reintroduce previously resolved completeness failures\n"
+            "- If proposing reallocation of content between themes and it is unclear whether bounded synthesis constraints can be maintained, you must avoid making such changes\n"
+            "Only suggest changes to the schema if there are obvious and non-speculative improvements that can be made based on the input. Do NOT make speculative improvements.\n"
+            "If making improvements, you should update theme descriptions, instructions and labels as needed to maintain clear conceptual boundaries. \n"
+            "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
+            "Do not merge themes unless both conceptual coherence and bounded synthesis viability are clearly preserved without collapsing distinct claim-families into lossy generalizations.\n\n"
 
             "## CONVERGENCE CONDITION\n"
             "You must always include a field \"no_change\" in your output.\n\n"
-            "HARD RULE:\n"
-            "- If any theme has \"completeness_check\": \"fail\", you MUST set \"no_change\": false.\n\n"
 
-            "- Set \"no_change\": true ONLY if:\n"
-            "   - all themes pass the completeness check, AND\n"
-            "   - there are no obvious issues with conceptual coherence, boundary clarity, or redundancy.\n"
+            "Set \"no_change\": true if either:\n"
+            "- there are no obvious unresolved opportunities to improve conceptual partitioning without risking new cases of theme overload; or\n"
+            "- all obvious improvements would require expanding near-capacity themes.\n\n"
 
-            "Do NOT set \"no_change\": true if any theme has failed the completeness check.\n"
+            "Set \"no_change\": false only if there are obvious, non-speculative improvements that preserve bounded synthesis viability.\n\n"
 
-            "Do NOT make speculative improvements. Only modify the schema when improvements would be obvious based on the input.\n\n"
-            
             "## OUTPUT FORMAT (STRICT JSON)\n"
             "{\n"
+            "  \"no_change\": <boolean>,\n"
             "  \"themes\": [\n"
             "    {\n"
             "      \"theme_label\": <string>,\n"
             "      \"theme_description\": <string>,\n"
             "      \"instructions\": <string>\n"
             "    }\n"
-            "  ],\n"
-            "  \"no_change\": <boolean>\n"
+            "  ]\n"
             "}\n\n"
 
-            "## CONSTRAINTS\n"
-            "- Do NOT generate numeric theme identifiers\n"
-            "- Themes must define distinct conceptual territories\n"
-            "- INCLUDE/EXCLUDE/TRIGGER rules must prevent conceptual overlap\n"
-            "- Completeness failures must be addressed\n"
-            "- The Conflict theme must preserve conceptual polarity\n"
-            "- The Other theme must remain a residual category\n"
-            "- The final codebook must support full assignment without loss of conceptual granularity\n"
+            "If you set \"no_change\": true, \"themes\" should be an empty array.\n"
+            "If no_change=false, return the full revised schema, not only changed themes.\n"
         )
+       
 
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
         """
@@ -1451,15 +2086,21 @@ class Prompts:
             f"   Do not exceed {theme_len} words.\n\n"
 
             "6. Fidelity:\n"
-            "   Preserve all factual details and citations exactly as they appear in the source text. "
-            "Do not introduce new information or external knowledge.\n\n"
+            "   Preserve all factual details and citation provenance from the source text. "
+            "Do not introduce new information or external knowledge.\n"
+            "   Normalize citations into compact academic formats:\n"
+            "   - Use surname-only citation forms\n"
+            "   - Use up to three surnames before 'et al.'\n"
+            "   - Use short canonical names for institutional authors\n"
+            "   Examples: 'World Bank 2010', 'Chang, Andreoni 2020', 'Ferrannini et al. 2021'.\n\n"
 
             "7. Tone:\n"
             "   Maintain a formal, academic, analytic tone.\n\n"
 
             "NOTE\n"
             "Some insights may be duplicates. If the exact same claims appears in multiple insights with the same citation, treat it as a single point. " 
-            "However, if the same claim is supported by distinct citations in different insights, this should increase its salience and be reflected in the synthesis accordingly.\n\n"
+            "However, if the same claim is supported by distinct citations in different insights, this should increase its salience and be reflected in the synthesis accordingly.\n"
+            "When the same claim is supported by distinct citations in different insights, this should increase its salience and be reflected in the synthesis accordingly, using the normalized citation formats above.\n\n"
 
             f"{specific_instructions}"
 
@@ -1469,6 +2110,8 @@ class Prompts:
             "  \"thematic_summary\": \"The synthesized thematic narrative including citations.\"\n"
             "}\n"
         )
+
+    
 
     def identify_orphans(self):
         """
@@ -1551,6 +2194,76 @@ class Prompts:
             '  "mentioned_insight_ids": ["ID_1", "ID_2", ...]\n'
             '}\n\n'
         )
+
+
+    def identify_citations(self):
+        """
+        """
+        return (
+            "You are a research auditor. Your task is to identify which citations/authors from a provided list are explicitly named in a thematic summary.\n\n"
+
+            "You will receive:\n"
+            "1. A THEMATIC SUMMARY.\n"
+            "2. A JSON ARRAY of required citations/authors, each linked to a paper_id.\n\n"
+
+            "TASK\n"
+            "Determine which required citations/authors are explicitly present in the thematic summary. "
+            "Return only the paper_ids for sources that are clearly mentioned in the summary.\n\n"
+
+            "MATCHING RULES\n"
+            "- The thematic summary may normalize citations into standard academic formats.\n"
+            "- The required citation records may contain raw or inconsistent author/date formatting.\n"
+            "- Match using author identity and year where available.\n"
+            "- If the year is missing, match only when the author/source identity is clear.\n"
+            "- Do NOT infer citation presence from topical similarity.\n"
+            "- Do NOT return a paper_id unless the citation/author/source is explicitly named in the summary.\n\n"
+
+            "OUTPUT PROTOCOL\n"
+            "- Return ONLY a JSON object in the form:\n"
+            "{\n"
+            '  "identified_paper_ids": ["paper_id_1", "paper_id_2", ...]\n'
+            "}\n"
+            "- If no matches are found, return an empty array.\n"
+            "- Do not provide explanations or commentary."
+        )
+
+    def repair_citation_provenance(self):
+        """
+        """
+        return (
+            "You are a research editor. Your task is to repair citation provenance in a thematic summary by inserting citations/authors that were dropped during a prior summarization process.\n\n"
+
+            "YOU WILL RECEIVE:\n"
+            "1. A THEMATIC SUMMARY.\n"
+            "2. A JSON object containing citations/authors missing from the thematic summary and the insights generated by those authors.\n\n"
+
+            "TASK\n"
+            "- Ensure that each missing citation/author is substantively and coherently represented at least once somewhere in the revised summary.\n"
+            "- Do NOT fully re-integrate every insight individually.\n\n"
+
+            "SPECIFIC INSTRUCTIONS\n"
+            "- Attach citations/authors to existing synthesized claims where conceptually appropriate.\n"
+            "- Use the provided insights only to determine where the citation/author logically belongs.\n"
+            "- Normalize citation formatting to match academic style: last name + year where available, 'et al.' for multiple authors where appropriate, one institutional name for institutional authors, and well-known acronyms where appropriate.\n"
+            "- Use appropriate abstractions of the provided insights to identify the most relevant point for citation; the exact wording of an insight is not required.\n"
+            "- If there is no plausible way to attach a missing citation/author to an existing claim, add one concise sentence that captures the core contribution of that citation/author and attach the citation there.\n"
+            "- If adding a new sentence, embed it in the existing thematic summary where it best maintains conceptual coherence and narrative flow.\n"
+            "- Other than repairing citation provenance, make minimal changes.\n"
+            "- If additions would exceed the maximum output length, minimally compress elsewhere to make room while preserving substantive content and citation provenance.\n"
+            "- Do NOT add a new sentence if the missing citation supports a claim already present in the summary.\n"
+            "   - If the missing citation supports an existing claim, merge it into that claim's citation list.\n"
+            "- Only add a new sentence when the missing citation contributes a substantively distinct claim not already represented.\n"
+            "- Do not create repeated claims with different citations.\n\n"
+
+            "OUTPUT PROTOCOL\n"
+            "- Return ONLY a JSON object in the form:\n"
+            "{\n"
+            '  "repaired_summary": "<updated_summary_text>"\n'
+            "}\n"
+            "- Do not provide explanations or commentary."
+        )
+
+
     
     def integrate_orphans(self):
         """
@@ -1582,96 +2295,57 @@ class Prompts:
         """
         return (
             '# ROLE\n'
-            'You are a Research Synthesizer. Your task is to update an existing thematic summary so that all listed orphan insights are substantively reflected. This update is part of a batched orphan insertion process.\n\n'
+            'You are a Research Synthesizer. Rewrite a thematic summary so that orphan insights are integrated into a coherent synthesis without creating duplicate claims.\n\n'
 
             '# TASK\n'
-            'I will provide you with:\n'
-            '1. THEMATIC CONTEXT: The Theme Label, Theme Description, and Research Question.\n'
-            '2. ORIGINAL SUMMARY: The current version of the summary.\n'
-            '3. REQUIRED ORPHAN CITATIONS/AUTHORS: A cumulative list across orphan-insertion batches of citations/authors that must remain represented in this full-summary rewrite.\n'
-            '4. ORPHAN INSIGHTS: A list of insights that must be integrated.\n\n'
-
-            '# INPUT FORMAT\n'
-            'RESEARCH QUESTION: <question_text>\n'
-            'THEME LABEL: <theme_label>\n\n'
-            'THEME DESCRIPTION:\n'
-            '<theme_description>\n\n'
-            'ORIGINAL SUMMARY:\n'
-            '<original_summary_text>\n\n'
-            'REQUIRED ORPHAN CITATIONS/AUTHORS:\n'
-            '<batch_citations_str>\n\n'
-            'ORPHAN INSIGHTS:\n'
-            '<insight_text_1>\n'
-            '<insight_text_2>\n'
-            '...\n\n'
+            'You will receive:\n'
+            '1. THEMATIC CONTEXT: research question, theme label, and theme description.\n'
+            '2. ORIGINAL SUMMARY: the current thematic summary.\n'
+            '3. REQUIRED ORPHAN CITATIONS/AUTHORS: citations/authors that must remain visibly represented.\n'
+            '4. ORPHAN INSIGHTS: insights that must be substantively integrated.\n\n'
 
             '# OBJECTIVE\n'
-            'Produce a revised summary in which every orphan insight is substantively reflected.\n\n'
+            'Produce a complete revised summary that preserves the original substantive findings, integrates all substantively distinct orphan contributions, and preserves citation provenance.\n\n'
 
-            '# CRITICAL CONSTRAINTS\n'
-            'You must satisfy the following in order of priority. Follow this prioritization strictly when constraints are in conflict:\n\n'
+            '# CLAIM INTEGRATION AND DEDUPLICATION\n'
+            '- First, mentally group the original summary and orphan insights into substantively distinct claim groups.\n'
+            '- Treat paraphrases, near-duplicates, repeated mechanisms, and differently cited versions of the same point as one claim group.\n'
+            '- Write one canonical sentence or passage for each claim group.\n'
+            '- Merge citations from duplicate or overlapping claims into the retained canonical claim.\n'
+            '- Do NOT restate the same claim merely to preserve a different citation, author, example, or source.\n'
+            '- Preserve examples only when they add a distinct mechanism, condition, geography, sector, or implication.\n'
+            '- If an orphan introduces contradiction, qualification, or minority perspective, preserve that distinction explicitly.\n\n'
 
-            '1. COVERAGE (HARD CONSTRAINT)\n'
-            '- All substantively distinct ideas introduced by the orphan insights must be represented in the revised summary.\n'
-            '- Representation may be explicit or through accurate synthesis.\n'
+            '# COVERAGE REQUIREMENTS\n'
+            '- Every substantively distinct orphan insight must be reflected in the revised summary.\n'
+            '- An insight is reflected when its core claim, mechanism, finding, or implication is clearly represented, even if synthesized at a higher level of abstraction.\n'
+            '- Do NOT omit distinct mechanisms, causal logics, implications, minority views, or contradictions.\n'
             '- One-to-one mapping between insights and sentences is NOT required.\n\n'
 
-            '2. GRANULARITY\n'
-            '- Preserve substantively distinct claims.\n'
-            '- You MAY merge conceptually similar insights into unified statements.\n\n'
+            '# CITATION REQUIREMENTS\n'
+            '- Preserve every citation/author already present in the ORIGINAL SUMMARY at least once where substantively appropriate.\n'
+            '- Every citation/author listed under REQUIRED ORPHAN CITATIONS/AUTHORS must appear at least once in the revised summary.\n'
+            '- Add missing citations to existing claims where they support a claim already present.\n'
+            '- Only create a new sentence when the orphan citation contributes a substantively distinct claim not already represented.\n'
+            '- Preserve distinct, minority, or conflicting perspectives with explicit provenance.\n'
+            '- No claim should normally carry more than four references; when many sources support the same claim, keep the most representative citations on that claim and place required citations only where they substantively fit.\n\n'
 
-            '3. PRESERVE DIFFERENTIATION\n'
-            '- Do NOT collapse ideas that differ in mechanism, causal logic, or implication into vague generalizations.\n'
-            '- Maintain the diversity of mechanisms, relationships, and arguments.\n\n'
+            '# CITATION NORMALIZATION\n'
+            '- Normalize citations into compact academic formats while preserving identifiable provenance.\n'
+            '- Use surname-only citation forms.\n'
+            '- Use up to three surnames before "et al.".\n'
+            '- Use short canonical names for institutional authors, e.g. "World Bank 2010", "UNCTAD 2018", "UNIDO 2024".\n'
+            '- Do not use long institutional publisher strings when a canonical institutional name is available.\n\n'
 
-            '4. ENSURE COMPLETENESS\n'
-            '- The response must be complete and not cut off.\n'
-            '- Do not produce a partial or incomplete synthesis.\n\n'
-
-            '5. WHEN CONSTRAINTS CONFLICT\n'
-            '- Prioritize COVERAGE first.\n'
-            '- Preserve GRANULARITY wherever possible.\n'
-            '- Do NOT omit substantively distinct ideas.\n'
-            '- Do NOT reduce the summary to vague generalizations to save space.\n\n'
-
-            '# DEFINITION OF "REFLECTED"\n'
-            'An orphan insight is reflected if:\n'
-            '- Its core claim, finding, or argument is clearly represented in the revised summary.\n'
-            '- It contributes meaningfully to a synthesized claim.\n'
-            '- Its substantive contribution is preserved, even if expressed at a higher level of abstraction.\n'
-            '- Its citation, author, or source provenance is explicitly preserved in the revised summary.\n\n'
-
-            'An orphan insight is NOT reflected if:\n'
-            '- It is only loosely implied without preserving its conceptual contribution.\n'
-            '- It is reduced to a vague generalization that erases its distinct meaning.\n'
-            '- Its core claim is represented but its citation, author, or source provenance is missing.\n\n'
-
-            '# INTEGRATION GUIDELINES\n'
-            '- You are REWRITING the entire summary, not appending to it.\n'
-            '- DO NOT remove substantive findings.\n'
-            '- Prefer restructuring and synthesis over inserting orphan insights as standalone sentences.\n'
-            '- DO NOT preserve original wording if it prevents integration.\n'
-            '- MAINTAIN conceptual coherence with the Theme Label and Description.\n'
-            '- If an orphan introduces contradiction or nuance, explicitly articulate that tension.\n'
-            '- Multiple insights may be synthesized together when their substantive meaning is similar or overlapping.\n'
-            '- You do NOT need to attach every relevant citation/author to every synthesized claim.\n'
-            '- Preserve every citation/author already present in the ORIGINAL SUMMARY at least once somewhere in the revised summary.\n'
-            '- In addition, every citation/author listed under REQUIRED ORPHAN CITATIONS/AUTHORS must appear at least once somewhere in the revised summary.\n'
-            '- You may shorten redundant citation lists attached to individual claims, but only if any removed citation/author still appears elsewhere in the revised summary.\n'
-            '- Preserve citations/authors sufficient to maintain visible grounding in the literature.\n'
-            '- Distinct, minority, or conflicting perspectives should retain explicit provenance.\n'
-            '- No claim needs to be substantiated by more than four references.\n'
-            '- Do NOT remove citations/authors in ways that obscure the origin, grounding, or representational breadth of substantive claims.\n\n'
-
-            '# CONVERGENCE REQUIREMENT\n'
-            'The revised summary must satisfy both:\n'
-            '- All orphan insights are represented\n'
-            '- All REQUIRED ORPHAN CITATIONS/AUTHORS appear at least once\n'
-            '- The response is complete and not truncated\n\n'
+            '# STYLE AND STRUCTURE\n'
+            '- Rewrite the full summary; do not append orphan material mechanically.\n'
+            '- Maintain coherence with the research question, theme label, and theme description.\n'
+            '- Prefer synthesis, restructuring, and compression over adding standalone orphan sentences.\n'
+            '- Make minimal changes where the existing summary is already coherent.\n'
+            '- The response must be complete and not truncated.\n\n'
 
             '# OUTPUT PROTOCOL\n'
-            '- Return ONLY a JSON object.\n'
-            '- The response MUST be complete and valid JSON. Do not truncate the output.\n'
+            '- Return ONLY a valid JSON object.\n'
             '- The object must contain a single key "updated_summary".\n'
             '- Do not provide explanations, preamble, or commentary.\n\n'
 
