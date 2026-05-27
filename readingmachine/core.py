@@ -3996,6 +3996,380 @@ class Summarize:
 
         return self.summary_state.cluster_summary_list
     
+    
+    def _llm_gen_initial_schema(self, user_prompt, sys_prompt):
+        
+        fall_back = {
+            "themes": [],
+            "no_change": False
+        }
+        
+        json_schema = {
+            "name": "theme_schema_generator",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": {
+                                    "type": "string"
+                                },
+                                "theme_description": {
+                                    "type": "string"
+                                },
+                                "instructions": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "theme_label",
+                                "theme_description",
+                                "instructions"
+                            ],
+                            "additionalProperties": False
+                        }
+                    },
+                    "no_change": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "themes",
+                    "no_change"
+                ],
+                "additionalProperties": False
+            }
+        }
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema
+        )
+
+        themes = response.get("themes", [])
+        return themes
+    
+    def _llm_gen_schema_repair_plan(self, user_prompt, sys_prompt):
+
+        fall_back = {
+            "repair_plan": {
+                "theme_repairs": [],
+                "schema_repairs": []
+            },
+        } 
+
+        json_schema = {
+            "name": "theme_schema_repair_plan",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "repair_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "theme_repairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "source_theme_id": {"type": "integer"},
+                                        "source_theme_label": {"type": "string"},
+                                        "completeness_check": {
+                                            "type": "string",
+                                            "enum": ["fail"]
+                                        },
+                                        "concepts_ranked_by_representational_load": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "concept": {"type": "string"},
+                                                    "estimated_load": {
+                                                        "type": "string",
+                                                        "enum": ["high", "medium", "low"]
+                                                    },
+                                                    "evidence_from_summary_or_failed_batches": {"type": "string"},
+                                                    "independently_synthesizable": {"type": "boolean"}
+                                                },
+                                                "required": [
+                                                    "concept",
+                                                    "estimated_load",
+                                                    "evidence_from_summary_or_failed_batches",
+                                                    "independently_synthesizable"
+                                                ]
+                                            }
+                                        },
+                                        "extractions": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "concept": {"type": "string"},
+                                                    "action": {
+                                                        "type": "string",
+                                                        "enum": ["new_theme", "move_to_existing_theme"]
+                                                    },
+                                                    "target_theme_id": {
+                                                        "type": ["integer", "null"]
+                                                    },
+                                                    "new_theme_label": {
+                                                        "type": ["string", "null"]
+                                                    },
+                                                    "new_theme_core_scope": {
+                                                        "type": ["string", "null"]
+                                                    },
+                                                    "new_theme_inclusions": {
+                                                        "type": "array",
+                                                        "items": {"type": "string"}
+                                                    },
+                                                    "new_theme_exclusions": {
+                                                        "type": "array",
+                                                        "items": {"type": "string"}
+                                                    },
+                                                    "receiving_theme_scope_update": {
+                                                        "type": ["string", "null"]
+                                                    },
+                                                    "reason": {"type": "string"}
+                                                },
+                                                "required": [
+                                                    "concept",
+                                                    "action",
+                                                    "target_theme_id",
+                                                    "new_theme_label",
+                                                    "new_theme_core_scope",
+                                                    "new_theme_inclusions",
+                                                    "new_theme_exclusions",
+                                                    "receiving_theme_scope_update",
+                                                    "reason"
+                                                ]
+                                            }
+                                        },
+                                        "source_theme_resolution": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "outcome": {
+                                                    "type": "string",
+                                                    "enum": ["rename_and_narrow", "dissolve_and_reallocate"]
+                                                },
+                                                "residual_label": {
+                                                    "type": ["string", "null"]
+                                                },
+                                                "residual_core_scope": {
+                                                    "type": ["string", "null"]
+                                                },
+                                                "residual_inclusions": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"}
+                                                },
+                                                "residual_exclusions": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"}
+                                                },
+                                                "residual_expected_to_pass": {"type": "boolean"},
+                                                "dissolution_reason": {
+                                                    "type": ["string", "null"]
+                                                }
+                                            },
+                                            "required": [
+                                                "outcome",
+                                                "residual_label",
+                                                "residual_core_scope",
+                                                "residual_inclusions",
+                                                "residual_exclusions",
+                                                "residual_expected_to_pass",
+                                                "dissolution_reason"
+                                            ]
+                                        },
+                                        "repair_narrative": {"type": "string"}
+                                    },
+                                    "required": [
+                                        "source_theme_id",
+                                        "source_theme_label",
+                                        "completeness_check",
+                                        "concepts_ranked_by_representational_load",
+                                        "extractions",
+                                        "source_theme_resolution",
+                                        "repair_narrative"
+                                    ]
+                                }
+                            },
+                            "schema_repairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "affected_theme_ids": {
+                                            "type": "array",
+                                            "items": {"type": "integer"}
+                                        },
+                                        "repair_narrative": {"type": "string"}
+                                    },
+                                    "required": [
+                                        "affected_theme_ids",
+                                        "repair_narrative"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "theme_repairs",
+                            "schema_repairs"
+                        ]
+                    }
+                },
+                "required": ["repair_plan"]
+            }
+        }
+
+        # Generate the repair instructions for this schema
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema,
+        )
+
+
+        repair_plan = response.get("repair_plan", {
+            "theme_repairs": [],
+            "schema_repairs": []
+        })
+
+        return repair_plan
+
+
+    def _llm_apply_schema_repair_plan(self, unstable_schema_rq, sys_prompt, user_prompt):
+        fall_back = {
+            "themes": unstable_schema_rq[
+                ["theme_label", "theme_description", "instructions"]
+                ].to_dict(orient="records")
+            } 
+        
+        json_schema = {
+            "name": "theme_schema_repair_implementer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": {"type": "string"},
+                                "theme_description": {"type": "string"},
+                                "instructions": {"type": "string"}
+                            },
+                            "required": [
+                                "theme_label",
+                                "theme_description",
+                                "instructions"
+                            ],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": ["themes"],
+                "additionalProperties": False
+            }
+        }
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema
+        )
+
+        themes = response.get("themes", [])
+        
+        return themes
+
+    def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
+
+        fallback_optimizer_response = {
+            "no_change": True,
+            "themes": []
+        }
+
+        json_schema = {
+            "name": "theme_schema_optimizer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "no_change": {
+                        "type": "boolean"
+                    },
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": {"type": "string"},
+                                "theme_description": {"type": "string"},
+                                "instructions": {"type": "string"}
+                            },
+                            "required": [
+                                "theme_label",
+                                "theme_description",
+                                "instructions"
+                            ],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": [
+                    "no_change",
+                    "themes"
+                ],
+                "additionalProperties": False
+            }
+        }
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fallback_optimizer_response,
+            return_json=True,
+            json_schema=json_schema
+        )
+
+        optimized_schema = response.get("themes", [])
+
+        if response.get("no_change", False):
+            print("Optimizer indicated no change needed. Retaining existing schema.")
+            return("no change")
+
+        else:
+            optimized_schema = response.get("themes", [])
+        return optimized_schema
+
+
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
         """
         Generate or refine the thematic schema using the LLM.
@@ -4097,30 +4471,37 @@ class Summarize:
         if source not in ["cluster summaries", "populated themes"]:
             raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
         
+        #update the theme_schema_list with values from populated themes so that they are avialble here for conditional flow
+        if source == "populated themes" and self.summary_state.populated_theme_list:
+            status_cols = ["needs_repair", "optimized", "stable"]
+
+            self.summary_state.theme_schema_list[-1] = (
+                self.summary_state.theme_schema_list[-1]
+                .drop(columns=status_cols, errors="ignore") # Drop these in case they were created in a partial pass previously and will result in name dediup x_, y_ upon merge
+                .merge(
+                    self.summary_state.populated_theme_list[-1][
+                        ["theme_label", "question_id"] + status_cols
+                    ],
+                    how="left",
+                    on=["question_id", "theme_label"]
+                )
+            )
+
         out_df_list = []
-        no_change_count = 0
-
+        self.last_schema_repair_theme_repairs = []
+        self.last_schema_repair_schema_repairs = [] 
+        no_change_count = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].nunique() if self.summary_state.theme_schema_list else 0
+        
         # initialize the primary dataframes for the two input branches:
-
         if source == "cluster summaries":
             # Grab data from summaries
             source_df = self.summary_state.cluster_summary_list[0].copy()
-            no_change_count = 0
             stable_schema = None
+            for idx, row in self.corpus_state.questions.iterrows():
+                print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
+                question_id = row["question_id"]
+                question_text = row["question_text"]
 
-        else:
-            # First identify any stable and unstable schema
-            stable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]
-            unstable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == False]
-            no_change_count = len(stable_schema["question_id"].unique().tolist()) if not stable_schema.empty else 0
-                
-
-        for idx, row in self.corpus_state.questions.iterrows():
-            print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
-            question_id = row["question_id"]
-            question_text = row["question_text"]
-
-            if source == "cluster summaries":
                 # Use source df and get the clusters for this rq
                 rq_df = source_df[source_df["question_id"] == question_id].copy()
                 summary = "\n\n".join(rq_df["summary"].tolist())
@@ -4132,174 +4513,255 @@ class Summarize:
                     f"{summary}\n"
                 )
                 sys_prompt = Prompts().gen_theme_schema_cluster_source()
+                # Get the initial schema for this question from the LLM
+                theme_list = self._llm_gen_initial_schema(user_prompt, sys_prompt)
+                themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
+            
+                # Add the metadata back to the results
+                themes_df["needs_repair"] = True
+                themes_df[["optimized", "stable"]] = False # These are generated from the cluster summaries so that need to be checked for repairs and are not optimized or stable yet           
+                themes_df["question_id"] = question_id
+                themes_df["question_text"] = question_text
+                themes_df["schema_produced_by"] = "initial_cluster_schema"
 
-            else:
-                # Use the stable and unstable schema to generate the user prompts 
-                
-                # First create the json of the current schema
-                current_schema = unstable_schema.copy()
-                # Get the schema for this rq
-                current_schema_rq = current_schema[current_schema["question_id"] == question_id].sort_values(by=["theme_id"]).copy()
-                # Check that there is something in this schema - i.e. its not stable for this question and therefore already processed. If stable continue to the next question
-                if current_schema_rq.empty:
+                out_df_list.append(themes_df)
+
+        else:
+            # If its not cluster summaries then its from orphans so first we prepare for schema repair
+            # First identify any viable and unviable schema
+            stable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"]]
+            unstable_schema = self.summary_state.theme_schema_list[-1][~self.summary_state.theme_schema_list[-1]["stable"]]
+            
+            for idx, row in self.corpus_state.questions.iterrows():
+                question_id = row["question_id"]
+                question_text = row["question_text"]
+           
+                # First check whether the question is unstable - if not we can skip and add to the output df as is, if it is unstable we need to send to the LLM for revision
+                unstable_schema_rq = unstable_schema[unstable_schema["question_id"] == question_id].copy()
+                if unstable_schema_rq.empty:
+                    stable_schema_rq = stable_schema[stable_schema["question_id"] == question_id].copy()
+                    out_df_list.append(stable_schema_rq[["theme_label", "theme_description", "instructions", "question_id", "question_text", "stable", "needs_repair", "optimized"]])
                     continue
 
-                # Convert to json
-                current_schema_rq_json = current_schema_rq[[
-                    "theme_label",
-                    "theme_description",
-                    "instructions"
-                ]].to_dict(orient="records")
+                else:
+                    # If its not stable we generate the full history of schema iterations for this question as this will be used in the repair plan and optimization prompts, and filtered for the last iteration in implement repair plan prompt
+                    print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
+                    
+                    # Generate the full history of the theme summaries and schema rules for this question so that i can pass it to the model
+                    full_history = []
 
-                # Then create the json of the current themes
-                # Copy and select the current populated theme values
-                current_populated_themes = self.summary_state.populated_theme_list[-1].copy()
+                    for i, (s, p) in enumerate(zip(self.summary_state.theme_schema_list, self.summary_state.populated_theme_list)):
+                        merged_schema_pop_df = (
+                            s[s["question_id"] == question_id]
+                            .merge(p[["thematic_summary", "theme_id", "question_id"]], 
+                                    how ="left", 
+                                    on=["question_id", "theme_id"])
+                            .assign(completeness_check=lambda x: x["thematic_summary"].apply(lambda y: "fail" if pd.notna(y) and "--- FAILED BATCH SUMMARIES ---" in y else "pass"))
+                            .assign(iteration=i)
+                            .assign(word_count=lambda x: x["thematic_summary"].str.split("--- FAILED BATCH SUMMARIES ---").str[0].str.split().str.len().fillna(0).astype(int))
+                            .assign(word_count=lambda x: np.where(x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---", na=False), None, x["word_count"]))
+                            .assign(schema_has_failures=lambda x: (x["completeness_check"] == "fail").any())
+                            .assign(is_current_iteration=lambda x: x["iteration"] == len(self.summary_state.theme_schema_list) - 1)
+                        )
+                        full_history.append(merged_schema_pop_df)
 
-                # Get the current populated themes for this rq
-                current_populated_themes_rq = current_populated_themes[current_populated_themes["question_id"] == question_id].copy()
-                # Get pass/fail for the themes with failing batches
-                current_populated_themes_rq["completeness_check"] = current_populated_themes_rq["thematic_summary"].apply(
-                    lambda x: "fail" if isinstance(x, str) and "--- FAILED BATCH SUMMARIES ---" in x else "pass"
-                )
+                    full_history_df = pd.concat(full_history, ignore_index=True)
 
-                # Get the word count before the failed batches
-                current_populated_themes_rq["word_count"] = current_populated_themes_rq["thematic_summary"].apply(lambda x: len(x.split("--- FAILED BATCH SUMMARIES ---")[0].split()) if isinstance(x, str) else 0)
-                # Merge with schema to get the instructions
-                current_populated_themes_rq = (
-                    current_populated_themes_rq
-                    .merge(
-                        current_schema_rq[["theme_id", "instructions"]],
-                        on=["theme_id"],
-                        how="left"
-                    )
-                )
+                    # Avoid invalid JSON NaN values
+                    full_history_df = full_history_df.where(pd.notna(full_history_df), None)
 
-                # Sort and select only the relevant columns to send to the LLM
-                current_populated_themes_json = (
-                    current_populated_themes_rq
-                    .sort_values(by =["theme_id"],
-                                ascending=[True])
-                )[[
-                    "theme_label",
-                    "theme_description",
-                    "instructions",
-                    "thematic_summary",
-                    "completeness_check",
-                    "word_count"
-                ]].to_dict(orient="records")
-               
-                user_prompt = (
-                    f"LATEST THEME CODEBOOK:\n{current_schema_rq_json}\n\n"
-                    "-------------------------------------------------------------\n\n"
-                    f"THEME SUMMARIES POPULATED WITH INSIGHTS:\n{current_populated_themes_json}"
-                    )
-                
-                # generate the sys prompt for source after orphan insertion
-                sys_prompt = Prompts().gen_theme_schema_orphan_source()
-
-            # Fall back uses existing schema
-            if source == "cluster summaries":
-                fall_back = {
-                    "themes": [],
-                    "no_change": False
-                }
-            else:
-                fall_back = {
-                    "themes": current_schema_rq_json,
-                    "no_change": False
-                }
-
-            json_schema = {
-            "name": "thematic_schema_generator",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "themes": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "theme_label": { "type": "string" },
-                                "theme_description": { "type": "string" },
-                                "instructions": { "type": "string" }
-                            },
-                            "required": [
-                                "theme_label", 
-                                "theme_description", 
-                                "instructions"
-                            ],
-                            "additionalProperties": False
-                        }
-                    },
-                    "no_change": {
-                        "type": "boolean"
+                    full_history_by_iteration_dict = {
+                    str(iteration): {
+                        "iteration": int(iteration),
+                        "is_current_iteration": bool(group["is_current_iteration"].iloc[0]),
+                        "schema_has_failures": bool(group["schema_has_failures"].iloc[0]),
+                        "themes": group[
+                            [
+                                "theme_id",
+                                "theme_label",
+                                "theme_description",
+                                "instructions",
+                                "completeness_check",
+                                "word_count",
+                                "thematic_summary",
+                            ]
+                        ].to_dict(orient="records")
                     }
-                },
-                "required": ["themes", "no_change"],
-                "additionalProperties": False
-            }
-        }
+                    for iteration, group in full_history_df.sort_values(
+                        ["iteration", "theme_id"]
+                    ).groupby("iteration", sort=True)
+                    }
 
-            response = utils.call_chat_completion(
-                sys_prompt=sys_prompt,
-                user_prompt=user_prompt,
-                llm_client=self.llm_client,
-                ai_model=self.ai_model,
-                fall_back=fall_back,
-                return_json=True,
-                json_schema=json_schema
-            )
+                    # Now we route
+                    # 1. if the question needs repair it goes to the schema repair process
+                    # 2. if the question does not need repairs it goes to optimization
 
-            # Check if the schema is not worth iterating on, if so exit
-            if source != "cluster summaries" and response["no_change"]:
-                no_change_count += 1
-                print(f"No changes to the theme schema for question {question_id}. Retaining the previous schema.\n\n")
-                # Use previous schema directly
-                themes_df = current_schema_rq.copy()
-                # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable
-                themes_df["stable"] = True
+                    # First check is the schema is stable for this question, if so move to next question
+                    if unstable_schema_rq["needs_repair"].iloc[0]:
+                        print("Schema for this question has been marked as needing repairs based on the completeness check and word count signals. Running repair process...")
 
-            else:
-                # Otherwise process the returned schema for the RQ and add to the list of schemas
-                theme_list = response.get("themes", [])
-                themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
-                # Set the stable flag to false for all themes in this question as the model has indicated that there is a need to change the schema and therefore they are not stable
-                themes_df["stable"] = False
-            
-            themes_df["question_id"] = question_id
-            themes_df["question_text"] = question_text
+                        # Generate the content for the repair plan prompt
+                        # Turn full history into json for the prompt
+                        full_history_json = json.dumps(
+                                full_history_by_iteration_dict,
+                                ensure_ascii=False,
+                                indent=2,
+                                allow_nan=False,
+                            )
+                            
+                        # generate the repair instructions for this schema
+                        user_prompt_gen_repair = (
+                            f"RESEARCH QUESTION: {question_text}\n\n"
+                            "-------------------------------------------------------------\n\n"
+                            "HISTORIC EFFORTS AT SCHEMA DEVELOPMENT:\n"
+                            f"{full_history_json}\n\n"
+                            "-------------------------------------------------------------\n\n"
+                        )
 
-            out_df_list.append(themes_df)
-        
-        if no_change_count == self.corpus_state.questions.shape[0]:
-            print(
-                "This iteration has not made any changes to the schema for any of the research questions.\n"
-                "This means there are no errors in your populated themes and no obvious optimiaztion options for the schema to improve the mapping of insights to themes.\n"
-                "You should consider iterations done.\n"
-                "The final populated theme list is available in `self.summary_state.populated_theme_list[-1]`.\n"
-                "You should move to redundancy handling/rendering."
-                )
-            return(None)
-        
+                        sys_prompt_gen_repair = Prompts().gen_theme_schema_repair_instructions()
+
+                        # Get the repair plan
+                        repair_plan = self._llm_gen_schema_repair_plan(user_prompt_gen_repair, sys_prompt_gen_repair)
+
+                        if repair_plan.get("theme_repairs") == [] and repair_plan.get("schema_repairs") == []:
+                            print("LLM did not propose any repairs for this question. Reusing old schema and marking as unstable, not optimized and needs repair.")
+                            themes_df = unstable_schema_rq.copy()
+                            themes_df["stable"] = False # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable now
+                            themes_df["needs_repair"] = True # Assuming error so repair did not happen therefor needs repair stays True
+                            themes_df["optimized"] = False # If there are no repairs then they have not been optimized 
+                            themes_df["schema_produced_by"] = "repair"
+                            themes_df["question_id"] = question_id
+                            themes_df["question_text"] = question_text
+                            # Append to the out_df_list
+                            out_df_list.append(themes_df)
+                            continue
+
+                        # Assign the repair plans as attributes so that i can see what they are proposing for debugging
+                        theme_repairs = repair_plan.get("theme_repairs", [])
+                        schema_repairs = repair_plan.get("schema_repairs", [])
+                        theme_repairs_df = pd.DataFrame(theme_repairs)
+                        schema_repairs_df = pd.DataFrame(schema_repairs)
+                        theme_repairs_df["question_id"] = question_id
+                        schema_repairs_df["question_id"] = question_id
+                        self.last_schema_repair_theme_repairs.append(theme_repairs_df)
+                        self.last_schema_repair_schema_repairs.append(schema_repairs_df)
+
+                        # Now implement the plan
+                        print("Implementing repair plan...")
+                        # get the repair plan as json for the LLM
+                        repair_plan_json = json.dumps(repair_plan, indent=2, ensure_ascii=False)
+
+                        # We send the implement repair prompt the latest schema iteraton with all the information so get the last iteration
+                        last_iteration = full_history_df["iteration"].max()
+                        full_history_last_iteration = full_history_by_iteration_dict[str(last_iteration)]
+                        # Convert full_history_last_iteration to json for the prompt
+                        full_history_last_iteration_json = json.dumps(
+                            full_history_last_iteration,
+                                ensure_ascii=False,
+                                indent=2,
+                                allow_nan=False,
+                        )
+
+                        # Create all the prompts
+                        user_prompt = (
+                            f"RESEARCH QUESTION: {question_text}\n\n"
+                            "-------------------------------------------------------------\n\n"
+                            "CURRENT UNSTABLE SCHEMA:\n"
+                            f"{full_history_last_iteration_json}\n\n"
+                            "-------------------------------------------------------------\n\n"
+                            "REPAIR PLAN:\n"
+                            f"{repair_plan_json}\n\n"
+                        )
+                        # Then the sys prompt
+                        sys_prompt = Prompts().implement_schema_repairs()
+
+                        # Get the repaired themes from the LLM
+                        theme_list = self._llm_apply_schema_repair_plan(
+                            unstable_schema_rq=unstable_schema_rq, 
+                            sys_prompt=sys_prompt, 
+                            user_prompt=user_prompt
+                            )
+                        # Convert the repaired theme list to a dataframe
+                        themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
+                        # Set the needs_repair flag to false for all themes in this question as the model has undertaken repairs and therefore they are not viable yet - vability will be set for this update after orphan insertion
+                        themes_df["needs_repair"] = pd.NA # We dont know whether they are viable or not until we test them so set to NA for now
+                        themes_df["optimized"] = False # If there are repairs then they have not been optimized 
+                        themes_df["stable"] = False # If they are not optimized they are not stable
+
+                        # Now add the metadata back in for the themes for this question - covering both now stable and unstable themes
+                        themes_df["question_id"] = question_id
+                        themes_df["question_text"] = question_text
+                        themes_df["schema_produced_by"] = "repair"
+                        
+                        # Append to the final list
+                        out_df_list.append(themes_df)
+
+                    else: # now checking if it does not need repairs, and it was not stable it must need optimizing
+                        print("Schema for this question does not need repairs, sending for optimization...")
+                        # generate the user prompt for schema optimization
+                        # First get the full history
+                        full_history_json = json.dumps(
+                                full_history_by_iteration_dict,
+                                ensure_ascii=False,
+                                indent=2,
+                                allow_nan=False,
+                            )
+                        
+                        user_prompt = (
+                            f"RESEARCH QUESTION: {question_text}\n\n"
+                            f"SCHEMA HISTORY: {full_history_json}\n\n"
+                        )
+
+                        sys_prompt = Prompts().gen_theme_schema_optimize()
+
+                        optimized_schema = self._llm_apply_schema_optimization(sys_prompt=sys_prompt, user_prompt=user_prompt)
+
+                        if optimized_schema == "no change": # If we get back no change we need to set to stable, and use the existing schema for this question
+                            print("No changes proposed by optimizer. Marking schema as stable for this question.")
+                            themes_df = unstable_schema_rq.copy()
+                            themes_df["stable"] = True # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable now
+                            themes_df["optimized"] = True # If there is no change then they are optimized and therefore stable
+                            themes_df["schema_produced_by"] = "optimizer_no_change"
+                            themes_df["question_id"] = question_id
+                            themes_df["question_text"] = question_text
+                            # Append to the out_df_list
+                            out_df_list.append(themes_df)
+                            # Increment the no change count
+                            no_change_count += 1
+                            # Check if no change count equals the total number of research questions, if so end the stabilization iterations
+                            if no_change_count == self.corpus_state.questions.shape[0]:
+                                print(
+                                    "This iteration has not made any changes to the schema for any of the research questions.\n"
+                                    "This means there are no errors in your populated themes and no obvious optimiaztion options for the schema to improve the mapping of insights to themes.\n"
+                                    "You should consider iterations done.\n"
+                                    "The final populated theme list is available in `self.summary_state.populated_theme_list[-1]`.\n"
+                                    "You should move to redundancy handling/rendering."
+                                )
+                                return(None)
+                        else:
+                            themes = optimized_schema
+                            themes_df = pd.DataFrame(themes, columns=["theme_label", "theme_description", "instructions"])
+                            themes_df["optimized"] = False # Set the optimized flag to false for all themes in this question as the model has undertaken optimizations and these need to be tested
+                            themes_df["stable"] = False # Set the stable flag to false for all themes in this question as the model has undertaken optimizations and therefore we need to test wh
+                            themes_df["needs_repair"] = pd.NA # We dont know whether they need repairs or not until we test them so set to NA for now
+                            themes_df["schema_produced_by"] = "optimizer_change"
+                            themes_df["question_id"] = question_id
+                            themes_df["question_text"] = question_text
+                            # Append to the out_df_list
+                            out_df_list.append(themes_df)
+
+        # Now we have to concat the repaired/optimized/stable themes 
         # Concat all the questions
         output = pd.concat(out_df_list, ignore_index=True, sort=False)
-        # Add a numeric id to the themes so that i can sort them later which is important to generate the narrative at the end.
-        # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.
+        # We want to sort the themes by questions and the order they came in. So first we add a theme id
         output["theme_id"] = [i + 1 for i in range(len(output))]
-
-        # Now we need to add the originally stable schema back in. 
-        if stable_schema is not None and not stable_schema.empty:
-            # First make sure its sorted
-            stable_schema = stable_schema.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-            # Then concat it with the new schema output
-            output = pd.concat([output, stable_schema], ignore_index=True, sort=False)
-            # Then sort everything
-            output = output.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-            # And now regen the theme_id to be a unique numeric id for each theme while preserving the order. This is important because we want to be able to sort by theme_id later to stitch together the narrative and if we have duplicates or non numeric values this will cause problems. We also want to make sure that the theme_id is unique across all questions so that we can use it as a stable identifier for themes even if they move around in the ordering.
-            # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.
-            output["theme_id"] = [i + 1 for i in range(len(output))]        
-
+        # Sort the output
+        output = output.sort_values(by=["question_id", "theme_id"], ignore_index=True)
+        # Then we re-sort so that they run from theme 1 up, and are global
+        # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.       
+        output["theme_id"] = [i + 1 for i in range(len(output))]
+        #Drop the columns that i added to schema for the LLM to use but don't want otherwise subsequent processing will generate column name conflicts _y, and _x
+        output = output.drop(columns=["thematic_summary", "completeness_check", "word_count"], errors="ignore")
         return(output)
 
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
@@ -4468,7 +4930,11 @@ class Summarize:
 
             new_schema = self._run_llm_schema_gen(source=source_name)
             if new_schema is None:
-                # This means the LLM has indicated that there are no changes to the schema worth making, which likely means we have reached the optimal schema for the current state of populated themes and orphans. In this case we should not overwrite the last schema pass as the new one is identical to it, so we return None to indicate no new schema was generated.
+                # This means the LLM has indicated that there are no changes to the schema worth making,
+                # which likely means we have reached the optimal schema for the current state of
+                # populated themes and orphans. In this case we should not overwrite the last schema
+                # pass as the new one is identical to it, so we return None to indicate no new schema
+                # was generated.
                 return None
 
             # Replace last schema pass
@@ -5280,6 +5746,8 @@ class Summarize:
         - Full insight coverage is enforced later via orphan handling.
         - Themes with no mapped insights are retained with empty summaries.
         """
+
+    
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
@@ -5327,6 +5795,9 @@ class Summarize:
             theme_label = row["theme_label"]
             theme_description = row["theme_description"]
             allocated_length = row["allocated_length"]
+            needs_repair = row.get("needs_repair", pd.NA)
+            optimized = row.get("optimized", False)
+            stable = row.get("stable", False)
             # Get the insight ids for the specific question and theme
             insight_ids = mapped_themes_df[
                 (mapped_themes_df["question_id"] == rq_id) & 
@@ -5348,7 +5819,10 @@ class Summarize:
                     "theme_id": theme_id,
                     "theme_label": theme_label,
                     "theme_description": theme_description,
-                    "allocated_length": allocated_length
+                    "allocated_length": allocated_length,
+                    "needs_repair": needs_repair,
+                    "optimized": optimized,
+                    "stable": stable
                 }])
                 populated_themes.append(no_insight_df)
                 continue
@@ -5444,6 +5918,9 @@ class Summarize:
             thematic_summary["theme_label"] = theme_label
             thematic_summary["theme_description"] = theme_description
             thematic_summary["allocated_length"] = allocated_length
+            thematic_summary["needs_repair"] = needs_repair
+            thematic_summary["optimized"] = optimized
+            thematic_summary["stable"] = stable
 
             # Get the length of the summary in words and calculate the percentage of the allocated length that this summary represents
             thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
@@ -5454,7 +5931,6 @@ class Summarize:
 
         # Concat the final list of dfs and return
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
-        populated_themes_df["stable"] = False # Add a column to indicate that these themes are not stable, which will be used in the length check function to avoid flagging these for expansion. We want to preserve the populated summaries for the stable themes and not re-write them, so we flag them as stable here and then use this flag in the length check function to avoid flagging them for expansion.
         # Add back the stable questions and themes with thier populated summaries
         if stable_populated_themes is not None and not stable_populated_themes.empty:
             populated_themes_df = pd.concat([populated_themes_df, stable_populated_themes], ignore_index=True)
@@ -5717,6 +6193,7 @@ class Summarize:
         self.summary_state.populated_theme_list.append(populated_themes_df)
         self.summary_state.save()
         return self.summary_state.populated_theme_list[-1]
+
 
     def _identify_orphans(
             self, 
@@ -5990,6 +6467,188 @@ class Summarize:
 
         return response_summary
 
+    def _identify_missing_citations(self, summary:str, required_citations: pd.DataFrame) -> list:
+        """
+        """
+        if required_citations.empty:
+            return []
+
+        required_citations = required_citations.copy()
+        required_citations["paper_id"] = required_citations["paper_id"].astype(str) # make sure these are strings for comparison with the found citations
+        
+        #Turn the citations into json string
+        citations_json = required_citations.to_json(orient="records")
+        user_prompt = (
+            f"THEMATIC SUMMARY:\n{summary}\n\n"
+            f"REQUIRED CITATIONS:\n{citations_json}\n\n"
+        )
+
+        sys_prompt = Prompts().identify_citations()
+
+        json_schema = {
+            "name": "identify_citations",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "identified_paper_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A list of paper IDs that were explicitly identified in the summary."
+                    }
+                },
+                "required": ["identified_paper_ids"],
+                "additionalProperties": False
+            }
+        }
+        
+        fall_back = {"identified_paper_ids": []}
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema
+        )
+
+        found_citations = response["identified_paper_ids"]
+        found_citations = [str(c) for c in found_citations] # make sure these are strings for comparison with the paper ids in required citations
+
+        # Now compare to get missing citations
+        missing_citations_df = required_citations[~required_citations["paper_id"].isin(found_citations)].copy()
+        missing_citations_paper_ids = missing_citations_df["paper_id"].tolist()
+
+        return missing_citations_paper_ids
+    
+    def _address_missing_citations(
+        self,
+        summary: str,
+        missing_citations_df: pd.DataFrame
+        ) -> str:
+
+        """
+        Repair missing citation provenance in a thematic summary
+        using only insights associated with missing paper_ids.
+        """
+
+        ## UTILS ---
+        def build_missing_citation_json(df: pd.DataFrame) -> str:
+
+            def format_citation(r):
+                author = str(r.get("paper_author", "")).strip()
+                date = r.get("paper_date", "")
+
+                if pd.isna(date):
+                    date = ""
+                elif isinstance(date, float) and date.is_integer():
+                    date = str(int(date))
+                else:
+                    date = str(date).strip()
+
+                if date.lower() in ["nan", "none", ""]:
+                    return author
+
+                if author.lower() in ["nan", "none", ""]:
+                    return date
+
+                return f"{author} {date}"
+
+            working = df.copy()
+
+            working["citation"] = working.apply(format_citation, axis=1)
+
+            grouped = (
+                working.groupby("citation")["insight"]
+                .apply(list)
+                .reset_index()
+            )
+
+            payload = grouped.to_dict(orient="records")
+
+            return json.dumps(payload, indent=2)
+
+        ## UTILS END ---
+
+        if missing_citations_df.empty:
+            return summary
+
+        missing_citations_json = build_missing_citation_json(missing_citations_df)
+
+        user_prompt = (
+            f"THEMATIC SUMMARY:\n{summary}\n\n"
+            f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
+        )
+
+        sys_prompt = Prompts().repair_citation_provenance()
+
+        json_schema = {
+            "name": "repair_citation_provenance",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "repaired_summary": {
+                        "type": "string",
+                        "description": "The thematic summary with repaired citation provenance."
+                    }
+                },
+                "required": ["repaired_summary"],
+                "additionalProperties": False
+            }
+        }
+
+        fall_back = {"repaired_summary": summary}
+
+        response = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema,
+            max_tokens=4096
+        )
+
+        repaired_summary = response["repaired_summary"]
+
+        return repaired_summary
+
+
+    def _load_failed_themes(self, remove_latest_iteration: bool = False) -> defaultdict:
+        """
+        """
+        os.makedirs(config.FAILED_THEMES_PATH, exist_ok=True)
+
+        failed_themes_path = Path(config.FAILED_THEMES_PATH) / "failed_themes.json"
+
+        if not failed_themes_path.is_file():
+            return defaultdict(list)
+
+        with open(failed_themes_path, "r", encoding="utf-8") as f:
+            failed_themes_dict = json.load(f)
+
+        summarize_iteration = len(self.summary_state.orphan_list)
+
+        for k in failed_themes_dict.keys():
+            # Drop records from impossible/future iterations caused by partial crashes.
+            failed_themes_dict[k] = [
+                ft for ft in failed_themes_dict[k]
+                if ft["iteration"] <= summarize_iteration + 1
+            ]
+
+            # For schema generation, omit latest visible failures because they are
+            # already represented in populated themes with FAILED BATCH SUMMARIES.
+            if remove_latest_iteration:
+                failed_themes_dict[k] = [
+                    ft for ft in failed_themes_dict[k]
+                    if ft["iteration"] < summarize_iteration
+                ]
+
+        return defaultdict(list, failed_themes_dict)        
 
     def _integrate_orphans(
             self,
@@ -6046,6 +6705,9 @@ class Summarize:
         - Themes without orphan insights are returned unchanged.
         """
 
+        # Load failed themes so that we can update as we go - keep all iterations to preserve history
+        failed_themes = self._load_failed_themes(remove_latest_iteration=False)        
+
         # Prepare output holder for updated theme summaries
         updated_summary_df_lst = []
 
@@ -6061,6 +6723,26 @@ class Summarize:
         # ---- Capacity parameters (tune once) ----
         MODEL_INPUT_WORD_LIMIT = 22000   # practical integration limit (well below 128k hard cap)
         # ----------------------------------------
+
+        # get back sensible citations
+        def format_citation(r):
+            author = str(r.get("paper_author", "")).strip()
+            date = r.get("paper_date", "")
+
+            if pd.isna(date):
+                date = ""
+            elif isinstance(date, float) and date.is_integer():
+                date = str(int(date))
+            else:
+                date = str(date).strip()
+
+            if date.lower() in ["nan", "none", ""]:
+                return author
+
+            if author.lower() in ["nan", "none", ""]:
+                return date
+
+            return f"{author} {date}"
 
         # Packs as many insights as possible into a single batch without exceeding capacity
         # This maximizes efficiency (few passes) while avoiding model overload
@@ -6079,6 +6761,8 @@ class Summarize:
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
+            optimized = row.get("optimized", False)
+            stable = row.get("stable", False)
             
             # Retrieve research question text for prompt context
             question_text = self.corpus_state.questions[
@@ -6132,26 +6816,7 @@ class Summarize:
                     # Format batch for prompt (bullet list preserves separability)
                     batch = batch.copy() # Avoid SettingWithCopyWarning
 
-                    # get back sensible citations
-                    def format_citation(r):
-                        author = str(r.get("paper_author", "")).strip()
-                        date = r.get("paper_date", "")
-
-                        if pd.isna(date):
-                            date = ""
-                        elif isinstance(date, float) and date.is_integer():
-                            date = str(int(date))
-                        else:
-                            date = str(date).strip()
-
-                        if date.lower() in ["nan", "none", ""]:
-                            return author
-
-                        if author.lower() in ["nan", "none", ""]:
-                            return date
-
-                        return f"{author} {date}"
-
+                    
                     # Format citations for the batch, ensuring uniqueness and cleanliness
                     batch["citations"] = batch.apply(format_citation, axis=1)
                     batch_citations_unique = list(dict.fromkeys(
@@ -6159,7 +6824,6 @@ class Summarize:
                         if c and c.lower() not in ["nan", "none"]
                     ))
                     
-
                     # Accumulate citations/authors across batches for this theme
                     required_citations_seen = list(dict.fromkeys(
                         required_citations_seen + batch_citations_unique
@@ -6246,8 +6910,72 @@ class Summarize:
                     f"{batch_count} batches (avg {avg_batch_size:.1f} insights/batch)"
                 )
 
+                # Check if there were failed batch summaries
                 if failed_batch_summaries:
+                    # Skip citation provenance
+                    print("Skipping citation provenance check because there were failed batch summaries.")
+                    # Update the summary with the failures so they can go back to the model
                     updated_summary += "\n\n--- FAILED BATCH SUMMARIES ---\n\n" + "\n\n".join(failed_batch_summaries) + "\n\n" 
+                    # Add the failed themes to the failed themes dict to be saved and used in the next schema gen pass
+                    # Get the theme instructions
+                    instructions = self.summary_state.theme_schema_list[-1][
+                        (self.summary_state.theme_schema_list[-1]["theme_id"] == theme_id) &
+                        (self.summary_state.theme_schema_list[-1]["question_id"] == question_id)
+                    ]["instructions"].iloc[0]
+                    
+                    failed_themes[question_id].append(
+                        {"theme_id": theme_id, 
+                         "theme_label": theme_label,
+                         "theme_description": theme_description,
+                         "instructions": instructions, 
+                         "iteration": len(self.summary_state.orphan_list) + 1} # Keep this 1 ahead of orphan list as this iteration of orphan list has not yet been saved
+                    )
+
+                else: 
+                    # If there were no failed batches we proceed with citation provenance repair
+                    # First get all the insights that should be in this theme, from there get paper_ids
+                    print("Checking for missing citations in the updated summary...")
+                    required_insights = self.summary_state.mapped_theme_list[-1][
+                        (self.summary_state.mapped_theme_list[-1]["theme_id"] == theme_id) &
+                        (self.summary_state.mapped_theme_list[-1]["question_id"] == question_id)
+                        ]["insight_id"].to_list()
+
+                    required_citations_df = (
+                        self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(required_insights)][["paper_id", "paper_author", "paper_date"]]
+                        .drop_duplicates()
+                        .assign(citation = lambda df: df.apply(format_citation, axis=1))
+                        .drop(columns=["paper_author", "paper_date"])
+                    )
+                    
+                    # Have the LLM find the missing citations
+                    theme_missing_citations = self._identify_missing_citations(updated_summary, required_citations_df)
+
+                    # If there are missing citations, attempt to repair them
+                    if theme_missing_citations:
+                        print(f"Missing citations identified for theme {theme_id}. Attempting to repair citation provenance in the summary...")
+
+                        #Convert to strings 
+                        theme_missing_citations = [str(x) for x in theme_missing_citations]
+                        # I am going to get insights for paper_ids from corpus_state.insights and then filter for those insights mapped to this theme and question
+                        # First get all insights
+                        insights = self.corpus_state.insights.copy()
+                        insights["paper_id"] = insights["paper_id"].astype(str)
+                        # then prepare mapping
+                        mapped = self.summary_state.mapped_theme_list[-1].copy()
+
+                        mapped_theme_insight_ids = mapped[
+                            (mapped["question_id"] == question_id) &
+                            (mapped["theme_id"] == theme_id)
+                        ]["insight_id"].dropna().tolist()
+
+                        # take the intersection
+                        theme_missing_citations_df = insights[
+                            (insights["paper_id"].isin(theme_missing_citations)) &
+                            (insights["insight_id"].isin(mapped_theme_insight_ids))
+                        ][["paper_id", "paper_author", "paper_date", "insight_id", "insight"]].copy()
+
+                        # Have the LLM repair the summary to add in missing citations
+                        updated_summary = self._address_missing_citations(updated_summary, theme_missing_citations_df)
 
                 # Store final fully integrated summary for this theme
                 updated_row = pd.DataFrame([{
@@ -6257,7 +6985,9 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
-                    "stable": False
+                    "stable": stable,
+                    "needs_repair": True if failed_batch_summaries else False,
+                    "optimized": optimized
                 }])
 
             else:
@@ -6270,7 +7000,9 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
-                    "stable": False
+                    "stable": stable, 
+                    "needs_repair": False,
+                    "optimized": optimized
                 }])
 
             updated_summary_df_lst.append(updated_row)
@@ -6288,7 +7020,9 @@ class Summarize:
                 "theme_label",
                 "theme_description",
                 "question_text",
-                "stable"]].copy()
+                "stable",
+                "needs_repair",
+                "optimized"]].copy()
             theme_no_orphans = pd.concat([theme_no_orphans, stable_populated_themes], ignore_index=True)
 
         # Sort for outputing in the correct order - before this make sure the theme_id is int to prevent sorting issues
@@ -6296,6 +7030,12 @@ class Summarize:
         theme_no_orphans = theme_no_orphans.sort_values(
             by=["question_id", "theme_id"]
         ).reset_index(drop=True)
+
+        # Save the failed themes so that they can be used in the next schema gen
+        os.makedirs(config.FAILED_THEMES_PATH, exist_ok=True)
+        failed_themes_path = Path(config.FAILED_THEMES_PATH) / "failed_themes.json"
+        with open(failed_themes_path, "w", encoding="utf-8") as f:
+            json.dump(dict(failed_themes), f, indent=2, ensure_ascii=False) # We want to work with a defaultdict, but serialize a regular dict for stabiliy
 
         return theme_no_orphans
 
@@ -6583,6 +7323,7 @@ class Summarize:
         self.summary_state.save()
         return self.summary_state.orphan_list[-1]
 
+    
     def _llm_redundancy_check(self):
         """
         Reduce redundancy across theme summaries.
