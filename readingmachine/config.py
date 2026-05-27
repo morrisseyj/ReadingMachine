@@ -59,6 +59,9 @@ PICKLE_SAVE_LOCATION = os.path.join(os.getcwd(), "data", "pickles")
 # Location in which the fuzzy duplicate checks are saved after the fuzzy duplicate check step of the pipeline completes
 FUZZY_CHECK_PATH = os.path.join(os.getcwd(), "data", "fuzzy_checks")
 
+# Location in which the failed themes are saved after the orphan integration step of the pipeline completes
+FAILED_THEMES_PATH = os.path.join(os.getcwd(), "data", "failed_themes")
+
 ###
 # REPRODUCIBILITY CONFIGURATION
 ###
