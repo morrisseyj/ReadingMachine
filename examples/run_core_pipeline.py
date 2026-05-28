@@ -250,7 +250,7 @@ cluster.tune_umap_params(
 cluster.reduce_dimensions(
     n_neighbors=100,
     min_dist=0.5,
-    n_components=5,
+    n_components=10,
     metric="cosine",
     random_state=config.seed
 )
@@ -272,9 +272,9 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 # Apply clustering
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 20, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 10},
-    "question_1": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 4},
-    "question_2": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 4},
+    "question_0": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_1": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
+    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
     "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
     "question_4": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2}
 })
@@ -284,6 +284,14 @@ cluster.generate_clusters({
 # ==========================================================
 
 # The Summarize class performs the thematic synthesis pipeline.
+
+from readingmachine import utils
+utils.restart_pipeline()
+
+from readingmachine import state
+
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\readingmachine_add_doc_id_tree\ReadingMachine\data\runs\09_clusters')
+summarize = core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model="gpt-4o", paper_output_length=10000)
 
 summarize = core.Summarize(
     corpus_state=cluster.corpus_state,

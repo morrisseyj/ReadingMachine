@@ -1216,6 +1216,7 @@ class Ingestor:
         """
         # Make a copy of working insights so that we only mutate at the end and don't change things in stages if code crashes
         working_insights = self.corpus_state.insights.copy()
+
         # First we change the paper_id field to filename_stub to reflect that it is no longer the paper id but the original filename stub that we have for each paper, which is what we will use to link the unique citations to the papers. We then create a new paper_id field which is the unique citation. We generate the unique citation by combining the author and date fields, and then we check for duplicates and append an integer if there are duplicates. Finally we save this as a new dataframe in the state called unique_citations.
         working_insights = working_insights.rename(columns={"paper_id": "filename_stub"})
         # Now we create the paper_id field by combining the author and dat fields and then checking for uniqueness
@@ -1243,6 +1244,7 @@ class Ingestor:
         
         paper_author = (
             working_insights["paper_author"]
+            .str.replace(";", ",", regex=False)
             .str.split(",")
             .str[0]
             .str.replace(" ", "", regex=False)
@@ -1255,6 +1257,16 @@ class Ingestor:
 
         working_insights["paper_id"] = self._make_unique_list(
             working_insights["paper_id"].tolist()
+        )
+
+        # Before we get unique citations we also update the paper id in corpus_state.full_text
+        working_full_text = self.corpus_state.full_text.copy() #Make a copy for safety so that i can mutate state at the end and avoid any distortions from code crashing
+        working_full_text = (
+            working_full_text
+            .rename(columns={"paper_id": "filename_stub"})
+            .merge(working_insights[["filename_stub", "paper_id"]], 
+                   how="left", on="filename_stub")
+            .drop(columns=["filename_stub"])
         )
 
         # Now we get the unique citations back from the LLM
@@ -1331,6 +1343,7 @@ class Ingestor:
 
         # Mutate the state at the end of this
         self.corpus_state.insights = working_insights
+        self.corpus_state.full_text = working_full_text
         print(self.corpus_state.insights[["paper_id", "in_text_citation"]].head())
 
     @staticmethod
@@ -1768,7 +1781,7 @@ class Insights:
             injected_value=None,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi"
+                "paper_id", "paper_title", "paper_author", "paper_date", "doi", "in_text_citation"
             ],
             injected_required_cols=None
             )
@@ -1851,21 +1864,8 @@ class Insights:
         rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.corpus_state.questions.iterrows()]
         rqs_ids_str = "\n".join(rqs_ids)
 
-        # get unique paper metadata to append to chunks so that insights can be cited
-        paper_metadata = (
-            self.corpus_state.insights
-            [["paper_id", "question_text", "paper_author", "paper_date"]]
-            .sort_values("paper_author", na_position="last")
-            .drop_duplicates("paper_id")
-        )
-
-        # Merge chunk text with metadata (author, date, etc.)
-        temp_state_insights: pd.DataFrame = remaining_chunks.merge(
-            paper_metadata[["paper_id", "question_text", "paper_author", "paper_date"]],
-            how="left",
-            on=["paper_id"],
-            validate="many_to_one"
-        )
+        # Create a temp copy of the remaining chunks to iterate over, this is just to be safe and not mutate the original dataframe as we go through the loop
+        temp_state_insights = remaining_chunks.copy()
 
         # Iterate over each chunk
         for idx, (df_index, row) in enumerate(temp_state_insights.iterrows()):
@@ -1876,23 +1876,10 @@ class Insights:
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
             chunk_id: str = str(row["chunk_id"])
 
-            # Generate the citation accounting for NA values in authors and date
-            authors = row["paper_author"]
-            if isinstance(authors, (list, np.ndarray)):
-                authors = " ".join(authors)
-            elif pd.isna(authors):
-                authors = ""
-            else:
-                authors = str(authors)
-            date = row["paper_date"] if not pd.isna(row["paper_date"]) else ""
-
             # Build prompts
             sys_prompt: str = Prompts().gen_chunk_insights(paper_context=self.paper_context)
             user_prompt: str = (
                 f"RESEARCH QUESTIONS:\n{rqs_ids_str}\n\n"
-                f"CHUNK METADATA:\n"
-                f"Paper Author(s): {authors}\n"
-                f"Paper Date: {date}\n\n"
                 f"TEXT CHUNK:\n{chunk_text}\n"
             )
 
@@ -2088,28 +2075,12 @@ class Insights:
                 ]["insight"].dropna().tolist()
                 paper_question_chunk_insights = "\n".join(paper_question_chunk_insights) if paper_question_chunk_insights else ""
             
-                # Get the metadata for the paper id
-                paper_metadata_df = self.corpus_state.insights[self.corpus_state.insights["paper_id"] == paper_id][["paper_author", "paper_title", "paper_date"]].drop_duplicates()
-                author = paper_metadata_df["paper_author"].iloc[0] if not paper_metadata_df.empty and "paper_author" in paper_metadata_df.columns else pd.NA
-                if isinstance(author, list):
-                        author_str = ", ".join(author)
-                elif pd.isna(author):
-                    author_str = ""
-                else:
-                    author_str = str(author)
-                date = paper_metadata_df["paper_date"].iloc[0] if not paper_metadata_df.empty and "paper_date" in paper_metadata_df.columns else pd.NA
-                date_str = "" if pd.isna(date) else str(date)
-                title = paper_metadata_df["paper_title"].iloc[0] if not paper_metadata_df.empty and "paper_title" in paper_metadata_df.columns else pd.NA
-                title_str = "" if pd.isna(title) else str(title)
-                metadata = f"{author_str}, {date_str}, {title_str}"
-
                 # Now build the dataframe that we can call against the LLM and that we can use to determine resume points
                 meta_insight_check_df = pd.DataFrame({
                     "paper_id": [paper_id] * len(paper_content_list),
                     "question_id": [rqid] * len(paper_content_list),
                     "paper_content": paper_content_list,
                     "paper_chunk_insights": [paper_question_chunk_insights] * len(paper_content_list),
-                    "metadata": [metadata] * len(paper_content_list),
                 })
 
                 list_of_papers.append(meta_insight_check_df)
@@ -2199,7 +2170,6 @@ class Insights:
             other_rqs_str = "\n".join([f"{row['question_id']}: {row['question_text']}" for _, row in other_rqs.iterrows()])
             paper_content: str = row["paper_content"] if pd.notna(row["paper_content"]) else ""
             paper_chunk_insights: str = row["paper_chunk_insights"] if pd.notna(row["paper_chunk_insights"]) else ""
-            metadata: str = row["metadata"] if pd.notna(row["metadata"]) else ""
             content_chunk_id: str = row["content_chunk_id"]
 
 
@@ -2207,7 +2177,6 @@ class Insights:
             sys_prompt: str = Prompts().gen_meta_insights(paper_context=self.paper_context)
             user_prompt: str = (
                 f"SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n{rq}\n"
-                f"PAPER METADATA:\n{metadata}\n"
                 f"PAPER TEXT:\n{paper_content}\n"
                 f"EXISTING CHUNK INSIGHTS:\n{paper_chunk_insights}\n\n"
                 f"OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n{other_rqs_str}\n\n"
@@ -2491,7 +2460,7 @@ class Clustering:
             injected_value=None,
             state_required_cols=[
                 "question_id", "question_text", "search_string_id", "search_string",
-                "paper_id", "paper_title", "paper_author", "paper_date", "doi", "chunk_id", "insight"
+                "paper_id", "paper_title", "paper_author", "paper_date", "doi", "in_text_citation", "chunk_id", "insight"
             ],
             injected_required_cols=None
             )
@@ -2508,44 +2477,44 @@ class Clustering:
         self.cum_prop_cluster: pd.DataFrame = pd.DataFrame()
 
     
-    @staticmethod
-    def _strip_citation_parentheticals(text: str) -> str:
-        """
-        Remove citation-style parentheticals from insight text.
+    # @staticmethod
+    # def _strip_citation_parentheticals(text: str) -> str:
+    #     """
+    #     Remove citation-style parentheticals from insight text.
 
-        Academic writing frequently embeds author-year citations
-        (e.g., "(Smith 2018)" or "(Smith and Jones 2020)") that can bias
-        embedding models by introducing surface-level similarities
-        unrelated to semantic content.
+    #     Academic writing frequently embeds author-year citations
+    #     (e.g., "(Smith 2018)" or "(Smith and Jones 2020)") that can bias
+    #     embedding models by introducing surface-level similarities
+    #     unrelated to semantic content.
 
-        This function removes common citation patterns before generating
-        embeddings so that clustering reflects the meaning of insights
-        rather than citation artifacts.
+    #     This function removes common citation patterns before generating
+    #     embeddings so that clustering reflects the meaning of insights
+    #     rather than citation artifacts.
 
-        Parameters
-        ----------
-        text : str
-            Raw insight text.
+    #     Parameters
+    #     ----------
+    #     text : str
+    #         Raw insight text.
 
-        Returns
-        -------
-        str
-            Cleaned insight string with citation parentheticals removed.
-        """
+    #     Returns
+    #     -------
+    #     str
+    #         Cleaned insight string with citation parentheticals removed.
+    #     """
 
-        if not isinstance(text, str):
-            return ""
+    #     if not isinstance(text, str):
+    #         return ""
 
-        # 1. Remove parentheses containing a 4-digit year
-        text = re.sub(r"\([^)]*\d{4}[^)]*\)", "", text)
+    #     # 1. Remove parentheses containing a 4-digit year
+    #     text = re.sub(r"\([^)]*\d{4}[^)]*\)", "", text)
 
-        # 2. Remove parentheses that look like author lists (capitalized names)
-        text = re.sub(r"\(([A-Z][a-zA-Z]+(?:\s+(?:and|et al\.|,)?\s*[A-Z][a-zA-Z]+)+)\)", "", text)
+    #     # 2. Remove parentheses that look like author lists (capitalized names)
+    #     text = re.sub(r"\(([A-Z][a-zA-Z]+(?:\s+(?:and|et al\.|,)?\s*[A-Z][a-zA-Z]+)+)\)", "", text)
 
-        # Collapse whitespace
-        text = re.sub(r"\s+", " ", text).strip()
+    #     # Collapse whitespace
+    #     text = re.sub(r"\s+", " ", text).strip()
 
-        return text
+    #     return text
 
     def _gen_valid_embeddings_df(self):
         """
@@ -2572,13 +2541,7 @@ class Clustering:
             self.corpus_state.insights["insight"].notna()
         ].copy()
 
-        valid["no_author_insight_string"] = (
-            valid["insight"]
-            .astype(str)
-            .apply(self._strip_citation_parentheticals)
-        )
-
-        valid = valid[valid["no_author_insight_string"].str.strip() != ""]
+        valid = valid[valid["in_text_citation"].astype(str).str.strip() != ""]
 
         # Ensure clean positional index for embedding alignment
         valid = valid.reset_index(drop=True)
@@ -2671,7 +2634,6 @@ class Clustering:
        # Create empty df to populate with embeddings and insight_id
         processed_embeddings_df = pd.DataFrame(columns = ["insight_id", "full_insight_embedding"])
         
-
         # Initialize column for alignment (only once)
         if "full_insight_embedding" not in self.valid_embeddings_df.columns:
             self.valid_embeddings_df["full_insight_embedding"] = None
@@ -2719,7 +2681,7 @@ class Clustering:
             print(f"Embedding insight {count} of {total}")
 
             response = self.llm_client.embeddings.create(
-                input=row["no_author_insight_string"],
+                input=row["insight"],
                 model=self.embedding_model,
                 dimensions=self.embedding_dims
             )
@@ -4049,10 +4011,14 @@ class Summarize:
 
                 cluster_df: pd.DataFrame = rq_df[rq_df["cluster"] == cluster]
                 # get the insights, they are list of single strings. So make sure they are valid string to send to the LLM
-                insights: List[str] = cluster_df["insight"].apply(
-                    lambda x: x if isinstance(x, str) else (
-                        x[0] if isinstance(x, list) and len(x) == 1 and isinstance(x[0], str) else None
-                    )).tolist()
+                insights: List[str] = (
+                    cluster_df
+                    .apply(
+                        lambda row: f'{row["insight"]} ({row["in_text_citation"]})',
+                        axis=1,
+                    )
+                    .tolist()
+                )
 
                 # # --- Sampling step for large clusters ---
                 # MAX_WORDS = 70000
@@ -4198,15 +4164,19 @@ class Summarize:
             }
         }
 
-        response = utils.call_chat_completion(
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
             fall_back=fall_back,
             return_json=True,
-            json_schema=json_schema
+            json_schema=json_schema, 
+            return_with_error=True
         )
+
+        if error:
+            print(f"Error during LLM schema generation: {error}. Returning empty theme list.")
 
         themes = response.get("themes", [])
         return themes
@@ -4667,6 +4637,7 @@ class Summarize:
                 )
                 sys_prompt = Prompts().gen_theme_schema_cluster_source()
                 # Get the initial schema for this question from the LLM
+
                 theme_list = self._llm_gen_initial_schema(user_prompt, sys_prompt)
                 themes_df = pd.DataFrame(theme_list, columns=["theme_label", "theme_description", "instructions"])
             
@@ -5961,8 +5932,9 @@ class Summarize:
             insights_df = self.corpus_state.insights[
                 self.corpus_state.insights["insight_id"].isin(insight_ids)
             ].copy()
-
-            insights = insights_df["insight"].tolist()
+            
+            # Add in the citations
+            insights = (insights_df["insight"] + " (" + insights_df["in_text_citation"] + ")").tolist()
             
             # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so populate with an empty row
             if len(insights) == 0:
@@ -6445,6 +6417,9 @@ class Summarize:
                 (~self.corpus_state.insights["insight_id"].isin(checked_insight_id_list)) # SKIP checked insights
             ].dropna(subset=["insight_id"]).copy()
 
+            # Add the in text citation to the insight text to make sure its included in the LLM check
+            relevant_insights["insight"] = relevant_insights["insight"] + " (" + relevant_insights["in_text_citation"] + ")"
+
             for i in range(0, len(relevant_insights), batch_size):
                 print(f"Checking insights for theme {t_id} and question {q_id}, batch {count} of {total_batches_to_check}...")
                 count += 1
@@ -6631,6 +6606,7 @@ class Summarize:
         
         #Turn the citations into json string
         citations_json = required_citations.to_json(orient="records")
+
         user_prompt = (
             f"THEMATIC SUMMARY:\n{summary}\n\n"
             f"REQUIRED CITATIONS:\n{citations_json}\n\n"
@@ -6687,48 +6663,57 @@ class Summarize:
         using only insights associated with missing paper_ids.
         """
 
-        ## UTILS ---
-        def build_missing_citation_json(df: pd.DataFrame) -> str:
+        # ## UTILS ---
+        # def build_missing_citation_json(df: pd.DataFrame) -> str:
 
-            def format_citation(r):
-                author = str(r.get("paper_author", "")).strip()
-                date = r.get("paper_date", "")
+        #     def format_citation(r):
+        #         author = str(r.get("paper_author", "")).strip()
+        #         date = r.get("paper_date", "")
 
-                if pd.isna(date):
-                    date = ""
-                elif isinstance(date, float) and date.is_integer():
-                    date = str(int(date))
-                else:
-                    date = str(date).strip()
+        #         if pd.isna(date):
+        #             date = ""
+        #         elif isinstance(date, float) and date.is_integer():
+        #             date = str(int(date))
+        #         else:
+        #             date = str(date).strip()
 
-                if date.lower() in ["nan", "none", ""]:
-                    return author
+        #         if date.lower() in ["nan", "none", ""]:
+        #             return author
 
-                if author.lower() in ["nan", "none", ""]:
-                    return date
+        #         if author.lower() in ["nan", "none", ""]:
+        #             return date
 
-                return f"{author} {date}"
+        #         return f"{author} {date}"
 
-            working = df.copy()
+        #     working = df.copy()
 
-            working["citation"] = working.apply(format_citation, axis=1)
+        #     working["citation"] = working.apply(format_citation, axis=1)
 
-            grouped = (
-                working.groupby("citation")["insight"]
-                .apply(list)
-                .reset_index()
-            )
+        #     grouped = (
+        #         working.groupby("citation")["insight"]
+        #         .apply(list)
+        #         .reset_index()
+        #     )
 
-            payload = grouped.to_dict(orient="records")
+        #     payload = grouped.to_dict(orient="records")
 
-            return json.dumps(payload, indent=2)
+        #     return json.dumps(payload, indent=2)
 
-        ## UTILS END ---
+        # ## UTILS END ---
 
         if missing_citations_df.empty:
             return summary
 
-        missing_citations_json = build_missing_citation_json(missing_citations_df)
+        missing_citations_grouped = (
+            missing_citations_df
+            .groupby("in_text_citation")["insight"]
+            .apply(list)
+            .reset_index()
+            .to_dict(orient="records")
+        )
+
+        missing_citations_json = json.dumps(missing_citations_grouped, indent=2)
+        print(f"Missing citations and associated insights:\n{missing_citations_json}")
 
         user_prompt = (
             f"THEMATIC SUMMARY:\n{summary}\n\n"
@@ -6877,25 +6862,25 @@ class Summarize:
         MODEL_INPUT_WORD_LIMIT = 22000   # practical integration limit (well below 128k hard cap)
         # ----------------------------------------
 
-        # get back sensible citations
-        def format_citation(r):
-            author = str(r.get("paper_author", "")).strip()
-            date = r.get("paper_date", "")
+        # # get back sensible citations
+        # def format_citation(r):
+        #     author = str(r.get("paper_author", "")).strip()
+        #     date = r.get("paper_date", "")
 
-            if pd.isna(date):
-                date = ""
-            elif isinstance(date, float) and date.is_integer():
-                date = str(int(date))
-            else:
-                date = str(date).strip()
+        #     if pd.isna(date):
+        #         date = ""
+        #     elif isinstance(date, float) and date.is_integer():
+        #         date = str(int(date))
+        #     else:
+        #         date = str(date).strip()
 
-            if date.lower() in ["nan", "none", ""]:
-                return author
+        #     if date.lower() in ["nan", "none", ""]:
+        #         return author
 
-            if author.lower() in ["nan", "none", ""]:
-                return date
+        #     if author.lower() in ["nan", "none", ""]:
+        #         return date
 
-            return f"{author} {date}"
+        #     return f"{author} {date}"
 
         # Packs as many insights as possible into a single batch without exceeding capacity
         # This maximizes efficiency (few passes) while avoiding model overload
@@ -6938,7 +6923,9 @@ class Summarize:
                 # Resolve orphan IDs → actual insight text
                 orphan_data = self.corpus_state.insights[
                     self.corpus_state.insights["insight_id"].isin(theme_orphans["insight_id"])
-                ]
+                ].copy()
+                # Add the in_text_citations to the orphan data insights
+                orphan_data["insight"] = orphan_data["insight"] + " (" + orphan_data["in_text_citation"] + ")"
 
                 # ---- iterative large-batch integration ----
                 # We process all orphans, but in a few large capacity-safe batches
@@ -6971,11 +6958,7 @@ class Summarize:
 
                     
                     # Format citations for the batch, ensuring uniqueness and cleanliness
-                    batch["citations"] = batch.apply(format_citation, axis=1)
-                    batch_citations_unique = list(dict.fromkeys(
-                        c for c in batch["citations"].tolist()
-                        if c and c.lower() not in ["nan", "none"]
-                    ))
+                    batch_citations_unique = batch["in_text_citation"].unique().tolist()
                     
                     # Accumulate citations/authors across batches for this theme
                     required_citations_seen = list(dict.fromkeys(
@@ -6991,11 +6974,11 @@ class Summarize:
                     sys_prompt = Prompts().integrate_orphans()
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
-                        f"THEME LABEL: {theme_label}\n"
+                        f"THEME LABEL: {theme_label}\n\n"
                         "THEME DESCRIPTION:\n"
-                        f"{theme_description}\n"
+                        f"{theme_description}\n\n"
                         "ORIGINAL SUMMARY:\n"
-                        f"{updated_summary}\n"
+                        f"{updated_summary}\n\n"
                         "REQUIRED ORPHAN CITATIONS/AUTHORS:\n"
                         f"{batch_citations_str}\n\n"
                         "ORPHAN INSIGHTS:\n"
@@ -7094,10 +7077,8 @@ class Summarize:
                         ]["insight_id"].to_list()
 
                     required_citations_df = (
-                        self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(required_insights)][["paper_id", "paper_author", "paper_date"]]
+                        self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(required_insights)][["in_text_citation", "paper_id"]]
                         .drop_duplicates()
-                        .assign(citation = lambda df: df.apply(format_citation, axis=1))
-                        .drop(columns=["paper_author", "paper_date"])
                     )
                     
                     # Have the LLM find the missing citations

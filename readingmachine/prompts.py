@@ -507,8 +507,9 @@ class Prompts:
             'any conversational text, explanations, or code fencing (e.g., `json`).\n'
             '3. **Metadata Fields:** Extract the paper\'s **Title**, **Author(s)**, and **Date**.\n\n'
             '### FIELD RULES ###\n'
-            '* **paper_author:** This must be a string with author names separated by semicolons (e.g., "Smith, J.; Jones, A."). '
-            'If the author is an institution (common for grey literature), the institutional name should be the single string (e.g., "World Bank Group").\n'
+            '* **paper_author:** This must be a string with author names separated by semicolons (e.g. "Smith, J.; Jones, A."). '
+            'The author names should be in the form: last_name, first_initial.\n'
+            '* **paper_institution:** If the author is an institution (common for grey literature), the institutional name should be the single string (e.g. "World Bank").\n'
             '* **paper_date:** Extract the full year (YYYY).\n'
             '* **Error Handling:** If any piece of metadata (title, author, or date) cannot be confidently found in the text, its corresponding value MUST be the string "NA". '
             'For the **paper_author** field in this case, the value should be "NA".\n\n'
@@ -555,12 +556,11 @@ class Prompts:
             "2. Do not omit, modify, reorder, or invent paper_id values.\n"
             "3. Return ONLY valid JSON.\n"
             "4. Do not include explanations, markdown, comments, or additional text.\n"
-            "5. Use general academic practices:\n"
+            "5. Use the following style requirements:\n"
             "   - Use author last names only.\n"
             "   - Use the format 'Author Year' e.g. 'Smith 2020'.\n"
-            "   - For two authors use 'and' e.g. 'Smith and Jones 2020'.\n"
-            "   - For three authors use commas and 'and' e.g. 'Smith, Jones, and Lee 2020'.\n"
-            "   - For more than three authors use 'et al.' e.g. 'Smith et al. 2020'.\n"
+            "   - For more than one author use: <first_author> et al. <date> e.g. 'Smith et al. 2020'.\n"
+            "       - It is understood that this is not common in academic styles but is is necessary for brevity in this application.\n"
             "   - For institutions use the institutional name e.g. 'World Bank 2020'.\n"
             "   - For no date or nd/n.d./n.d use n.d. e.g. 'Smith n.d.'.\n"
             "   - if dates are formatted as floats (e.g. 2020.0), convert to integers (e.g. 2020).\n"
@@ -645,15 +645,14 @@ class Prompts:
             "5) Do NOT infer, generalize, or combine information beyond what is clearly stated.\n"
             "6) Preserve wording as much as possible. Minor trimming for clarity is allowed, but do not rewrite or reinterpret.\n"
             "7) Each extracted item must be concise (one sentence or short phrase) and must stand alone as a coherent idea.\n"
-            "8) Each extracted item MUST end with the paper citation in the form (Author Date) - from the metadata.\n"
-            "9) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate within a question.\n"
-            "10) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return {\"results\": {}}.\n\n"
+            "8) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate within a question.\n"
+            "9) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return {\"results\": {}}.\n\n"
 
             "Output MUST be valid JSON only, matching this schema:\n\n"
 
             "{\n"
             '  "results": {\n'
-            '    "<rq_id>": ["<claim ... (Author Date)>"]\n'
+            '    "<rq_id>": ["<claim>"]\n'
             "  }\n"
             "}\n\n"
 
@@ -711,8 +710,6 @@ class Prompts:
             "INPUT FORMAT:\n\n"
             "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n"
             "<question_id>: <question_text>\n\n"
-            "PAPER METADATA:\n"
-            "<paper_metadata - author, date, title>\n\n"
             "PAPER TEXT:\n"
             "<paper_content>\n\n"
             "EXISTING CHUNK INSIGHTS:\n"
@@ -725,7 +722,7 @@ class Prompts:
             "Return a valid JSON object matching this exact schema:\n\n"
             "{\n"
             '  "results": {\n'
-            '    "meta_insight": ["<claim ... (Author Date)>"]\n'
+            '    "meta_insight": ["<claim)>"]\n'
             "  }\n"
             "}\n\n"
 
@@ -756,8 +753,7 @@ class Prompts:
 
             "FORMATTING:\n"
             "- Each extracted item must be concise (one sentence or short phrase).\n"
-            "- Each insight must stand alone as a coherent idea.\n"
-            "- Each extracted item MUST end with the citation (Author Date).\n\n"
+            "- Each insight must stand alone as a coherent idea.\n\n"
 
             "CONTEXT NOTE:\n"
             "- If the full text exceeds the context window, you may only see part of the document.\n"
@@ -838,7 +834,7 @@ class Prompts:
             "- If there are no preceding summaries, write the summary as if it is the first in the sequence.\n"
             "- Provide a clear topline summary of the cluster first, then detail individual points.\n"
             "- Maintain local narrative coherence where appropriate, but do not imply global continuity across the corpus.\n"
-            "- Preserve all citations exactly as they appear.\n"
+            "- Preserve all citations exactly as they appear. Do not alter or change the citations in any way. When amalgamating insights from various insights preserve up to four citations per point, using the most prominent. Represent them as semicolon-separated, e.g. (Jones 2023; Smith and Paul, 2022)\n"
             "- For clusters containing outliers or small groups (cluster -1), reflect this in the tone.\n"
             "- Ensure the summary is coherent, logically structured, and written in an academic literature-review tone.\n\n"
 
@@ -2134,11 +2130,9 @@ class Prompts:
             "6. Fidelity:\n"
             "   Preserve all factual details and citation provenance from the source text. "
             "Do not introduce new information or external knowledge.\n"
-            "   Normalize citations into compact academic formats:\n"
-            "   - Use surname-only citation forms\n"
-            "   - Use up to three surnames before 'et al.'\n"
-            "   - Use short canonical names for institutional authors\n"
-            "   Examples: 'World Bank 2010', 'Chang, Andreoni 2020', 'Ferrannini et al. 2021'.\n\n"
+            "Use citations exactly as provided in the insights. Do not alter or change the citations in any way. \n" \
+            "If a claim is supported by multiple similar insights with distinct citations, reflect multiple citations to support the claim in the syntheis - use a semi-colon separated list (e.g., Smith 2020; Jones 2021).\n"
+            "If a claim is supported by many insights, reflect the four most salient citations that support it, prioritizing diversity of sources. \n\n"
 
             "7. Tone:\n"
             "   Maintain a formal, academic, analytic tone.\n\n"
@@ -2207,32 +2201,27 @@ class Prompts:
 
             '# DEFINITION OF "REFLECTED"\n'
             'An insight is considered reflected if:\n'
-            '- Its core claim, finding, or argument is clearly represented in the summary, even if expressed at a higher level of abstraction.\n'
+            '- Its core claim, finding, or argument is meaningfully represented in the summary, even if expressed at a higher level of abstraction.\n'
             '- It meaningfully contributes to a synthesized claim in the summary, even if not individually distinguishable.\n'
             '- It is incorporated as part of a broader grouping of similar insights, where the shared mechanism, relationship, or implication is clearly represented.\n'
-            '- The "core claim" refers to the central mechanism, relationship, or implication of the insight, not its exact phrasing or contextual detail.\n'
-            '- Its citation, author, or source provenance is explicitly preserved in the summary, either attached to the relevant synthesized claim or included among the citations supporting that claim.\n\n'
+            '- The "core claim" refers to the central mechanism, relationship, or implication of the insight, not its exact phrasing or contextual detail.\n\n'
 
             'An insight is NOT reflected if:\n'
             '- The specific claim, finding, or argument is absent from the summary.\n'
             '- The summary contradicts the insight without explicitly acknowledging that tension.\n'
-            '- The insight is reduced to a vague generalization that erases its substantive contribution.\n'
-            '- The insight\'s core claim is represented, but its citation, author, or source provenance is missing from the relevant citation set in the summary.\n\n'
+            '- The insight is reduced to a vague generalization that erases its substantive contribution.\n\n'
 
             '# IMPORTANT\n'
             '- Reflection requires substantive representation, not mere topic overlap.\n'
-            '- Reflection also requires citation/provenance preservation.\n'
             '- You may infer inclusion when a generalized or synthesized claim clearly captures the core mechanism or implication of the insight.\n'
             '- Multiple insights may be reflected by a single synthesized statement if they share a common underlying mechanism, relationship, or implication.\n'
-            '- When multiple insights are reflected by a single synthesized statement, the citation set for that statement must preserve the contributing citations, authors, or source provenance of those insights.\n'
             '- Do not mark an insight as reflected if its core contribution is missing.\n'
-            '- Do not mark an insight as reflected if its core contribution is represented but its citation, author, or source provenance is missing.\n'
-            '- However, abstraction alone is not grounds for exclusion if the underlying mechanism, relationship, or implication is clearly preserved and the insight\'s citation/provenance is also preserved.\n\n'
+            '- However, abstraction alone is not grounds for exclusion if the underlying mechanism, relationship, or implication is clearly preserved.\n\n'
 
             '# OUTPUT PROTOCOL\n'
             '- Return ONLY a JSON object.\n'
             '- The object must contain a single key "mentioned_insight_ids" containing an array of strings.\n'
-            '- Only include IDs from the provided list that are substantively reflected in the summary and whose citation/provenance is preserved in the summary.\n'
+            '- Only include IDs from the provided list that are substantively reflected in the summary.\n'
             '- Do not provide explanations or commentary.\n\n'
 
             '# JSON SCHEMA\n'
@@ -2257,12 +2246,11 @@ class Prompts:
             "Return only the paper_ids for sources that are clearly mentioned in the summary.\n\n"
 
             "MATCHING RULES\n"
-            "- The thematic summary may normalize citations into standard academic formats.\n"
-            "- The required citation records may contain raw or inconsistent author/date formatting.\n"
             "- Match using author identity and year where available.\n"
             "- If the year is missing, match only when the author/source identity is clear.\n"
             "- Do NOT infer citation presence from topical similarity.\n"
-            "- Do NOT return a paper_id unless the citation/author/source is explicitly named in the summary.\n\n"
+            "- Do NOT return a paper_id unless the citation/author/source is explicitly named in the summary.\n"
+            "- Return the paper_ids exactly as they appear in the provided list.\n"
 
             "OUTPUT PROTOCOL\n"
             "- Return ONLY a JSON object in the form:\n"
@@ -2285,16 +2273,18 @@ class Prompts:
 
             "TASK\n"
             "- Ensure that each missing citation/author is substantively and coherently represented at least once somewhere in the revised summary.\n"
-            "- Do NOT fully re-integrate every insight individually.\n\n"
+            "- Do NOT fully re-integrate every insight individually.\n"
+            "- Maintain all the citations from the original summary.\n\n"
 
             "SPECIFIC INSTRUCTIONS\n"
             "- Attach citations/authors to existing synthesized claims where conceptually appropriate.\n"
+            "   - If adding a missing citation/author to an existing claim is plausible based on the provided insights, do so without adding a new sentence. In this case append the citation/author to the existing claim via a semi-colon separated list (e.g. \"Smith et al. 2012; Johnson 2020\").\n"
             "- Use the provided insights only to determine where the citation/author logically belongs.\n"
-            "- Normalize citation formatting to match academic style: last name + year where available, 'et al.' for multiple authors where appropriate, one institutional name for institutional authors, and well-known acronyms where appropriate.\n"
             "- Use appropriate abstractions of the provided insights to identify the most relevant point for citation; the exact wording of an insight is not required.\n"
             "- If there is no plausible way to attach a missing citation/author to an existing claim, add one concise sentence that captures the core contribution of that citation/author and attach the citation there.\n"
             "- If adding a new sentence, embed it in the existing thematic summary where it best maintains conceptual coherence and narrative flow.\n"
             "- Other than repairing citation provenance, make minimal changes.\n"
+            " - Importantly maintain all the existing citations from the original summary, even if they are not in the citations provided for repair. The only changes should be the addition of missing citations where appropriate.\n"
             "- If additions would exceed the maximum output length, minimally compress elsewhere to make room while preserving substantive content and citation provenance.\n"
             "- Do NOT add a new sentence if the missing citation supports a claim already present in the summary.\n"
             "   - If the missing citation supports an existing claim, merge it into that claim's citation list.\n"
@@ -2322,9 +2312,10 @@ class Prompts:
         The revised summary must:
 
             • preserve the original findings
+            • preserve the original citations
+            • Include citations for orphan insights
             • integrate orphan insights coherently
             • maintain the original analytical tone
-            • preserve all citations exactly as written
             • avoid mechanical insertion of orphan sentences
 
         The updated summary must remain faithful to:
@@ -2371,18 +2362,12 @@ class Prompts:
             '# CITATION REQUIREMENTS\n'
             '- Preserve every citation/author already present in the ORIGINAL SUMMARY at least once where substantively appropriate.\n'
             '- Every citation/author listed under REQUIRED ORPHAN CITATIONS/AUTHORS must appear at least once in the revised summary.\n'
-            '- Add missing citations to existing claims where they support a claim already present.\n'
+            '- Include citations for the orphan insights upon insertion. Use the exact same citation format as provided in the insights.\n'
             '- Only create a new sentence when the orphan citation contributes a substantively distinct claim not already represented.\n'
             '- Preserve distinct, minority, or conflicting perspectives with explicit provenance.\n'
             '- No claim should normally carry more than four references; when many sources support the same claim, keep the most representative citations on that claim and place required citations only where they substantively fit.\n\n'
-
-            '# CITATION NORMALIZATION\n'
-            '- Normalize citations into compact academic formats while preserving identifiable provenance.\n'
-            '- Use surname-only citation forms.\n'
             '- Use up to three surnames before "et al.".\n'
-            '- Use short canonical names for institutional authors, e.g. "World Bank 2010", "UNCTAD 2018", "UNIDO 2024".\n'
-            '- Do not use long institutional publisher strings when a canonical institutional name is available.\n\n'
-
+        
             '# STYLE AND STRUCTURE\n'
             '- Rewrite the full summary; do not append orphan material mechanically.\n'
             '- Maintain coherence with the research question, theme label, and theme description.\n'
