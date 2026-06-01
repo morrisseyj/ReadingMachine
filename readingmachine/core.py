@@ -1288,7 +1288,7 @@ class Ingestor:
             batch = {
                 key: citations_dict[key] for key in citation_keys[i:i+step]
             }
-            citations_json = json.dumps(batch, indent=2)
+            citations_json = json.dumps(batch, indent=2, ensure_ascii=False)
             user_prompt = citations_json
             sys_prompt = Prompts().gen_in_text_citation()
             json_schema = {
