@@ -6595,62 +6595,78 @@ class Summarize:
 
         return response_summary
 
-    def _identify_missing_citations(self, summary:str, required_citations: pd.DataFrame) -> list:
+    def _identify_missing_citations(self, summary: str, required_citations: list) -> list:
         """
         """
-        if required_citations.empty:
+        if not required_citations:
             return []
 
-        required_citations = required_citations.copy()
-        required_citations["paper_id"] = required_citations["paper_id"].astype(str) # make sure these are strings for comparison with the found citations
+        required_citations = [str(i).strip() for i in required_citations]
+        required_citations = list(dict.fromkeys(required_citations))  # deduplicate defensively
+
+        missing_citations = [
+            i for i in required_citations
+            if i not in summary
+        ]
+
+        return missing_citations
+
+        # #Turn the citations into json string
+        # citations_json = json.dumps(required_citations, ensure_ascii=False, indent = 2)
+
+        # user_prompt = (
+        #     f"THEMATIC SUMMARY:\n{summary}\n\n"
+        #     f"REQUIRED CITATIONS:\n{citations_json}\n\n"
+        # )
+
+        # print(f"User prompt for identifying missing citations:\n\n{user_prompt}")
+
+        # sys_prompt = Prompts().identify_citations()
+
+        # json_schema = {
+        #     "name": "identify_citations",
+        #     "strict": True,
+        #     "schema": {
+        #         "type": "object",
+        #         "properties": {
+        #             "identified_citations": {
+        #                 "type": "array",
+        #                 "items": {"type": "string"},
+        #                 "description": "A list of required in_text_citation strings that are explicitly present in the thematic summary."
+        #             }
+        #         },
+        #         "required": ["identified_citations"],
+        #         "additionalProperties": False
+        #     }
+        # }
         
-        #Turn the citations into json string
-        citations_json = required_citations.to_json(orient="records")
+        # fall_back = {"identified_citations": []}
 
-        user_prompt = (
-            f"THEMATIC SUMMARY:\n{summary}\n\n"
-            f"REQUIRED CITATIONS:\n{citations_json}\n\n"
-        )
+        # response = utils.call_chat_completion(
+        #     sys_prompt=sys_prompt,
+        #     user_prompt=user_prompt,
+        #     llm_client=self.llm_client,
+        #     ai_model=self.ai_model,
+        #     fall_back=fall_back,
+        #     return_json=True,
+        #     json_schema=json_schema
+        # )
 
-        sys_prompt = Prompts().identify_citations()
+        # found_citations = [
+        #     str(c)
+        #     for c in response["identified_citations"] # Make sure nothing was hallucinated
+        #     if str(c) in required_citations         # ensure string comparison against required citation strings
+        # ]   
 
-        json_schema = {
-            "name": "identify_citations",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "identified_paper_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "A list of paper IDs that were explicitly identified in the summary."
-                    }
-                },
-                "required": ["identified_paper_ids"],
-                "additionalProperties": False
-            }
-        }
-        
-        fall_back = {"identified_paper_ids": []}
+        # print(f"Citations identified as present in the thematic summary:\n\n{found_citations}\n\n")
 
-        response = utils.call_chat_completion(
-            sys_prompt=sys_prompt,
-            user_prompt=user_prompt,
-            llm_client=self.llm_client,
-            ai_model=self.ai_model,
-            fall_back=fall_back,
-            return_json=True,
-            json_schema=json_schema
-        )
+        # # Now compare to get missing citations
+        # missing_citations = [
+        #     c for c in required_citations
+        #     if c not in found_citations
+        # ]
 
-        found_citations = response["identified_paper_ids"]
-        found_citations = [str(c) for c in found_citations] # make sure these are strings for comparison with the paper ids in required citations
-
-        # Now compare to get missing citations
-        missing_citations_df = required_citations[~required_citations["paper_id"].isin(found_citations)].copy()
-        missing_citations_paper_ids = missing_citations_df["paper_id"].tolist()
-
-        return missing_citations_paper_ids
+        # return missing_citations
     
     def _address_missing_citations(
         self,
@@ -6712,13 +6728,15 @@ class Summarize:
             .to_dict(orient="records")
         )
 
-        missing_citations_json = json.dumps(missing_citations_grouped, indent=2)
+        missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
         print(f"Missing citations and associated insights:\n{missing_citations_json}")
 
         user_prompt = (
             f"THEMATIC SUMMARY:\n{summary}\n\n"
             f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
         )
+
+        print(f"User prompt for repairing missing citations:\n\n{user_prompt}")
 
         sys_prompt = Prompts().repair_citation_provenance()
 
@@ -6728,17 +6746,53 @@ class Summarize:
             "schema": {
                 "type": "object",
                 "properties": {
-                    "repaired_summary": {
-                        "type": "string",
-                        "description": "The thematic summary with repaired citation provenance."
+                    "patches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "missing_citations": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "revise": {
+                                    "type": "boolean"
+                                },
+                                "original_sentence": {
+                                    "type": "string"
+                                },
+                                "revised_sentence": {
+                                    "type": "string"
+                                },
+                                "anchor_sentence": {
+                                    "type": "string"
+                                },
+                                "new_sentence": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "missing_citations",
+                                "revise",
+                                "original_sentence",
+                                "revised_sentence",
+                                "anchor_sentence",
+                                "new_sentence"
+                            ],
+                            "additionalProperties": False
+                        }
                     }
                 },
-                "required": ["repaired_summary"],
+                "required": ["patches"],
                 "additionalProperties": False
             }
         }
 
-        fall_back = {"repaired_summary": summary}
+        fall_back = {
+            "patches": []
+        }
 
         response = utils.call_chat_completion(
             sys_prompt=sys_prompt,
@@ -6751,9 +6805,40 @@ class Summarize:
             max_tokens=4096
         )
 
-        repaired_summary = response["repaired_summary"]
+        print(f"Patches proposed for repairing missing citations:\n{json.dumps(response, indent=2, ensure_ascii=False)}")
 
-        return repaired_summary
+        for patch in response["patches"]:
+            # Check whether the sentences got returned correctly
+            if patch["revise"]:
+
+                if patch["original_sentence"] not in summary:
+                    print("WARNING: original sentence not found")
+                    continue
+
+            else:
+
+                if patch["anchor_sentence"] not in summary:
+                    print("WARNING: anchor sentence not found")
+                    continue
+
+            # Then deterministically insert the revised sentences
+            if patch["revise"]:
+
+                summary = summary.replace(
+                    patch["original_sentence"],
+                    patch["revised_sentence"],
+                    1
+                )
+
+            else:
+
+                summary = summary.replace(
+                    patch["anchor_sentence"],
+                    patch["anchor_sentence"] + " " + patch["new_sentence"],
+                    1
+                )
+
+        return summary
 
 
     def _load_failed_themes(self, remove_latest_iteration: bool = False) -> defaultdict:
@@ -7076,13 +7161,16 @@ class Summarize:
                         (self.summary_state.mapped_theme_list[-1]["question_id"] == question_id)
                         ]["insight_id"].to_list()
 
-                    required_citations_df = (
-                        self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(required_insights)][["in_text_citation", "paper_id"]]
+                    required_citations = (
+                        self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(required_insights)]["in_text_citation"]
+                        .dropna()
                         .drop_duplicates()
+                        .astype(str)
+                        .to_list()
                     )
                     
                     # Have the LLM find the missing citations
-                    theme_missing_citations = self._identify_missing_citations(updated_summary, required_citations_df)
+                    theme_missing_citations = self._identify_missing_citations(updated_summary, required_citations)
 
                     # If there are missing citations, attempt to repair them
                     if theme_missing_citations:
@@ -7093,7 +7181,7 @@ class Summarize:
                         # I am going to get insights for paper_ids from corpus_state.insights and then filter for those insights mapped to this theme and question
                         # First get all insights
                         insights = self.corpus_state.insights.copy()
-                        insights["paper_id"] = insights["paper_id"].astype(str)
+                        insights["in_text_citation"] = insights["in_text_citation"].astype(str)
                         # then prepare mapping
                         mapped = self.summary_state.mapped_theme_list[-1].copy()
 
@@ -7103,10 +7191,18 @@ class Summarize:
                         ]["insight_id"].dropna().tolist()
 
                         # take the intersection
-                        theme_missing_citations_df = insights[
-                            (insights["paper_id"].isin(theme_missing_citations)) &
+                        theme_missing_citations_df = (
+                            # First we take the intersection
+                            insights[
+                            (insights["in_text_citation"].isin(theme_missing_citations)) &
                             (insights["insight_id"].isin(mapped_theme_insight_ids))
-                        ][["paper_id", "paper_author", "paper_date", "insight_id", "insight"]].copy()
+                        ]   # Then we sample
+                            #.groupby("in_text_citation", group_keys=False)
+                            #.apply(lambda x: x.sample(n=min(len(x), 20), random_state=config.RANDOM_SEED))
+                            .reset_index(drop=True)
+                            [["in_text_citation", "insight_id", "insight"]]
+                            .copy()
+                        )
 
                         # Have the LLM repair the summary to add in missing citations
                         updated_summary = self._address_missing_citations(updated_summary, theme_missing_citations_df)
