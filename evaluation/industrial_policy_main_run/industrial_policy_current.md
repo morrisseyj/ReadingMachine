@@ -37,7 +37,7 @@ The corpus underlying this output was constructed using the [`getlit`](https://g
 7. Manual removal of clearly low‑salience or out‑of‑scope titles
 8. Acquisition of full texts where institutional access permitted
 
-This process was intended to balance breadth, relevance, and feasibility, while maintaining explicit boundaries around what constitutes “the corpus” for this analysis. This resulted in a varied corpus, 176 documents in length including academic papers, webpages, institutional reports (some long form - ~400 pages) and books. After ingestion, and insight retrieval, this was whittled down to 152 documents. After final synthesis the document contained 137 citations (see whitepaper for details on why this would have happened).
+This process was intended to balance breadth, relevance, and feasibility, while maintaining explicit boundaries around what constitutes “the corpus” for this analysis. This resulted in a varied corpus, 175 documents in length including academic papers, webpages, institutional reports (some long form - ~400 pages) and books. After ingestion, and insight retrieval, this was whittled down to 152 documents. After final synthesis the document contained 137 citations (see whitepaper for details on why this would have happened).
 
 The final corpus used in this run is available here: https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/industrial_policy_main_run/corpus.md and as a reference list at the end of the paper. 
 
