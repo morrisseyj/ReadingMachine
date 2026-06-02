@@ -277,19 +277,29 @@ We drop duplicate papers as maintaining them is expensive in terms of tokens and
 ingestor.drop_duplicates()
 ```
 
-### 2.4 Manual duplicate check* 
+### 2.4 Manual duplicate check
 The above step involves dropping exact duplicates and identifying possible duplicates. The user has to manually inspect a file and delete duplicates. The file is here: `~/ReadingMachine/data/fuzzy_check/ingest/duplicate_check.csv`
 
 Manually amend the file so that one unique versions of each document remains. This is also a good time to manually complete any meta data that the model failed to generate. 
 
-### 2.5 Update the state*
+### 2.5 Update the state
 Now we update the state to reflect the deduplicated and metadata complete file.
 
 ```
 ingestor.update_state("duplicate_check.csv")
 ```
 
-### 2.6 Chunk documents*
+### 2.6 Generate unique citations
+
+Penultimately for this class, we need to generate unique citations that we can use in-text. These are automatically generated from the meta-data and implemented via:
+
+```
+ingestor.chunk_papers()
+```
+
+Note that you need to have valid metadata for every paper that you have in your system, in order for this to complete. If any data is missing and this errors you can edit “duplicate_check.csv” and re-run step 2.5, before running step 2.6 again.
+
+### 2.7 Chunk documents
 The final step of this class is chunking the documents so that they can be passed to the LLM for insight retrieval.
 
 ```
