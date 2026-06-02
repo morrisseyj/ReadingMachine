@@ -309,13 +309,15 @@ The eventual solution was to split the repair pass first into a decomposition pr
 
 ### 5.6 Dropped citations
 
-The demands on orphan insertion (large numbers of orphans) eroded citation retention. Citations for papers that produced insights would drop out of the final summary altogether. This raises the possibility that underlying insights were also being lost during iterative synthesis, although the batched orphan architecture suggests citation erosion was more common than complete insight deletion. To handle this:
+The demands on orphan insertion (large numbers of orphans) eroded citation retention. Citations for papers that produced insights would drop out of the final summary altogether - such that around 1/3 of the total citations were missing from the final paper. This raises the possibility that underlying insights were also being lost during iterative synthesis, although the batched orphan architecture suggests citation erosion was more common than complete insight deletion. To handle this:
 
 1. After theme population an LLM call on the theme summary identifies all current citations
 2. With each orphan batch the list of required citations is sent to the LLM, along with the batch of orphan insights to be incorporated. The instructions are to incorporate orphans and ensure that all the citations in the list appear in the theme. 
 3. This is bootstrapped by a final citation check where the set of citations for the insights mapped to the theme is compared with the insights currently appearing in the theme. For any missing citations, all the insights for those citations for the theme, are then sent to an LLM with instructions to insert distinct citations at least once. 
 
-The issue of dropped citations raises a question about the role we expect citations to play in the synthesis. It would be technically possible to have every claim list every citation that supports it in the paper, but this would undermine readability and erode token budgets where the hard constraint on operationalizing the pipeline is bounded output length. A compromise was therefore adopted that looks something more like human review. All claims should be cited, with no claim needing more than four citations, prioritizing the most prominent. At the same time, all authors that produce insights for a theme should appear at least once in the theme. The result is a readable output, where claims are substantiated and all covered authors are reflected in the final synthesis. 
+Notably this approach to citation repair did not initially work. Even though the model was provided with a full set of required citations and the relevant insights to insert it would not successfully reinsert them. The hypothesized reason for this is similar to that explaining failed schema repair: the model is trained to output coherent readable paragraphs; these do not generally include large numbers of citations behind general claims. This preference persisted even when the model was explicitly instructed to stuff the citations. In testing, only about one third of the missing citations would get inserted into the text. To address this an approach similar to that used in schema repair was adopted, whereby instead of asking the model to both track insertion of missed citations and generate an updated complete synthesis, the model was tasked with generating a repair patch the inserted the citations. This could instruct the addition of a citation to an existing claim or the addition of a new sentence to reflect the claim. The patch included, verbatim, the sentence to be replaced, or the preceding sentence. These were then deterministically replaced in python. The model occasionally errored in returning the exact sentence which is what is thought to account for the loss of citations. This problem should be fixable through the use of a fuzzy match on sentences or via a semantic match. This approach was not however implemented in this version of the tool.
+
+The issue of dropped citations raises a question about the role we expect citations to play in the synthesis. It would be technically possible to have every claim list every citation that supports it in the paper, but this would undermine readability and erode token budgets where the hard constraint on operationalizing the pipeline is bounded output length. A compromise was therefore adopted that looks something more like human review. All claims should be cited, with no claim needing more than four citations, prioritizing the most prominent. At the same time, all authors that produce insights for a theme should appear at least once in the theme. In the final output this is partially achieved. The theme summary does not invoke more than four citations to support a point, but the citation repair can insert as many as it likes. The result is some claims supported by large numbers (e.g. 14) of citations. This slightly undermines readability, but for an intermediate reading layer this is considered acceptable. 
 
 ## 6. Methodological Contributions
 
@@ -351,7 +353,7 @@ To support this process, this paper constitutes an open invitation to domain exp
 
 ### 7.2 Experimental Setup
 
-The corpus was constructed using the ReadingMachine *getlit* module, which combines structured search, LLM-assisted retrieval of grey literature, and human filtering. This produced a corpus of 176 documents, of which 153 returned insights. This corpus is intentionally demanding: it is large, spans a diverse literature, and includes multiple document types, including webpages, academic papers, long institutional reports, and books.
+The corpus was constructed using the ReadingMachine *getlit* module, which combines structured search, LLM-assisted retrieval of grey literature, and human filtering. This produced a corpus of 176 documents, of which 152 returned insights. This corpus is intentionally demanding: it is large, spans a diverse literature, and includes multiple document types, including webpages, academic papers, long institutional reports, and books. The final output included 137 citations.
 
 The analysis was guided by the following research questions:
 
@@ -371,19 +373,20 @@ The full pipeline execution required approximately 14 hours and incurred a total
 
 Core system metrics include:
 
-| Variable                    | Value   			|
-|-----------------------------|---------------------|
-| Document count              | 153 (176)     		|
-| Total run cost              | ~ $300  			|
-| Insight count               | 17752   			|
-| Chunk insight count         | 12166    			|
-| Meta insight count          | 5633   			 	|
-| Cluster count               | 170     			|
-| Runs to stable schema		  | 3					|
-| Theme counts			      | 28, 30, 30			|
-| Orphan counts				  | 16244, 16942, 16901 |
-| Failed theme counts		  | 3, 1, 0				|
-|-----------------------------|---------------------|
+| Variable                    | Value   						  |
+|-----------------------------|-----------------------------------|
+| Document count              | 152 (176)     		 			  |
+| FInal citation count        | 137		  						  |
+| Total run cost              | ~ $300  						  |
+| Insight count               | 17752   						  |
+| Chunk insight count         | 12166    						  |
+| Meta insight count          | 5633   			 				  |
+| Cluster count               | 169     						  |
+| Runs to stable schema		  | 5								  |
+| Theme counts			      | 34, 34, 34, 34, 34				  |
+| Orphan counts				  | 14008, 15092, 15318, 14927, 15657 |
+| Failed theme counts		  | 4, 2, 2, 1, 0					  |
+|-----------------------------|-----------------------------------|
 
 ### 7.4 Example Insights 
 
@@ -417,11 +420,11 @@ Conflict is explicitly represented. Tensions within the literature are articulat
 
 No obvious hallucinations were identified during internal review, though this has not been formally or systematically evaluated.
 
-Theme counts initially increase across runs, reflecting the architecture's initial use of theme splitting (repair) to address failing themes, before stabilizing as optimization passes dominate. This suggests the iterative approach is working to resolve output constraints while maintaining high levels of granularity and limiting omission. That said, theme stability was not emergent (see below).
+Notably theme count remains stable across iterations. In previous testing runs, themes initially split to address output constraints and then stabilized. Nonetheless the total number of failing themes declines across runs indicating that the iterative approach is working to address output constraints, while maintaining high levels of granularity and limiting omission.
 
 The distribution of content across themes is uneven. Some themes are significantly more developed than others. This likely reflects variation in the density of the underlying literature, rather than a constraint imposed by the system. In contrast, human-led reviews often impose balance across sections, even where this diverges from the distribution of available evidence.
 
-The pipeline produces an output that is structurally distinct from conventional AI systems, including query-conditioned and summarization-based approaches. Direct comparison with systems such as RAG is therefore not straightforward, as the outputs differ in form and objective; even where comparisons are possible (e.g., coverage or traceability), the central evaluation question is whether separating reading from reasoning in this way leads to better downstream reasoning, sufficient to justify the additional cost, latency, and complexity.
+The pipeline produces an output that is structurally distinct from conventional AI systems, including query-conditioned and summarization-based approaches. Direct comparison with systems such as RAG is therefore not straightforward, as the outputs differ in form and objective; even where comparisons are possible (e.g., coverage or traceability). The central evaluation question for ReadingMachine is whether separating reading from reasoning in this way leads to better downstream reasoning, sufficient to justify the additional cost, latency, and complexity.
 
 ### 7.6 Failure Modes and Issues
 
@@ -439,7 +442,7 @@ These factors together suggest that the observed volume of meta-insights reflect
 
 #### 7.6.2 High orphan counts
 
-Orphan counts remain high across all passes and in fact show an upward trend. This is partly expected for three reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves. Third, the theme counts are increasing. Given the above, since orphans are counter per theme as total theme counts increase, total orphans are expected to increase as well. 
+Orphan counts remain high across all passes and in fact show an upward trend. This is partly expected for two reasons. First, the orphan identification prompt is intentionally strict in order to prioritize coverage: false positives are preferred to missed insights. Second, summaries are fully regenerated during the theme population step rather than incrementally updated with previously reinserted orphans. As a result, improvements introduced during orphan handling are not directly preserved in subsequent synthesis steps. If the context window is under pressure during theme population, and insights are dropped at that stage, this behavior is likely to persist even as the theme schema improves.
 
 Taken together, these effects suggest that the model is operating under synthesis pressure. This likely reflects both the size of the input and the heterogeneity of the insight set, which can lead the model to produce increasingly abstract summaries. Under these conditions, individual claims may be incorporated at a conceptual level without remaining directly recoverable in near-verbatim form. In such cases, the orphan detection step may classify insights as unrepresented even when they have been integrated at a higher level of abstraction.
 
@@ -464,6 +467,17 @@ Insights are currently referenced using an author–date–year format. As a res
 This limitation could be addressed in future iterations by linking each insight_id directly to its source span, with human-readable author–date references layered on top. The implementation of such functionality is dependent on the output format—for example, HTML hover interactions versus jump links in PDF or Word documents.
 
 For meta-insights in particular, tracing may return large portions of text even when a single insight_id is queried. This reduces the precision of traceability and reinforces the need to further refine the meta-insight extraction process.
+
+#### 7.6.5 Dropped citations
+
+As mentioned above the dropping of citations that are known to hold insights is a concern for the method. It raises the questions not only about citation provenance but also, more concerningly, about whether the insights themselves are being lost. Given the orphan insertion loop, it is thought unlikely that there is significant insight loss and that this is a citation tracking/model bias towards coherence issue, but this requires evaluation. It is quite possible that citation repair is another process of orphan handling. 
+
+Addressing the issue of dropped citations therefore raises three future areas of work:
+1. Under the current implementation add fuzzy string matches or semantic matches to handle deterministic string replacement in the application of patch repair. 
+2. Evaluate insight coverage to check whether the orphan loop is working sufficiently and identify whether dropped citations are simply an issue of coherence bias/tracking
+3. Test an approach to orphan handling which mimics the schema and citation repair process which removes the coherence requirement from the model when it comes to inserting orphans. 
+
+For item 3 above, the proposed change in approach is not obviously better as this task sits on the boundary of synthesizing information (the orphan) and tracking that you have addressed it. Moving this to more of a tracking framework may result in a far less coherent output. 
 
 ### 7.7 Interpretation and Next Steps
 
@@ -562,6 +576,16 @@ In this respect, ReadingMachine can be understood in part as an external auditin
 Notably, the auditing requirements observed in ReadingMachine are largely orthogonal to current dominant scaling strategies in LLM development, such as context-window expansion. The behavior observed in the development of ReadingMachine suggests that increasing context windows may increase rather than eliminate the need for externalized auditing. Larger synthesis contexts likely amplify omission pressure, abstraction pressure, citation drift, and instability in maintaining coherent representational structure across repeated transformations. In this respect, visibility over larger amounts of text should not be conflated with stable integration of that text into a faithful synthesis.
 
 While the instability documented here concerns synthesis and comprehension tasks, the same underlying generative dynamics are likely relevant to reasoning processes, which also operate through iterative transformations over bounded texts. To the extent that reasoning depends on preserving assumptions, constraints, provenance, or intermediate conclusions across extended inference trajectories, similar forms of representational drift may emerge. This suggests that long-horizon reasoning systems may also benefit from external auditing architectures in cases where completeness, consistency, traceability, or preservation of epistemic structure are important.
+
+### 8.11 Fighting upstream compression
+
+A clear element of ReadingMachine's design was to delay compression as long as possible. However even with that in mind, a repeated pattern appeared in building the workflow. The model would compress outputs, to the detriment of coverage, even when explicitly instructed not to. This was apparent in orphan insertion, which was initially conceived of as defensive bootstrapping but which turned out to be necessary reinflation of compressed material. Likewise with schema repair, the model would anchor on conceptually elegant schema, going so far as to hallucinate repairs. And similarly with citations, the model would simply fail to integrate citations due to its apparent anchoring on more elegant prose. 
+
+One interpretation is that the model is optimized more strongly for producing coherent synthesized outputs than for conserving all source information through iterative transformations. This suggests that for a system like ReadingMachine, the operational pattern is to put in place auditing architecture like that described above and separate out repair tasks from those seeking to synthesize information. Effectively fight information loss via compression until completeness is achieved, and only then allow some compression. 
+
+It is worth noting that the above failures were not a result of context pressure. When we provided the exact same context but with instructions that ignored synthesis - generate a repair plan, or generate patches - results improved enormously. This again points to the idea that the solutions to effective information preserving synthesis might not be larger context windows - which could actually make the problem worse under models with similar training imperatives. They might be auditing and task separation.
+
+More generally, the repeated success of decomposition, patch generation, auditing, and repair suggests that information-preserving workflows may benefit from separating representational fidelity tasks from synthesis tasks, rather than assuming that a single generative operation can optimize both simultaneously. 
 
 ## 9. Limitations
 
