@@ -802,7 +802,7 @@ class GreyLiterature:
         #self.GREY_LIT_RAW_PICKLE_FILE = os.path.join(self.grey_lit_pickle_folder, "grey_lit_raw.pkl")
 
 
-    def get_grey_lit(self, example_grey_literature_sources, resp_timeout=1500) -> Optional[pd.DataFrame]:
+     def get_grey_lit(self, example_grey_literature_sources) -> Optional[pd.DataFrame]:
         """
         Retrieve grey literature relevant to the research questions.
 
@@ -879,8 +879,7 @@ class GreyLiterature:
         # Call the LLM
         response_dict = utils.call_reasoning_model(prompt=prompt,
                                         llm_client=self.llm_client,
-                                        ai_model=self.ai_reasoning_model,
-                                        resp_timeout=resp_timeout                                            
+                                        ai_model=self.ai_reasoning_model,                                            
                                         )
         
         
@@ -1043,7 +1042,7 @@ class Literature:
 
         output_path = os.path.join(self.save_location, "potential_duplicates.csv")
 
-        review_df = utils.prepare_dedup_review(state = self.corpus_state, similarity_threshold=theshold, engine = "fuzzy")
+        review_df = utils.prepare_dedup_review(state = self.corpus_state, threshold=theshold, engine = "fuzzy")
 
         review_df.to_csv(output_path, index=False)
 
@@ -1292,7 +1291,7 @@ class AiLiteratureCheck:
 
         return json.dumps(json_list, indent=2)
 
-    def ai_literature_check(self, resp_timeout = 1500) -> Optional[pd.DataFrame]:
+    def ai_literature_check(self) -> Optional[pd.DataFrame]:
         """
         Identify potentially missing literature using an LLM.
 
@@ -1349,8 +1348,7 @@ class AiLiteratureCheck:
          # Call the LLM
         response_dict = utils.call_reasoning_model(prompt=prompt,
                                         llm_client=self.llm_client,
-                                        ai_model=self.ai_reasoning_model,
-                                        resp_timeout=resp_timeout                                            
+                                        ai_model=self.ai_reasoning_model                                      
                                         )
         
         

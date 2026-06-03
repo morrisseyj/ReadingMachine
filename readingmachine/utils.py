@@ -308,109 +308,141 @@ def call_reasoning_model(
     llm_client: OpenAI,
     ai_model: str = "o3-deep-research",
     id_timeout: float = 30,
-    resp_timeout: float = 1500,
     max_retry: int = 2,
+    poll_interval: int = 60,
+    max_poll_errors: int = 20,
 ):
     """
     Execute a reasoning-model job with asynchronous polling.
 
-    This function manages long-running LLM reasoning tasks that may
-    require extended processing time. The request is submitted in
-    background mode and polled until completion.
-
-    Parameters
-    ----------
-    prompt : str
-        Prompt sent to the reasoning model.
-
-    llm_client : OpenAI
-        OpenAI client instance.
-
-    ai_model : str
-        Reasoning model identifier.
-
-    id_timeout : float
-        Timeout (seconds) for obtaining the job identifier.
-
-    resp_timeout : float
-        Maximum allowed wait time for job completion.
-
-    max_retry : int
-        Maximum number of retries when creating the job.
-
     Returns
     -------
     dict
-        Dictionary containing:
-
-            status : "success" or "failed"
-            response : model output text or response object
+        {
+            "status": "success" | "failed",
+            "response": <output_text or response object>,
+            "error": <error details or None>,
+            "response_id": <response id>
+        }
     """
-    # Get a response id with background=True
+
     def get_resp_id():
         attempt = 1
         last_err = None
+
         while attempt <= max_retry:
             try:
-                resp = llm_client.responses.create(
+                created_response = llm_client.responses.create(
                     model=ai_model,
                     input=prompt,
                     tools=[{"type": "web_search_preview"}],
                     timeout=id_timeout,
                     background=True,
                 )
-                return resp.id
+
+                print(f"Created response: {created_response.id}")
+                return created_response.id
+
             except (APITimeoutError, APIConnectionError) as e:
                 last_err = e
                 print(f"Create failed (attempt {attempt}/{max_retry}): {e}")
                 attempt += 1
-        print("Failed to create deep-research job.")
-        if last_err:
-            print(f"Last error: {last_err}")
-        return None
+
+        print("Failed to create reasoning job.")
+
+        return {
+            "status": "failed",
+            "response": None,
+            "error": str(last_err) if last_err else "Unable to create job",
+            "response_id": None,
+        }
 
     resp_id = get_resp_id()
-    if resp_id is None:
-        print("Could not obtain response ID; aborting.")
-        output = {"status": "failed", "response": None}
-        return output
 
-    end_time = time.time() + resp_timeout
+    # get_resp_id now returns either an id string or a failure dict
+    if isinstance(resp_id, dict):
+        return resp_id
+
     last_status = None
+    poll_errors = 0
 
     while True:
-        if time.time() > end_time:
-            print(f"Max wait time ({resp_timeout}s) exceeded.")
-            return None
 
         try:
-            resp = llm_client.responses.retrieve(resp_id)
+            print("Polling for response...")
+            current_response = llm_client.responses.retrieve(resp_id)
+            print("Successfully retrieved response status.")
+            poll_errors = 0
+
         except (APITimeoutError, APIConnectionError) as e:
-            print(f"Polling error: {e}; retrying in 10s.")
-            time.sleep(10)
+            poll_errors += 1
+
+            print(
+                f"Polling error ({poll_errors}/{max_poll_errors}): "
+                f"{e}. Retrying in {poll_interval}s."
+            )
+
+            if poll_errors >= max_poll_errors:
+                return {
+                    "status": "failed",
+                    "response": None,
+                    "error": f"Exceeded max polling errors: {e}",
+                    "response_id": resp_id,
+                }
+
+            time.sleep(poll_interval)
             continue
 
-        if resp.status != last_status:
-            print(f"Status: {resp.status}")
-            last_status = resp.status
+        if current_response.status != last_status:
+            print(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"status={current_response.status}"
+            )
+            last_status = current_response.status
 
-        if resp.status == "completed":
-            # Prefer the convenience field
-            if getattr(resp, "output_text", None):
-                output = {"status": "success", "response": resp.output_text}
-                return output
-            # Fallback: return the full object so you can inspect
-            print("Completed with no output_text; returning raw response object.")
-            output = {"status": "failed", "response": resp}
-            return output
+        if current_response.status == "completed":
 
-        if resp.status == "failed":
-            print("Deep research failed.")
-            print("Error:", getattr(resp, "error", None))
-            return None
+            if getattr(current_response, "output_text", None):
+                return {
+                    "status": "success",
+                    "response": current_response.output_text,
+                    "error": None,
+                    "response_id": resp_id,
+                }
 
-        print("Still processing; sleeping 60s...")
-        time.sleep(60)
+            print(
+                "Completed but output_text was empty. "
+                "Returning full response object."
+            )
+
+            return {
+                "status": "failed",
+                "response": current_response,
+                "error": "Completed with no output_text",
+                "response_id": resp_id,
+            }
+
+        if current_response.status in {
+            "failed",
+            "cancelled",
+            "expired",
+            "incomplete",
+        }:
+            return {
+                "status": "failed",
+                "response": current_response,
+                "error": getattr(current_response, "error", None),
+                "response_id": resp_id,
+            }
+
+        print(
+            f"Still processing "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"status={current_response.status} "
+            f"sleeping {poll_interval}s..."
+        )
+
+        time.sleep(poll_interval)
 
 
 def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs")):
@@ -562,7 +594,12 @@ def drop_exact_author_title_year(corpus_state: CorpusState) -> CorpusState:
     temp_corpus_state = corpus_state.copy()
     df = temp_corpus_state.insights.copy()
     # Create author_title_year string for exact matching
-    df["author_title_year"] = df["paper_author"].fillna("") + " " + df["paper_title"].fillna("") + " " + df["paper_date"].fillna("")
+    df["author_title_year"] = (
+        df[["paper_author", "paper_title", "paper_date"]]
+        .fillna("")
+        .astype(str)
+        .agg(" ".join, axis=1)
+    )
     # Normalize the string to avoid false negatives due to minor formatting differences
     df["norm_author_title_year"] = df["author_title_year"].apply(normalize_text)
     # Drop dupes
