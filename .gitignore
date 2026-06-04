@@ -27,3 +27,7 @@ outputs/
 
 # Ignore hdbscan results
 hdbscan*
+
+# Ignore build files for tex
+*.aux
+*.log
