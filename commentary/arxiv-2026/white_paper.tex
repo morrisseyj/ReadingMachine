@@ -67,14 +67,13 @@ Corpus Reading and Large-Scale Synthesis}
 \section*{Abstract}\label{abstract}
 
 The volume of written material produced across modern institutions now 
-far exceeds the capacity of human analysts to read, interpret, and synthesize
- it comprehensively. Existing computational approaches—such as 
- retrieval-augmented generation, hierarchical summarization, and agentic research 
- workflows—scale access to information but typically operate over selectively 
- accessed material, introducing risks of omission, early information loss, and 
- limited analytical transparency. As a result, high-stakes synthesis tasks in 
- research, policy, law, and organizational analysis remain constrained by 
- partial coverage and limited inspectability.
+far exceeds the capacity of human analysts to read, interpret, and synthesize it comprehensively. Existing computational approaches—such as 
+retrieval-augmented generation, hierarchical summarization, and agentic research 
+workflows—scale access to information but typically operate over selectively 
+accessed material, introducing risks of omission, early information loss, and 
+limited analytical transparency. As a result, high-stakes synthesis tasks in 
+research, policy, law, and organizational analysis remain constrained by 
+partial coverage and limited inspectability.
 
 This paper introduces ReadingMachine, a computational methodology for 
 structured corpus reading that reframes large language models as systems 
@@ -107,7 +106,7 @@ support systematic qualitative synthesis and downstream, explicitly constrained
 reasoning over stable corpus representations. The paper positions structured corpus 
 reading as a complementary mode of knowledge production, distinct from retrieval-based 
 and agentic AI systems. The results should be understood as a demonstration of system 
-behavior at scale rather than a validated assessment of performance, and collaboration 
+behavior at scale rather than a validated assessment of performance. Collaboration 
 on evaluation is actively encouraged.
 
 \section{Introduction}\label{introduction}
@@ -900,7 +899,16 @@ Under this design, orphan handling serves not only to address omission
 and refine the thematic structure, but also to operationalize synthesis
 under bounded output constraints.
 
-\subsection{Performative repair}\label{performative-repair}
+While this orphan handling loop is effective, it also resulted in two 
+further failure modes:
+\begin{itemize}
+  \item performative repair of the theme schema
+  \item dropped citations during orphan reinsertion
+\end{itemize}
+
+Each of these were addressed as follows:
+
+\subsubsection{Performative repair}\label{performative-repair}
 
 Step 2, above, was initially attempted as a single LLM call. This did not 
 work reliably: the schema repair pass repeatedly reproduced the same failing 
@@ -932,7 +940,7 @@ The eventual solution was to split the repair pass first into a decomposition
 prompt where the sole aim was to break up failing themes into smaller unit, by 
 taking out the largest coherent cluster of concepts that could stand alone as a 
 theme without itself resulting in conceptual overload. This pass had to make no 
-mention of conceptual elegance. Only after a theme was decomposed to that it would 
+mention of conceptual elegance. Only after a theme was decomposed so that it would 
 survive orphan insertion without errors was it passed it to an optimization prompt 
 which was instructed to recombine coherent conceptual groups and clarify boundaries, 
 so long as this did not risk recreating conceptual overload for any theme. After 
@@ -941,24 +949,29 @@ they remain viable. If the optimizer can see no obvious opportunities for improv
 it defines the schema for the question as "stable". Once all question schema 
 are stable, the iterative process completes. 
 
-\subsection{Dropped citations}\label{dropped-citations}
+\subsubsection{Dropped citations}\label{dropped-citations}
 
 The demands on orphan insertion (large numbers of orphans) eroded citation retention. 
 Citations for papers that produced insights would drop out of the final summary 
 altogether - such that around 1/3 of the total citations were missing from the final 
 paper. This raises the possibility that underlying insights were also being lost during 
 iterative synthesis, although the batched orphan architecture suggests citation erosion 
-was more common than complete insight deletion. To handle this:
+was more common than complete insight deletion. To handle this the following process was implemented:
 
 \begin{enumerate}
 \item After theme population an LLM call on the theme summary identifies all current citations
-\item With each orphan batch the list of required citations is sent to the LLM, along with the batch of orphan insights to be incorporated. The instructions are to incorporate orphans and ensure that all the citations in the list appear in the theme. 
-\item This is bootstrapped by a final citation check where the set of citations for the insights mapped to the theme is compared with the insights currently appearing in the theme. For any missing citations, all the insights for those citations for the theme, are then sent to an LLM with instructions to insert distinct citations at least once. 
+\item With each orphan batch the list of required citations is sent to the LLM, 
+along with the batch of orphan insights to be incorporated. The instructions 
+are to incorporate orphans and ensure that all the citations in the list appear in the theme. 
+\item This is bootstrapped by a final citation check where the set of citations 
+for the insights mapped to the theme is compared with the insights currently 
+appearing in the theme. For any missing citations, all the insights for those 
+citations for the theme, are then sent to an LLM with instructions to insert distinct citations at least once. 
 \end{enumerate}
 
 Notably this approach to citation repair did not initially work. Even though the 
 model was provided with a full set of required citations and the relevant insights to 
-insert it would not successfully reinsert them. The hypothesized reason for this is 
+insert, it would not successfully reinsert them. The hypothesized reason for this is 
 similar to that explaining failed schema repair: the model is trained to output coherent 
 readable paragraphs; these do not generally include large numbers of citations behind 
 general claims. This preference persisted even when the model was explicitly instructed 
@@ -966,9 +979,9 @@ to stuff the citations. In testing, only about one third of the missing citation
 get inserted into the text. To address this an approach similar to that used in schema 
 repair was adopted, whereby instead of asking the model to both track insertion of missed 
 citations and generate an updated complete synthesis, the model was tasked with generating 
-a repair patch the inserted the citations. This could instruct the addition of a citation 
-to an existing claim or the addition of a new sentence to reflect the claim. The patch 
-included, verbatim, the sentence to be replaced, or the preceding sentence. These were 
+a repair patch. This could instruct the addition of a citation to an existing claim or 
+the addition of a new sentence to reflect the claim. The patch included, verbatim, the 
+sentence to be replaced, or the preceding sentence (in the case of a new sentence). These were 
 then deterministically replaced in python. The model occasionally errored in returning 
 the exact sentence which is what is thought to account for the loss of citations. This 
 problem should be fixable through the use of a fuzzy match on sentences or via a semantic 
@@ -1179,14 +1192,14 @@ What challenges and constraints do less-industrialized countries face in
 implementing effective industrial policy? & Chunk insight & `Many
 developing countries had been busy dismantling their industrial policies
 during the 1980s and the 1990s, which poses a challenge in realizing
-effective industrial policy now (Chang and Andreoni 2020).' \\
+effective industrial policy now (Chang et al. 2020).' \\
 What drivers account for the resurgence of industrial policy in both
 highly industrial and industrializing countries? & Meta insight & `The
 resurgence of industrial policy in both highly industrialized and
 industrializing countries is driven by the dual objectives of
 technological advancement and environmental sustainability, as seen in
 China's push for electric vehicles to enhance competitiveness and reduce
-urban air pollution (Altenburg, T.; Assmann, C. 2017).' \\
+urban air pollution (Altenburg et al. 2017).' \\
 \end{longtable}
 }
 
@@ -1238,18 +1251,17 @@ downstream interpretation is visible in the descriptive character of the
 text, which represents the literature without advancing a synthesized
 position.
 
-The themes generated appear interpretable and broadly consistent with
-recognizable structures in the industrial policy literature, based on
-internal review. No themes were identified as clearly distorted or
-artificial in this process of internal review. The overall output reads
-more like an academic literature review than a conventional LLM summary
-or question-answering response, and remains coherent across research
-questions. The re-theming process appears to consolidate conceptual
-structure across iterations: the reduction in theme count between passes
+Based on internal review, the themes generated appear interpretable 
+and broadly consistent with recognizable structures in the industrial policy literature. 
+No themes were identified as clearly distorted or
+artificial. The overall output reads more like an academic literature review than 
+a conventional LLM summary or question-answering response, 
+and remains coherent across research questions. The re-theming process appears 
+to consolidate conceptual structure across iterations: the reduction in theme count between passes
 is consistent with initial semantic groupings being reorganized into
 more coherent thematic categories.
 
-Granular claims are preserved throughout the output. The system does not
+Granular claims appear to be preserved throughout the output. The system does not
 collapse content into high-level abstractions; instead, specific and
 detailed claims remain visible within thematic summaries, contributing
 to the overall density of the document.
@@ -1261,7 +1273,8 @@ No obvious hallucinations were identified during internal review, though
 this has not been formally or systematically evaluated.
 
 Notably theme count remains stable across iterations. In previous 
-testing runs, themes initially split to address output constraints and 
+testing runs, themes initially split to address output constraints 
+(though the starting number of themes was fewer in these cases) and 
 then stabilized. Nonetheless the total number of failing themes declines 
 across runs indicating that the iterative approach is working to address 
 output constraints, while maintaining high levels of granularity and 
@@ -1297,7 +1310,7 @@ extended portions of a document.
 
 Given the observed volume of meta-insights, it is likely that the
 meta-insight prompt is overly permissive. Notably, an earlier run
-produced higher meta-insight:insight proportions (\textasciitilde2:1),
+produced higher meta-insight:insight proportions (\textasciitilde1:2),
 reflecting a too loose meta-insight extraction prompt and a too
 restrictive chunk extraction prompt. Overall this prior run produced
 more compressed and narratively coherent output, but with less granular
@@ -1455,7 +1468,7 @@ orphans.
 
 For item 3 above, the proposed change in approach is not obviously better as this task sits 
 on the boundary of synthesizing information (the orphan) and tracking that you have addressed 
-it. Moving this to more of a tracking framework may result in a far less coherent output. 
+it. Moving this to more of a tracking framework may result in a less coherent output. 
 
 \subsection{Interpretation and Next Steps}\label{interpretation-and-next-steps}
 
