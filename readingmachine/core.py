@@ -186,115 +186,182 @@ import math
 
 class Ingestor:
     """
-    Document ingestion, metadata extraction, and deduplication stage of the ReadingMachine pipeline.
+    Document ingestion, corpus preparation, and chunk generation for ReadingMachine.
 
-    The `Ingestor` class reads source documents from a filesystem directory
-    and converts them into the structured corpus representation used by the
-    rest of the pipeline. This stage transforms raw files into entries in the
-    `CorpusState.full_text` table and ensures that each document is linked to
-    the correct research question and paper identifier.
+    The Ingestor class transforms raw source documents into the structured
+    corpus representation used by the ReadingMachine reading pipeline. It is
+    responsible for converting files on disk into validated, metadata-rich,
+    deduplicated, and chunked corpus objects suitable for insight extraction.
 
-    Supported file formats
-    ----------------------
+    The ingestion workflow operates over a CorpusState and performs several
+    distinct stages:
+
+        file discovery
+            ↓
+        document ingestion
+            ↓
+        metadata extraction
+            ↓
+        corpus reconciliation
+            ↓
+        deduplication
+            ↓
+        citation generation
+            ↓
+        chunk generation
+
+    Supported document formats
+    --------------------------
     - PDF
     - HTML
 
-    HTML files are cleaned using structural parsing and then optionally
-    processed by an LLM to extract the main textual content of the page.
+    PDF files are ingested page by page using PyMuPDF.
 
-    After ingestion, the class performs **metadata extraction** using an LLM.
-    This step populates the following fields for each paper:
+    HTML files undergo a hybrid extraction process consisting of:
 
-    - paper_title
-    - paper_author
-    - paper_date
+        HTML cleaning
+            ↓
+        body-text extraction
+            ↓
+        character chunking
+            ↓
+        LLM-assisted content extraction
 
-    These values are extracted from the beginning of the document text and
-    validated for type consistency before being written back into
-    `corpus_state.insights`.
+    This approach combines deterministic preprocessing with model-based
+    content identification.
+
+    Metadata extraction
+    -------------------
+    The class can extract and normalize document metadata using an LLM.
+
+    The following fields are populated or updated:
+
+    - `paper_title`
+    - `paper_author`
+    - `paper_date`
+
+    Metadata extraction operates over document text and includes type
+    normalization, missing-value handling, and resume support for long
+    corpus-processing runs.
+
+    Corpus reconciliation
+    ---------------------
+    During ingestion, filesystem documents are matched against existing
+    corpus metadata using:
+
+    - `paper_id`
+    - `question_id`
+
+    The ingestion process identifies:
+
+    - successfully ingested papers
+    - ingestion failures
+    - unmatched files
+    - expected papers with no corresponding document
+
+    These diagnostics are exposed through dedicated attributes to support
+    user review and recovery.
 
     Deduplication
     -------------
-    Following metadata extraction, the ingestion stage performs a **global
-    deduplication pass** over the corpus.
+    The class supports human-in-the-loop duplicate detection.
 
-    Deduplication occurs in two steps:
+    Two deduplication strategies are used:
 
-        1. Exact duplicate removal
-           Records with identical author–title–year combinations are removed.
+    1. Exact duplicate detection
+    - metadata-based
+    - content-based
 
-        2. Fuzzy duplicate detection (human-in-the-loop)
-           Records with highly similar metadata are exported for manual review.
-           The user removes duplicates and confirms a final deduplicated set.
+    2. Similarity-based review
+    - title similarity
+    - full-text shingle similarity
 
-    After user confirmation, the corpus is filtered so that only unique
-    `paper_id` values are retained across:
+    Potential duplicates are exported for manual review and are only applied
+    to the corpus once explicitly confirmed by the user.
 
-        - `corpus_state.full_text`
-        - `corpus_state.insights`
+    Citation and identifier generation
+    ----------------------------------
+    Following metadata validation, the class can generate citation-based
+    paper identifiers and formatted in-text citation strings.
 
-    Importantly, this process does **not modify the user's filesystem**.
-    Duplicate files may remain on disk, but they are excluded from all
-    downstream processing.
+    These identifiers provide stable, human-readable references that are
+    used throughout downstream ReadingMachine outputs while preserving links
+    back to the original filename-derived identifiers.
 
-    Pipeline role
-    -------------
-    The ingestion stage produces three key artifacts:
+    Chunk generation
+    ----------------
+    The final ingestion stage converts full-text documents into overlapping
+    reading chunks.
 
-        corpus_state.full_text
-        corpus_state.insights (metadata-complete and deduplicated)
-        corpus_state.questions (canonicalized)
+    Chunk generation includes:
 
-    These artifacts are later used by downstream stages such as:
+    - text normalization
+    - greedy chunk splitting
+    - duplicate chunk removal
+    - boilerplate filtering
 
-    - chunking
+    The resulting chunk representation forms the input to the insight
+    extraction stage described in the ReadingMachine methodology.
+
+    Pipeline outputs
+    ----------------
+    The ingestion workflow produces and updates:
+
+    - `corpus_state.full_text`
+    - `corpus_state.chunks`
+    - `corpus_state.insights`
+
+    These structures form the corpus-reading layer that supports:
+
     - insight extraction
     - clustering
     - thematic synthesis
-
-    Deduplication ensures that:
-
-    - duplicate documents are not reprocessed
-    - token usage and runtime are minimized
-    - insights are not artificially duplicated during synthesis
+    - citation tracing
 
     Design principles
     -----------------
-    The ingestion logic is intentionally strict about identifier consistency.
+    The ingestion stage prioritizes:
 
-    Document filenames are expected to correspond to the `paper_id` values
-    present in the insights table. Duplicate filenames or mismatches between
-    the corpus metadata and filesystem contents will trigger warnings or
-    user confirmation prompts.
+    Traceability
+        Documents remain linked to identifiers throughout ingestion,
+        metadata extraction, chunking, and downstream synthesis.
 
-    Deduplication is performed **after metadata extraction** because metadata
-    provides the canonical basis for identifying duplicate documents.
+    Recoverability
+        Long-running metadata extraction tasks support checkpointing and
+        resume workflows.
+
+    Human oversight
+        Deduplication decisions are surfaced for review rather than applied
+        automatically.
+
+    Conservative cleaning
+        Cleaning and chunk filtering focus on removing obvious extraction
+        artifacts while preserving substantive document content.
 
     Attributes
     ----------
     corpus_state : CorpusState
-        Working corpus state containing literature metadata and insight
-        records. This object is mutated during ingestion.
+        Working corpus state mutated throughout ingestion.
 
     file_path : str
-        Directory containing the source documents to ingest.
+        Root directory containing source documents.
 
     llm_client : Any
-        LLM client used for HTML parsing and metadata extraction.
+        Language model client used for HTML extraction, metadata extraction,
+        and citation generation.
 
     ai_model : str
-        Model name used when making LLM calls.
+        Model identifier used for ingestion-time LLM calls.
 
-    ingestion_errors : List[str]
-        List of files that failed ingestion due to parsing errors.
+    ingestion_errors : list[str]
+        Files that failed ingestion.
 
     pickle_path : str
-        Directory used to persist intermediate metadata extraction results
-        for resume support.
+        Directory used for metadata extraction checkpoints and resume
+        support.
 
     fuzzy_check_path : str
-        Directory used to store fuzzy duplicate review files for
-        manual deduplication.
+        Directory used for duplicate-review outputs.
     """
 
     def __init__(
@@ -2130,17 +2197,56 @@ class Insights:
         meta_insights_pickle_file: str="meta_insights.pkl"
     ) -> None:
         """
-        Class for extracting insights (both chunk-level and meta/paper-level) 
-        from a corpus of academic papers and grey literature using an LLM.
+        Initialize the insight-extraction stage.
 
-        Args:
-            corpus_state (CorpusState): 
-                Container for all relevant corpus_state data including chunks, 
-                full text, and insights tables.
-            llm_client (Any): 
-                Client instance for calling the LLM API (e.g. OpenAI client).
-            ai_model (str): 
-                Model name/ID to be used for completions.
+        Creates an Insights object for generating chunk-level and document-level
+        meta-insights from a prepared CorpusState. The initializer validates that
+        the corpus state contains the metadata required for insight extraction,
+        stores LLM configuration, creates the pickle checkpoint directory, and
+        canonicalizes question text in the working state.
+
+        Parameters
+        ----------
+        corpus_state : CorpusState
+            Prepared CorpusState containing questions, paper metadata, citations,
+            full text, and chunk records. The state is deep-copied before use.
+
+        llm_client : Any
+            LLM client used for insight-extraction calls.
+
+        ai_model : str
+            Model identifier used for LLM calls.
+
+        paper_context : str
+            Corpus- or project-level context supplied to the insight-extraction
+            prompts.
+
+        max_token_length : int, default=100000
+            Maximum text length used when preparing document-level meta-insight
+            prompts.
+
+        pickle_path : str, default=config.PICKLE_SAVE_LOCATION
+            Directory used to store intermediate insight-extraction checkpoints.
+
+        chunk_insights_pickle_file : str, default="chunk_insights.pkl"
+            Filename used for chunk-level insight checkpoint data.
+
+        meta_insights_pickle_file : str, default="meta_insights.pkl"
+            Filename used for document-level meta-insight checkpoint data.
+
+        Notes
+        -----
+        The supplied CorpusState is validated through `utils.validate_format()`
+        and then deep-copied, so extraction mutates the Insights instance's
+        internal state rather than the caller's original object.
+
+        The required state columns include question metadata, paper metadata,
+        DOI, and `in_text_citation`, which is used to preserve citation
+        provenance in extracted insights.
+
+        This class corresponds to the ReadingMachine stage that converts the
+        prepared corpus representation into insight-level units for downstream
+        embedding, clustering, theme construction, and synthesis.
         """
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
@@ -2171,58 +2277,56 @@ class Insights:
 
     def _generate_chunk_insights(self, insights: List = None) -> pd.DataFrame:
         """
-        Generate research-question–level insights for each text chunk using the LLM.
+        Generate chunk-level insights for all unprocessed chunks.
 
-        Each chunk is processed independently and evaluated against all defined
-        research questions. For every chunk, the model returns zero or more
-        insights per question. Even when no insights are identified, the chunk
-        is recorded to ensure complete traceability and resumable execution.
+        Processes each chunk in `corpus_state.chunks` with the configured LLM and
+        extracts research-question-relevant insights. Each chunk is evaluated
+        against the full set of research questions, and extracted insights are
+        linked back to their source `paper_id` and `chunk_id`.
 
-        All generated insights are explicitly linked to:
-            - chunk_id  (unique identifier for the text chunk)
-            - paper_id  (source document identifier)
+        Parameters
+        ----------
+        insights : list[pd.DataFrame], optional
+            Previously generated chunk-insight outputs, usually recovered from a
+            checkpoint pickle. If provided, chunks whose `chunk_id` values already
+            appear in the recovered outputs are skipped.
 
-        The method supports resumable execution by accepting previously
-        generated insight DataFrames and skipping already processed chunk_ids.
+        Returns
+        -------
+        pd.DataFrame
+            Updated `corpus_state.insights` DataFrame containing chunk-level
+            insight rows, source identifiers, paper metadata, and generated
+            `insight_id` values.
 
-        Returns:
-            pd.DataFrame:
-                A consolidated insights table where each row represents a
-                (question_id, paper_id, chunk_id, insight) record, merged
-                with existing corpus_state metadata and assigned back to
-                `self.corpus_state.insights`.
+        Notes
+        -----
+        The method supports both fresh and resumed execution:
 
-        # -------------------------------------------------------------
-        # Recovery / Resume Handling
-        #
-        # This function can be called in two modes:
-        #
-        # 1. Fresh run:
-        #    insights is None
-        #    → No chunks have been processed yet.
-        #
-        # 2. Resume run:
-        #    insights is a list of previously generated DataFrames,
-        #    each containing chunk-level results that were written
-        #    incrementally to pickle.
-        #
-        # We must defensively handle three distinct states:
-        #
-        #    insights is None   → brand new run
-        #    insights == []     → valid recovery corpus_state but zero chunks processed
-        #    insights has data  → resume and skip already-processed chunk_ids
-        #
-        # Even though under normal execution the pickle file should
-        # never contain an empty list (because we append before dumping),
-        # we explicitly support insights == [] to guard against:
-        #   - manual injection
-        #   - corrupted pickle files
-        #   - future refactors
-        #   - direct unit test calls
-        #
-        # The key invariant:
-        #   remaining_chunks must ALWAYS be defined.
-        # -------------------------------------------------------------
+        - `insights is None`: start a new run
+        - `insights == []`: treat as a valid empty recovered state
+        - `insights` contains DataFrames: resume and skip processed chunks
+
+        If the model returns no insights for a chunk, the chunk is still recorded
+        with missing `question_id` and `insight` values. This preserves evidence
+        that the chunk was processed.
+
+        Intermediate results are checkpointed every 10 processed chunks to:
+
+            {self.pickle_path}/{self.chunk_insights_pickle_file}
+
+        The method does not save the CorpusState to disk. It only updates the
+        in-memory `self.corpus_state.insights`.
+
+        Chunk-level insight IDs are assigned only to rows with non-missing
+        insight text and take the form:
+
+            chunk_insight_1
+            chunk_insight_2
+            ...
+
+        This method implements the chunk-level reading pass in ReadingMachine:
+        it converts bounded text chunks into atomic, question-relevant insight
+        records while preserving links back to the source paper and chunk.
         """
 
         if insights is None:
@@ -2336,36 +2440,46 @@ class Insights:
             working_insights_df.loc[mask, "insight_id"].astype(int).astype(str)
         )
 
-        # Assign to corpus_state
-        self.corpus_state.insights = working_insights_df
-
-        # Note i don't save here as i only save at the end of the class's operations. This is cleaner for the user. 
-        # Also since i have the recover function in place, once the insights are generated for this class it should be quick to recreate to this point
-        return self.corpus_state.insights
+        return working_insights_df
     
     
     def _recover_chunk_insights_generation(self):
         """
-        Resume chunk insight generation from a previously saved pickle file.
+        Resume chunk-level insight extraction from a checkpoint.
 
-        The pickle file contains a list of partial insight DataFrames
-        produced during earlier execution. These are passed back into
-        `_generate_chunk_insights`, which skips already processed chunks
-        and continues extraction.
+        Loads previously generated chunk-insight DataFrames from
+        `self.chunk_insights_pickle_file` and passes them to
+        `_generate_chunk_insights()`, which skips chunks that have already been
+        processed and continues extraction from the remaining chunks.
+
+        Returns
+        -------
+        None
+
+        Side Effects
+        ------------
+        Reads from:
+
+            {self.pickle_path}/{self.chunk_insights_pickle_file}
+
+        Mutates `self.corpus_state.insights` through `_generate_chunk_insights()`.
 
         Notes
         -----
-        This mechanism enables safe recovery from interruptions such as:
+        This method assumes the checkpoint file exists and contains a list of
+        partial chunk-insight DataFrames. Missing, corrupted, or incompatible
+        pickle files will raise errors from `open()`, `pickle.load()`, or the
+        downstream recovery logic.
 
-        - API errors
-        - process termination
-        - user aborts
+        Recovery is based on previously processed `chunk_id` values.
         """
         print("Opening pickle file to recover chunk insights generation...")
         with open(os.path.join(self.pickle_path, self.chunk_insights_pickle_file), "rb") as f:
             recover_chunk_insights = pickle.load(f)
         
-        self._generate_chunk_insights(insights=recover_chunk_insights)
+        chunk_insights = self._generate_chunk_insights(insights=recover_chunk_insights)
+        
+        return(chunk_insights)
 
 
     def get_chunk_insights(self) -> pd.DataFrame:
@@ -2403,12 +2517,16 @@ class Insights:
                     "Hit 'r' to recover/restore from file, or 'n' to generate new insights (this will overwrite existing file):\n"
                     ).lower()
             if recover == 'r':
-                self._recover_chunk_insights_generation()
+                chunk_insights = self._recover_chunk_insights_generation()
             else:
                 print("Overwriting existing chunk insights pickle file...")
-                self._generate_chunk_insights()
+                chunk_insights = self._generate_chunk_insights()
         else:
-            self._generate_chunk_insights()
+            chunk_insights = self._generate_chunk_insights()
+
+        # Update the state with the chunk insights that we have generated or recovered
+        # Note we don't save here as we can recover from the pickle and we will save after getting the meta insights.
+        self.corpus_state.insights = chunk_insights
 
 
     def _prepare_meta_insights_df(self) -> pd.DataFrame:
