@@ -1,30 +1,63 @@
 """
-Utility functions used across the ReadingMachine codebase.
+Shared utility functions for the ReadingMachine pipeline.
 
-This module provides shared helpers that support the core pipeline,
-rendering layer, and corpus discovery tools. The utilities include:
+This module provides reusable helpers that support corpus acquisition,
+corpus reading, thematic synthesis, persistence, and pipeline
+orchestration. The functions are used across the getlit workflow, the
+core ReadingMachine pipeline, and downstream synthesis components.
 
-    - pipeline state validation
-    - standardized LLM API calls
-    - reasoning-model orchestration
-    - pipeline restart assistance
+Major utility categories include:
 
-These functions centralize repeated logic so that the rest of the
-codebase can remain focused on the analytical workflow rather than
-infrastructure details.
+    - state validation and normalization
+    - LLM API wrappers and reasoning-model orchestration
+    - pipeline recovery and resume helpers
+    - corpus deduplication and similarity matching
+    - text normalization and hashing
+    - schema-safe DataFrame operations
+    - persistence and serialization helpers
+    - context-window management utilities
+
+The utilities centralize infrastructure and workflow concerns so that
+pipeline components can focus on the methodological stages of
+ReadingMachine rather than implementation details.
 
 Design principles
 -----------------
 
-The utilities are designed to:
+The utilities are designed to support several methodological and
+engineering goals:
 
-    • enforce consistent input validation across modules
-    • standardize LLM interactions
-    • support resumable execution of long-running operations
-    • assist users in recovering pipeline progress
+Consistency
+    Shared validation, normalization, and schema-management helpers
+    ensure that pipeline stages operate on predictable inputs.
 
-None of the utilities modify the analytical logic of ReadingMachine;
-they exist solely to support reliable execution of the pipeline.
+Reproducibility
+    Deterministic normalization, hashing, fingerprinting, and sampling
+    utilities help maintain stable analytical workflows across runs.
+
+Resumability
+    State persistence, safe serialization, and recovery helpers support
+    long-running workflows that may span multiple sessions.
+
+Inspectability
+    Utilities favor explicit intermediate representations and state
+    management rather than opaque transformations.
+
+Scalability
+    Helpers such as sampling, deduplication, and asynchronous model
+    orchestration support operation over large corpora while respecting
+    practical resource constraints.
+
+Relationship to ReadingMachine
+------------------------------
+These utilities do not implement the core methodological stages of
+ReadingMachine directly. Instead, they provide the supporting operations
+required to execute the workflow reliably, including corpus validation,
+duplicate detection, LLM interaction, persistence, and recovery.
+
+Together, these functions form the operational layer that enables the
+ReadingMachine reading and synthesis pipelines to run as structured,
+resumable, and inspectable analytical processes.
 """
 
 from .state import CorpusState
@@ -56,48 +89,58 @@ def validate_format(
     injected_required_cols: List[str] = []
 ) -> "CorpusState":
     """
-   Validate and normalize pipeline input state.
+    Validate input state and return a CorpusState.
 
-    This helper ensures that downstream classes receive a properly
-    structured `CorpusState` object regardless of how the input
-    was provided.
-
-    The function supports two initialization paths:
-
-        Path A — Existing CorpusState
-            Validate the structure of the provided state object.
-
-        Path B — Injected DataFrame
-            Construct a new `CorpusState` from a questions DataFrame
-            and an injected dataset.
+    Accepts either an existing CorpusState or the components needed to
+    construct a new one from an injected DataFrame. This helper is used by
+    pipeline steps that can operate on either a pre-existing state object or
+    a manually supplied table.
 
     Parameters
     ----------
-    corpus_state : Optional[CorpusState]
-        Existing state object to validate.
+    corpus_state : CorpusState, optional
+        Existing CorpusState to validate. If provided, `questions` and
+        `injected_value` must not also be provided.
 
-    questions : Optional[pd.DataFrame]
-        Question metadata used to initialize a new state.
+    questions : pd.DataFrame, optional
+        Questions table used when constructing a new CorpusState from
+        `injected_value`. Must be provided together with `injected_value`.
 
-    injected_value : Optional[pd.DataFrame]
-        DataFrame containing records to insert into the new state.
+    injected_value : pd.DataFrame, optional
+        DataFrame to use as the `insights` table when constructing a new
+        CorpusState. Must be provided together with `questions`.
 
-    state_required_cols : List[str]
-        Columns required to exist in `corpus_state.insights`.
+    state_required_cols : list[str], default=[]
+        Columns required in `corpus_state.insights` when validating an
+        existing state. When constructing a new state, any missing columns
+        from this list are added to `injected_value` and filled with `NaN`.
 
-    injected_required_cols : List[str]
-        Columns required to exist in the injected DataFrame.
+    injected_required_cols : list[str], default=[]
+        Columns that must already exist in `injected_value` before a new
+        CorpusState can be constructed.
 
     Returns
     -------
     CorpusState
-        Validated or newly constructed state object.
+        The validated existing CorpusState, or a newly constructed
+        CorpusState using `questions` and `injected_value`.
 
     Raises
     ------
     ValueError
-        If the input arguments do not satisfy one of the valid
-        initialization paths or if required columns are missing.
+        If both initialization paths are supplied, neither valid path is
+        supplied, required columns are missing, or an existing state's
+        `insights.paper_id` column contains missing values.
+
+    Notes
+    -----
+    For an existing CorpusState, this function validates only
+    `corpus_state.insights` and does not inspect `questions`, `full_text`, or
+    `chunks`.
+
+    For injected DataFrames, the function mutates `injected_value` in place
+    by adding any missing `state_required_cols` as `NaN` columns before
+    constructing the CorpusState.
     """
     
     # --- PATH A: Existing State Provided ---
@@ -134,7 +177,6 @@ def validate_format(
             "OR both 'questions' and 'injected_value'."
         )
     
-
 def call_chat_completion(
     llm_client,
     ai_model: str,
@@ -151,89 +193,78 @@ def call_chat_completion(
     Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]
     ]:
     """
-    Standardized wrapper for chat completion calls.
+    Call a chat-completion model with standardized prompt, JSON, and error handling.
 
-    This function provides a consistent interface for interacting with
-    chat completion models. It supports both structured JSON responses
-    and plain text outputs, optional schema enforcement, and optional
-    structured error reporting.
-
-    The function centralizes:
-
-        • prompt construction
-        • response format handling (JSON vs text)
-        • error handling and fallback behavior
-        • optional output length control via max_tokens
+    Builds a two-message chat-completion request from a system prompt and a
+    user prompt, sends it to the supplied LLM client, and returns either raw
+    text or parsed JSON. The helper optionally requests JSON-mode or
+    schema-constrained JSON responses and can return structured error
+    metadata alongside the result.
 
     Parameters
     ----------
     llm_client : Any
-        LLM API client instance.
+        Client object exposing `chat.completions.create()`.
 
     ai_model : str
-        Model identifier used for the completion request.
+        Model identifier passed to the chat-completion API.
 
     sys_prompt : str
-        System prompt defining the model's role and instructions.
+        System prompt used as the first message.
 
     user_prompt : str
-        User prompt containing task-specific input.
+        User prompt used as the second message.
 
-    fall_back : Dict[str, Any]
-        Default value returned if the LLM call fails or returns
-        invalid JSON (only used when return_json=True).
+    fall_back : dict[str, Any]
+        Value returned when `return_json=True` and the API call fails or the
+        response cannot be parsed as JSON.
 
     return_json : bool
-        If True, the function attempts to parse the model response
-        as JSON and return a dictionary. If False, raw text is returned.
+        If True, request a JSON response and parse the returned content with
+        `json.loads()`. If False, return the response content as text.
 
-    json_schema : Optional[dict], default=None
-        Optional JSON schema used to enforce structured responses.
-        If provided, the model is constrained to return output matching
-        this schema.
+    json_schema : dict, optional
+        Optional schema passed as `response_format={"type": "json_schema",
+        "json_schema": json_schema}` when `return_json=True`. If omitted and
+        `return_json=True`, JSON object mode is requested instead.
 
-    max_tokens : Optional[int], default=None
-        Maximum number of tokens the model is allowed to generate.
-        If None, the API default is used.
+    max_tokens : int, optional
+        Maximum number of output tokens to request. If omitted, no
+        `max_tokens` argument is passed.
 
     return_with_error : bool, default=False
-        If True, the function returns a tuple of (result, error).
-        If False, only the result is returned (backward-compatible behavior).
+        If True, return `(result, error)`. If False, return only `result`.
 
     Returns
     -------
-    Union[str, Dict[str, Any], Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]]
-        - If return_with_error=False:
-            • str when return_json=False
-            • Dict[str, Any] when return_json=True
-        - If return_with_error=True:
-            • Tuple[result, error]
-                result : str or Dict[str, Any]
-                    The model output (or fallback on failure)
-                error : Optional[Dict[str, str]]
-                    None if successful, otherwise a dictionary describing the error
+    str or dict[str, Any] or tuple[str | dict[str, Any], dict[str, str] | None]
+        If `return_with_error=False`, returns either response text
+        (`return_json=False`) or parsed JSON / fallback (`return_json=True`).
 
-    Error Structure
-    ---------------
-    When return_with_error=True, errors are returned as dictionaries:
+        If `return_with_error=True`, returns a tuple containing the result
+        and an error dictionary, or `None` if no error occurred.
 
-        {
-            "type": "<error_type>",
-            "message": "<human-readable message>"
-        }
-
-    Possible error types include:
-        • "api_error"   : Failure during API call or unexpected response structure
-        • "parse_error" : Failure to parse JSON response when return_json=True
+    Raises
+    ------
+    None
+        API and JSON parsing failures are caught internally. Failures are
+        represented through fallback return values and, when requested,
+        structured error metadata.
 
     Notes
     -----
-    - If return_json=True and parsing fails, `fall_back` is returned.
-    - If return_json=False and the API call fails, an empty string is returned.
-    - The function always computes both result and error internally, but only
-    exposes the error when `return_with_error=True`.
-    - Setting `max_tokens` constrains output length only; it does not affect
-    input token limits.
+    The request is sent with `temperature=0`.
+
+    If `return_json=True`, JSON parsing failures return `fall_back` and
+    record a `"parse_error"` when `return_with_error=True`.
+
+    If the API call fails or returns empty content, the function returns
+    `fall_back` for JSON mode and an empty string for text mode. In this
+    case the recorded error type is `"api_error"`.
+
+    This wrapper does not validate returned JSON against `json_schema`
+    locally; it only passes the schema to the model API through
+    `response_format`.
     """
     # create the messages
     messages = [
@@ -313,17 +344,65 @@ def call_reasoning_model(
     max_poll_errors: int = 20,
 ):
     """
-    Execute a reasoning-model job with asynchronous polling.
+    Run a background reasoning-model job and poll until completion.
+
+    Creates a background response using the OpenAI Responses API, then
+    periodically retrieves the response status until the job completes,
+    fails, is cancelled, expires, or exceeds the allowed number of polling
+    errors.
+
+    Parameters
+    ----------
+    prompt : str
+        Prompt submitted to the reasoning model.
+
+    llm_client : OpenAI
+        OpenAI client instance exposing `responses.create()` and
+        `responses.retrieve()`.
+
+    ai_model : str, default="o3-deep-research"
+        Model identifier used when creating the response.
+
+    id_timeout : float, default=30
+        Timeout, in seconds, used when creating the background response job.
+
+    max_retry : int, default=2
+        Maximum number of attempts to create the background response job when
+        transient timeout or connection errors occur.
+
+    poll_interval : int, default=60
+        Number of seconds to wait between response-status polling attempts.
+
+    max_poll_errors : int, default=20
+        Maximum number of consecutive polling timeout or connection errors
+        allowed before the function returns failure.
 
     Returns
     -------
     dict
-        {
-            "status": "success" | "failed",
-            "response": <output_text or response object>,
-            "error": <error details or None>,
-            "response_id": <response id>
-        }
+        Dictionary with the following keys:
+
+        - `status`: `"success"` or `"failed"`
+        - `response`: output text on success, the full response object in
+        some failure cases, or None if no response is available
+        - `error`: None on success, otherwise error details
+        - `response_id`: created response ID, or None if job creation failed
+
+    Notes
+    -----
+    The response is created with `background=True` and with the
+    `web_search_preview` tool enabled.
+
+    Only `APITimeoutError` and `APIConnectionError` are retried during job
+    creation and polling. Other exceptions are not caught.
+
+    If the response status is `"completed"` but `output_text` is empty, the
+    function returns `status="failed"` and includes the full response object
+    for inspection.
+
+    This function blocks while polling. It does not return until the
+    background response reaches a terminal status or polling fails too many
+    times.
     """
 
     def get_resp_id():
@@ -446,23 +525,37 @@ def call_reasoning_model(
 
 
 def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs")):
-
     """
-     Identify the latest completed pipeline stage and provide recovery instructions.
+    Print resume instructions for the most recently completed pipeline stage.
 
-    This helper scans the pipeline run directory for `_done` marker files
-    indicating completed stages. It identifies the most recent stage and
-    prints instructions for resuming the pipeline from that point.
+    Scans the saved pipeline run directory for `_done` marker files, selects
+    the most recently modified marker, and prints the recommended next class
+    to initialize in order to resume the ReadingMachine workflow.
 
     Parameters
     ----------
-    saves_location : str
-        Directory containing saved pipeline state folders.
+    saves_location : str, default=os.path.join(os.getcwd(), "data", "runs")
+        Root directory containing saved pipeline stage folders.
+
+    Returns
+    -------
+    str or None
+        Returns a message if no `_done` files are found. Otherwise, prints
+        resume instructions and returns None.
 
     Notes
     -----
-    This utility is intended to help users recover progress in long
-    pipelines without manually inspecting state directories.
+    Completion is inferred from `_done` marker files stored inside
+    stage-specific save directories. The latest completed stage is selected
+    using the marker file modification time.
+
+    The generated instructions assume the standard ReadingMachine stage
+    directory names, such as `01_search_strings`, `08_insights`, and
+    `09_clusters`.
+
+    This helper covers the getlit and core corpus-reading workflow through
+    clustering. Once synthesis has begun, progress within the summarization
+    workflow should be checked separately using `SummaryState.status()`.
     """
     
     def gen_pipeline_step(latest_file_path):
@@ -513,7 +606,6 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
         # Call the dict to return the text
         return(pipeline_steps[latest_step])
     
-
     done_files = []
     # List all the files 
     for root, dirs, files in os.walk(saves_location):
@@ -521,7 +613,7 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
     
     if len(done_files) == 0:
         return("No steps of the pipeline have been completed. You should start from the beginning.")
-    done_timestamps = [os.path.getmtime(os.path.join(root, file)) for file in done_files]
+    done_timestamps = [os.path.getmtime(file) for file in done_files]
     latest_idx = np.argmax(done_timestamps)
     latest_file = done_files[latest_idx]
     
@@ -535,29 +627,36 @@ def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs"))
 
 def normalize_text(text: str) -> str:
     """
-    Normalize text for downstream comparison and hashing.
+    Normalize text for comparison, matching, and hashing operations.
 
-    This function standardizes text by:
-    - converting to lowercase
-    - collapsing consecutive whitespace
-    - stripping leading/trailing spaces
+    Applies a lightweight normalization procedure that:
 
-    Non-string inputs return an empty string.
+    - converts text to lowercase
+    - collapses consecutive whitespace into a single space
+    - removes leading and trailing whitespace
 
     Parameters
     ----------
     text : str
-        Input text to normalize.
+        Text to normalize.
 
     Returns
     -------
     str
-        Normalized text.
+        Normalized text. Non-string inputs return an empty string.
 
     Notes
     -----
-    - Used to reduce false negatives in both hashing and similarity comparisons.
-    - Does not remove punctuation (handled elsewhere if needed).
+    This normalization is intentionally minimal and is designed to reduce
+    superficial differences that can affect text comparison, similarity
+    matching, and deterministic hashing.
+
+    The function does not remove punctuation, perform stemming, normalize
+    Unicode characters, or apply any semantic transformations.
+
+    Because normalization lowercases text and collapses whitespace, the
+    transformation is lossy and should not be used when exact text
+    preservation is required.
     """
     if not isinstance(text, str):
         return ""
@@ -568,27 +667,39 @@ def normalize_text(text: str) -> str:
 
 def drop_exact_author_title_year(corpus_state: CorpusState) -> CorpusState:
     """
-    Remove exact duplicate records based on author, title, and publication date.
+    Remove exact duplicate papers based on normalized author, title, and date.
 
-    Constructs a normalized composite string of (author + title + date) and
-    removes duplicate entries using exact matching. Updates both `insights`
-    and `full_text` to retain only the deduplicated set of paper_ids.
+    Creates a copy of the supplied CorpusState, constructs a normalized
+    author-title-date key for each row in `insights`, and keeps the first
+    record for each unique key. The deduplicated set of `paper_id` values is
+    then used to filter both `insights` and, when populated, `full_text`.
 
     Parameters
     ----------
     corpus_state : CorpusState
-        Input state containing `insights` and optionally `full_text`.
+        CorpusState containing an `insights` table with `paper_author`,
+        `paper_title`, `paper_date`, and `paper_id` columns.
 
     Returns
     -------
     CorpusState
-        New CorpusState with duplicates removed.
+        A copied CorpusState with duplicate papers removed from `insights`
+        and, if present, `full_text`.
 
     Notes
     -----
-    - Operates on a copy of the input state (does not mutate original).
-    - Intended as a fast, low-risk pre-filter before fuzzy matching.
-    - Assumes that identical author-title-date combinations are duplicates.
+    The input CorpusState is not modified.
+
+    Duplicate detection is based on a normalized concatenation of
+    `paper_author`, `paper_title`, and `paper_date`. Normalization lowercases
+    text, collapses whitespace, and strips leading and trailing spaces.
+
+    The function assumes that records with identical normalized
+    author-title-date keys refer to the same paper. It is intended as a
+    conservative exact-deduplication step before fuzzier duplicate detection.
+
+    Only `insights` and `full_text` are filtered. Other CorpusState tables,
+    such as `chunks`, are not modified.
     """
     # Make working copy
     temp_corpus_state = corpus_state.copy()
@@ -620,28 +731,43 @@ def drop_exact_author_title_year(corpus_state: CorpusState) -> CorpusState:
 
 def drop_exact_hash(corpus_state: CorpusState) -> CorpusState:
     """
-    Remove exact duplicate documents using a hash of normalized full text.
+    Remove exact duplicate documents using normalized full-text hashes.
 
-    Computes an MD5 hash of normalized document text and removes duplicates
-    based on identical hashes. Updates both `insights` and `full_text` to
-    retain only unique documents.
+    Creates a copy of the supplied CorpusState, normalizes each document's
+    full text, computes an MD5 hash of the normalized content, and removes
+    documents with duplicate hashes. The resulting set of unique `paper_id`
+    values is then used to filter both `full_text` and `insights`.
 
     Parameters
     ----------
     corpus_state : CorpusState
-        Input state containing `full_text` and `insights`.
+        CorpusState containing populated `full_text` and `insights` tables.
 
     Returns
     -------
     CorpusState
-        New CorpusState with exact duplicate documents removed.
+        A copied CorpusState containing only unique documents based on
+        normalized full-text content.
 
     Notes
     -----
-    - Uses normalized text to avoid false negatives due to formatting differences.
-    - MD5 is used for speed; collision risk is negligible for this use case.
-    - Operates on a copy of the input state.
-    """ 
+    The input CorpusState is not modified.
+
+    Duplicate detection is based on the normalized document text rather than
+    metadata. Documents with identical normalized text will be treated as
+    duplicates regardless of title, author, or publication metadata.
+
+    Text normalization is performed using `normalize_text()`, which
+    lowercases text, collapses whitespace, and removes leading and trailing
+    spaces before hashing.
+
+    MD5 is used as a fast content-fingerprinting mechanism. While MD5 is not
+    cryptographically secure, collision risk is negligible for document
+    deduplication purposes.
+
+    Only `insights` and `full_text` are filtered. Other CorpusState tables,
+    such as `chunks`, are not modified.
+    """
     # Hash function
     def hash_text(text:str) -> str:
         """
@@ -672,32 +798,41 @@ def drop_exact_hash(corpus_state: CorpusState) -> CorpusState:
 
 def gen_shingles_items(df: pd.DataFrame, k: int = 5) -> Dict[str, set]:
     """
-    Generate k-word shingles for each document in the DataFrame.
+    Generate k-word shingles for a collection of documents.
 
-    Each document is converted into a set of overlapping k-word sequences
-    ("shingles"), which are later used for Jaccard similarity comparison.
+    Normalizes each document's full text and converts it into a set of
+    overlapping k-word sequences ("shingles"). The resulting shingle sets can
+    be used for document-similarity calculations such as Jaccard similarity.
 
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame containing at least:
-        - 'paper_id'
-        - 'full_text'
+
+        - `paper_id`
+        - `full_text`
 
     k : int, default=5
         Number of words per shingle.
 
     Returns
     -------
-    Dict[str, set]
-        Dictionary mapping paper_id → set of shingles.
+    dict[str, set[str]]
+        Dictionary mapping each `paper_id` to its set of k-word shingles.
 
     Notes
     -----
-    - Empty or very short texts return empty sets.
-    - Shingles capture phrase-level structure, making them robust to formatting changes.
-    - Used for full-text near-duplicate detection.
-     """
+    Text is normalized using `normalize_text()` before shingle generation.
+
+    Documents with fewer than `k` words produce empty shingle sets.
+
+    Shingles preserve local phrase structure and are commonly used for
+    near-duplicate detection because they are more robust to minor formatting
+    changes than exact text matching.
+
+    This function is used as a preprocessing step for content-based document
+    deduplication and similarity comparison.
+    """
 
     def gen_shingles(text: str, k: int) -> set:
         """
@@ -727,28 +862,38 @@ def gen_shingles_items(df: pd.DataFrame, k: int = 5) -> Dict[str, set]:
 
 def gen_title_items(df: pd.DataFrame) -> Dict[str, str]:
     """
-    Generate normalized title representations for fuzzy matching.
+    Generate normalized title representations for document comparison.
 
-    Each paper_id is mapped to a normalized version of its title,
-    which is used for fuzzy similarity comparison.
+    Normalizes paper titles and returns a mapping from `paper_id` to the
+    normalized title string. The resulting dictionary is intended for use in
+    title-based similarity matching and duplicate-candidate generation.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame containing:
-        - 'paper_id'
-        - 'paper_title'
+        DataFrame containing at least:
+
+        - `paper_id`
+        - `paper_title`
 
     Returns
     -------
-    Dict[str, str]
-        Dictionary mapping paper_id → normalized title string.
+    dict[str, str]
+        Dictionary mapping each `paper_id` to its normalized title.
 
     Notes
     -----
-    - Only title is used (author/year intentionally excluded).
-    - Designed to surface candidate duplicates for manual review.
-    - Less precise than full-text matching but useful pre-ingestion.
+    Titles are normalized using `normalize_text()`, which lowercases text,
+    collapses whitespace, and removes leading and trailing spaces.
+
+    Only title information is used. Author names, publication dates, and
+    full-text content are intentionally excluded.
+
+    Title-based matching is computationally inexpensive and useful for
+    identifying potential duplicates before document ingestion or full-text
+    processing. However, it is less precise than full-text similarity
+    methods and is generally best used as a candidate-generation step rather
+    than a final deduplication criterion.
     """
     temp_df = df.copy()
     temp_df["normalized_title"] = temp_df["paper_title"].apply(normalize_text)
@@ -756,28 +901,38 @@ def gen_title_items(df: pd.DataFrame) -> Dict[str, str]:
 
 def jaccard_sim(set_a: set, set_b: set) -> float:
     """
-    Compute Jaccard similarity between two sets.
+    Compute the Jaccard similarity between two sets.
 
-    Jaccard similarity is defined as:
+    Jaccard similarity measures the proportion of shared elements between
+    two sets and is defined as:
+
         |A ∩ B| / |A ∪ B|
 
     Parameters
     ----------
     set_a : set
-        First set (e.g., shingles of document A).
+        First set.
 
     set_b : set
-        Second set (e.g., shingles of document B).
+        Second set.
 
     Returns
     -------
     float
-        Similarity score in [0, 1].
+        Jaccard similarity score in the range [0.0, 1.0].
+
+        - 1.0 indicates identical sets.
+        - 0.0 indicates no shared elements.
+        - Intermediate values indicate partial overlap.
 
     Notes
     -----
-    - Returns 0.0 if both sets are empty.
-    - High values (~0.9+) indicate near-identical documents.
+    If both sets are empty, the union is empty and the function returns
+    0.0 by convention.
+
+    This function is commonly used with document shingles for near-duplicate
+    detection, where higher scores indicate greater overlap in phrase-level
+    content.
     """
     intersection = set_a.intersection(set_b)
     union = set_a.union(set_b)
@@ -787,13 +942,12 @@ def jaccard_sim(set_a: set, set_b: set) -> float:
     
     return len(intersection) / len(union)
 
-
 def fuzzy_sim(str_a: str, str_b: str, scorer=fuzz.token_set_ratio) -> float:
     """
-    Compute fuzzy similarity between two strings.
+    Compute fuzzy string similarity using a RapidFuzz scorer.
 
-    Uses RapidFuzz scorers (default: token_set_ratio) to measure
-    similarity between two text strings.
+    Applies the supplied RapidFuzz scoring function to two strings and
+    returns the resulting similarity score.
 
     Parameters
     ----------
@@ -804,17 +958,25 @@ def fuzzy_sim(str_a: str, str_b: str, scorer=fuzz.token_set_ratio) -> float:
         Second string.
 
     scorer : callable, default=fuzz.token_set_ratio
-        RapidFuzz scoring function.
+        RapidFuzz scoring function accepting two strings and returning a
+        similarity score.
 
     Returns
     -------
     float
-        Similarity score (typically 0–100 for token_set_ratio).
+        Similarity score produced by the selected scorer. The score range
+        depends on the scorer used. For `fuzz.token_set_ratio`, values
+        typically range from 0 to 100.
 
     Notes
     -----
-    - token_set_ratio is robust to word order and extra tokens.
-    - Used for metadata-based deduplication (titles).
+    The default scorer, `fuzz.token_set_ratio`, is tolerant of differences
+    in word order and extra tokens, making it useful for title-based and
+    metadata-based duplicate detection.
+
+    This function is a lightweight wrapper around RapidFuzz and performs no
+    additional normalization. Callers should normalize text before
+    comparison when consistent formatting is required.
     """
     score = scorer(str_a, str_b)
     return score
@@ -822,32 +984,51 @@ def fuzzy_sim(str_a: str, str_b: str, scorer=fuzz.token_set_ratio) -> float:
 
 def get_similar_groups(items: Dict[str, Any], similarity_fn, threshold: float) -> pd.DataFrame:
     """
-    Compute fuzzy similarity between two strings.
+    Group items whose pairwise similarity meets or exceeds a threshold.
 
-    Uses RapidFuzz scorers (default: token_set_ratio) to measure
-    similarity between two text strings.
+    Builds an undirected graph in which each item ID is a node and an edge is
+    added between two IDs when their similarity score is greater than or
+    equal to `threshold`. Connected components in this graph are then
+    returned as similarity groups.
 
     Parameters
     ----------
-    str_a : str
-        First string.
+    items : dict[str, Any]
+        Mapping from item IDs to comparable values. In ReadingMachine
+        deduplication workflows, keys are typically `paper_id` values and
+        values are normalized titles, shingle sets, or other comparison
+        representations.
 
-    str_b : str
-        Second string.
+    similarity_fn : callable
+        Function used to compare two item values. Must accept two values from
+        `items` and return a numeric similarity score.
 
-    scorer : callable, default=fuzz.token_set_ratio
-        RapidFuzz scoring function.
+    threshold : float
+        Minimum similarity score required to place an edge between two items.
 
     Returns
     -------
-    float
-        Similarity score (typically 0–100 for token_set_ratio).
+    pd.DataFrame
+        DataFrame with one row per item and the columns:
+
+        - `paper_id`: item ID from the input dictionary
+        - `sim_group`: connected-component group ID, or `-1` for singleton
+        items that have no similar matches
 
     Notes
     -----
-    - token_set_ratio is robust to word order and extra tokens.
-    - Used for metadata-based deduplication (titles).
-    """    
+    Similarity groups are transitive because they are based on connected
+    components. For example, if A is similar to B and B is similar to C, all
+    three items will be assigned to the same group even if A and C do not
+    meet the threshold directly.
+
+    The function performs all pairwise comparisons, so runtime scales
+    quadratically with the number of items.
+
+    Group IDs are assigned from the order of connected components returned
+    by NetworkX and should not be treated as stable identifiers across runs
+    or input order changes.
+    """   
     # Create a graph and add all ids as nodes
     G = nx.Graph()
     G.add_nodes_from(items.keys())
@@ -880,42 +1061,58 @@ def get_similar_groups(items: Dict[str, Any], similarity_fn, threshold: float) -
 
 def prepare_dedup_review(state: CorpusState, threshold: float, engine:str) -> pd.DataFrame:
     """
-    Prepare a DataFrame for manual deduplication review.
+    Prepare candidate duplicate records for manual review.
 
-    This function:
-    1. Removes exact duplicates (hash or author-title-year)
-    2. Builds representations (shingles or titles)
-    3. Computes similarity groups using graph-based clustering
-    4. Returns a DataFrame for manual inspection
+    Creates a copied CorpusState, removes exact duplicates using the selected
+    deduplication strategy, computes pairwise similarity groups, and returns
+    an insights-based review table with similarity group assignments.
 
     Parameters
     ----------
     state : CorpusState
-        Input corpus state containing `insights` and/or `full_text`.
+        CorpusState containing the corpus records to review.
 
     threshold : float
-        Similarity threshold for grouping:
-        - ~0.9 for shingles (Jaccard)
-        - ~85 for fuzzy title matching
+        Minimum similarity score required to group records as candidate
+        duplicates. Expected scale depends on `engine`:
+
+        - `"shingles"`: Jaccard similarity, typically in the range 0.0 to 1.0
+        - `"fuzzy"`: RapidFuzz similarity, typically in the range 0 to 100
 
     engine : str
-        Deduplication method:
-        - "shingles" → full-text similarity
-        - "fuzzy" → title similarity
+        Similarity method to use:
+
+        - `"shingles"`: remove exact full-text duplicates, generate
+        full-text shingles, and group records using Jaccard similarity
+        - `"fuzzy"`: remove exact author-title-year duplicates, normalize
+        titles, and group records using fuzzy title similarity
 
     Returns
     -------
     pd.DataFrame
-        DataFrame of candidate duplicates with columns:
-        - original insights fields
-        - 'sim_group'
+        DataFrame containing the deduplicated `insights` rows plus a
+        `sim_group` column. Candidate duplicate groups receive a positive
+        group ID; singleton records receive `-1`.
+
+    Raises
+    ------
+    ValueError
+        If `engine` is not `"shingles"` or `"fuzzy"`.
 
     Notes
     -----
-    - Does NOT mutate the original state.
-    - Intended for human review (not automatic deletion).
-    - Results are sorted by sim_group to cluster duplicates together.
-    - Full-text method is more precise; fuzzy is broader but noisier.
+    The input CorpusState is not modified.
+
+    This function prepares candidate duplicates for human review. It does
+    not automatically remove near-duplicates.
+
+    Results are sorted by `sim_group` in descending order so grouped
+    candidate duplicates appear together near the top of the review table.
+
+    The `"shingles"` engine requires populated `full_text` and is generally
+    more precise because it compares document content. The `"fuzzy"` engine
+    uses titles only and is useful before full-text ingestion, but is broader
+    and noisier.
     """
     if engine not in ["shingles", "fuzzy"]:
         raise ValueError("engine must be either 'shingles' or 'fuzzy'")
@@ -959,241 +1156,14 @@ def prepare_dedup_review(state: CorpusState, threshold: float, engine:str) -> pd
 # --------------------DEDUPLICATION FUNCTIONS END/----------------------
 
 
-
-
-# def gen_duplicate_check_string(df: pd.DataFrame) -> pd.Series:
-#     """
-#     Generate a string used for duplicate checking.
-
-#     This string combines author names, paper title, and publication year
-#     into a single string for each record.
-
-#     Returns
-#     -------
-#     pd.Series
-#         Series containing the duplicate check strings.
-#     """
-#     for col in ["paper_author", "paper_title", "paper_date"]:
-#         if col not in df.columns:
-#             raise ValueError(f"DataFrame must contain '{col}' column for duplicate removal.")
-
-#     authors_str = df["paper_author"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
-#     authors_str = authors_str.fillna("Unknown Authors")
-#     authors_str = authors_str.apply(lambda x: x if x.strip().lower() else "Unknown Authors")
-#     title_str = df["paper_title"].astype(str)
-#     date_str = df["paper_date"].astype(str)
-
-#     return authors_str + " " + title_str + " " + date_str
-
-# def drop_exact_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Remove exact duplicate literature records.
-
-#     Exact duplicates are identified using a constructed
-#     `duplicate_check_string`, which combines author names,
-#     paper title, and publication year.
-
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#         Input DataFrame containing literature records.
-
-#     Returns
-#     -------
-#     pd.DataFrame
-#         DataFrame with exact duplicates removed.
-
-#     Notes
-#     -----
-#     - This operation is deterministic.
-#     - The first occurrence of a duplicate is retained.
-#     - The helper column `duplicate_check_string` is removed before return.
-#     """
-
-#     df = df.copy()
-
-#     # Construct duplicate matching key
-#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-#     # Drop exact duplicates
-#     df = df.drop_duplicates(subset="duplicate_check_string", keep="first")
-
-#     # Clean up helper column
-#     df = df.drop(columns=["duplicate_check_string"])
-
-#     return df
-
-
-# def get_fuzzy_matches(
-#     df: pd.DataFrame,
-#     similarity_threshold: int = 90,
-# ) -> List[Tuple[str, str]]:
-#     """
-#     Identify potential duplicate records using fuzzy string matching.
-
-#     Computes pairwise similarity scores across all records using
-#     RapidFuzz and returns pairs exceeding the similarity threshold.
-
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#         Input DataFrame containing literature records.
-
-#     similarity_threshold : int, default=90
-#         Minimum similarity score required to flag a pair as a potential duplicate.
-
-#     Returns
-#     -------
-#     List[Tuple[str, str]]
-#         List of tuple pairs representing potentially duplicated records.
-
-#     Notes
-#     -----
-#     - Uses RapidFuzz `token_set_ratio` scorer (word similarity).
-#     - O(N^2) complexity — can become expensive for large corpora.
-#     """
-
-#     df = df.copy()
-
-#     # Generate matching strings
-#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-#     strings = df["duplicate_check_string"].tolist()
-
-#     # Compute pairwise similarity matrix
-#     similarity_matrix = process.cdist(strings, strings, scorer=fuzz.token_set_ratio)
-
-#     fuzzy_pairs: List[Tuple[str, str]] = []
-
-#     for i, row in enumerate(similarity_matrix):
-#         for j, score in enumerate(row):
-#             if i < j and score >= similarity_threshold:
-#                 fuzzy_pairs.append((strings[i], strings[j]))
-
-#     print("Pairwise fuzzy similarity computed.")
-
-#     return fuzzy_pairs
-
-# def get_similar_groups(
-#     df: pd.DataFrame,
-#     fuzzy_pairs: List[Tuple[str, str]]
-# ) -> pd.DataFrame:
-#     """
-#     Group fuzzy duplicate matches into similarity clusters.
-
-#     Constructs a graph where nodes are records and edges represent
-#     high-similarity matches. Connected components define groups
-#     of potentially duplicate records.
-
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#         Input DataFrame containing literature records.
-
-#     fuzzy_pairs : List[Tuple[str, str]]
-#         List of pairwise duplicate matches from `get_fuzzy_matches`.
-
-#     Returns
-#     -------
-#     pd.DataFrame
-#         DataFrame mapping each record to a similarity group.
-
-#         Columns:
-#         - duplicate_check_string
-#         - sim_group (int)
-
-#     Notes
-#     -----
-#     - Records without matches are assigned `sim_group = -1`.
-#     - Groups represent *candidate duplicates*, not confirmed duplicates.
-#     """
-
-#     df = df.copy()
-
-#     if "duplicate_check_string" not in df.columns:
-#         df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-#     # Build graph
-#     graph = nx.Graph()
-#     graph.add_nodes_from(df["duplicate_check_string"])
-#     graph.add_edges_from(fuzzy_pairs)
-
-#     # Identify connected components
-#     components = list(nx.connected_components(graph))
-
-#     grouped_records = []
-    
-#     for group_id, component in enumerate(components, start=1):
-#         for string in component:
-#             grouped_records.append({
-#                 "duplicate_check_string": string,
-#                 "sim_group": group_id if len(component) > 1 else -1
-#             })
-
-#     groups_df = pd.DataFrame(grouped_records)
-
-#     return groups_df
-
-# def prepare_fuzzy_review_df(
-#     df: pd.DataFrame,
-#     similarity_threshold: int = 90
-# ) -> pd.DataFrame:
-#     """
-#     Prepare a DataFrame for manual duplicate review.
-
-#     This function:
-#     1. Generates fuzzy matches
-#     2. Groups them into similarity clusters
-#     3. Merges results back with original data
-
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#         Input DataFrame containing literature records.
-
-#     similarity_threshold : int, default=90
-#         Threshold for fuzzy matching.
-
-#     Returns
-#     -------
-#     pd.DataFrame
-#         DataFrame suitable for manual inspection.
-
-#     Notes
-#     -----
-#     - Output should be exported (CSV/Excel) for manual review.
-#     - Users should delete duplicate rows manually.
-#     """
-
-#     df = df.copy()
-
-#     # Step 1: generate matching strings
-#     df["duplicate_check_string"] = gen_duplicate_check_string(df)
-
-#     # Step 2: fuzzy match pairs
-#     fuzzy_pairs = get_fuzzy_matches(df, similarity_threshold)
-
-#     # Step 3: group matches
-#     groups_df = get_similar_groups(df, fuzzy_pairs)
-
-#     # Step 4: merge back for inspection
-#     review_df = groups_df.merge(
-#         df,
-#         how="left",
-#         on="duplicate_check_string"
-#     )
-
-#     # Sort to make manual review easier
-#     review_df = review_df.sort_values(by=["sim_group"], ascending=False).reset_index(drop=True)
-
-#     return review_df
-
-
-
 def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -> pd.DataFrame:
     """
-    Safely concatenate two DataFrames, ensuring schema consistency. Built because of pandas new behavior of not allowing astype on empty columns, 
-    which was causing issues with our previous concat approach where we were filling missing columns with NaN and then trying to astype to ensure consistent dtypes across runs.
+    Concatenate two DataFrames using one DataFrame as the schema reference.
+
+    Aligns the non-reference DataFrame to the columns and dtypes of the
+    reference DataFrame before concatenation. Missing columns are created
+    with the reference dtype, columns are reordered to match the reference,
+    and existing columns are cast to the reference schema.
 
     Parameters
     ----------
@@ -1204,12 +1174,32 @@ def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -
         Second DataFrame.
 
     schema_from : str
-        Source of the schema to enforce ("top" or "bottom").
+        Which DataFrame should provide the output schema. Must be one of:
+
+        - `"top"`: use `df1` as the schema reference and return `df1`
+        followed by aligned `df2`
+        - `"bottom"`: use `df2` as the schema reference and return aligned
+        `df1` followed by `df2`
 
     Returns
     -------
     pd.DataFrame
-        Concatenated DataFrame with consistent schema.
+        Concatenated DataFrame whose columns and dtypes follow the selected
+        reference schema.
+
+    Raises
+    ------
+    ValueError
+        If `schema_from` is not `"top"` or `"bottom"`.
+
+    Notes
+    -----
+    Columns present only in the non-reference DataFrame are dropped, because
+    the output is restricted to the reference schema.
+
+    This helper exists to make concatenation stable across runs when one side
+    may be empty or missing columns. Missing columns are created with the
+    target dtype directly rather than being filled with `NaN` and cast later.
     """
     if schema_from == "top":
         ref = df1
@@ -1240,24 +1230,55 @@ def concat_with_schema(df1: pd.DataFrame, df2: pd.DataFrame, schema_from: str) -
 
 def safe_pickle(obj, path, retries=6, base_delay=0.05, backoff=2.0):
     """
-    Safely pickles an object to disk using atomic replace with retry + exponential backoff.
+    Persist an object to disk using atomic file replacement with retry logic.
+
+    Serializes an object using pickle, writes it to a temporary file, flushes
+    the file contents to disk, and then atomically replaces the target file
+    using `os.replace()`. If the replacement fails due to a transient
+    `PermissionError`, the operation is retried using exponential backoff.
 
     Parameters
     ----------
     obj : Any
-        The object to pickle.
+        Object to serialize.
+
     path : str
-        The file path to save the pickle.
-    retries : int
-        Number of replace attempts before failing.
-    base_delay : float
-        Initial delay between retries (seconds).
-    backoff : float
-        Multiplier for exponential backoff.
+        Destination file path.
+
+    retries : int, default=6
+        Maximum number of write/replace attempts before raising an error.
+
+    base_delay : float, default=0.05
+        Initial delay between retry attempts, in seconds.
+
+    backoff : float, default=2.0
+        Multiplicative factor applied to the retry delay after each failed
+        attempt.
 
     Returns
     -------
     None
+
+    Raises
+    ------
+    PermissionError
+        If all retry attempts fail due to file-access issues.
+
+    RuntimeError
+        If the function reaches an unexpected failure state after exhausting
+        retries.
+
+    Notes
+    -----
+    The object is first written to a uniquely named temporary file and then
+    moved into place with `os.replace()`. This helps prevent partially
+    written pickle files from being observed by other processes.
+
+    File contents are explicitly flushed and synchronized to disk using
+    `flush()` and `os.fsync()` before replacement.
+
+    Retry logic only handles `PermissionError`. Any other exception raised
+    during serialization or file operations is propagated immediately.
     """
     temp_path = f"{path}.{uuid.uuid4().hex}.tmp"
     delay = base_delay
@@ -1287,37 +1308,49 @@ def sample_to_word_limit(
     seed: int = config.seed
 ):
     """
-    Randomly sample a list of text items so that the total word count
-    does not exceed a specified limit.
+    Randomly sample text items up to a cumulative word-count limit.
 
-    This function shuffles the input list and selects a prefix whose
-    cumulative word count remains within `max_words`. It is designed
-    to enforce input size constraints for LLM calls while preserving
-    a representative random subset of the original data.
+    Shuffles the input collection and selects items sequentially until
+    adding the next item would exceed `max_words`. The result is a random
+    subset whose total word count remains within the specified budget.
 
     Parameters
     ----------
-    texts : List[str]
-        List of text items (e.g. insights) to sample from.
+    texts : Sequence[str]
+        Collection of text items to sample from.
 
-    max_words : int
-        Maximum total word count allowed across the selected texts.
+    max_words : int, default=70000
+        Maximum cumulative word count permitted across the selected items.
 
-    seed : Optional[int], default=None
-        Random seed for reproducibility.
+    seed : int, default=config.seed
+        Random seed used to initialize the shuffle for reproducible
+        sampling.
 
     Returns
     -------
-    List[str]
-        Subset of input texts whose combined word count does not
-        exceed `max_words`.
+    list[str]
+        Randomly ordered subset of the input texts whose combined word count
+        does not exceed `max_words`.
 
     Notes
     -----
-    - Sampling is uniform over permutations (via shuffle).
-    - Order is not preserved.
-    - This is preferable to count-based sampling when model constraints
-      depend on total input size rather than number of items.
+    Sampling is performed by shuffling the input and then taking the longest
+    prefix that satisfies the word-count constraint.
+
+    The original order of `texts` is not preserved.
+
+    Word count is estimated using `len(text.split())`.
+
+    This function is used to constrain prompt size when a complete insight
+    set exceeds the practical input limits of a synthesis step. In the
+    ReadingMachine workflow, any resulting omissions are expected to be
+    recovered through downstream orphan detection, reinsertion, and
+    iterative re-theming.
+
+    Because selection is prefix-based after shuffling, inclusion
+    probabilities are not identical to sampling without replacement under a
+    fixed-size design. The function prioritizes respecting the word budget
+    rather than producing a statistically representative sample.
     """
 
     random.seed(seed)
