@@ -454,37 +454,47 @@ class Ingestor:
         return ""
 
     @staticmethod
-    def _html_chunker(clean_html: str, token_limit: int = 16000) -> List[str]:
+    def _html_chunker(clean_html: str, chunk_size: int = 16000) -> List[str]:
         """
-        Split cleaned HTML text into segments suitable for LLM processing.
+        Split cleaned HTML text into fixed-size character chunks.
 
-        Large HTML documents may exceed the token limits of the model used
-        for HTML parsing. This function divides the cleaned text into chunks
-        that can be safely processed by the LLM.
+        This helper is used to keep HTML-derived text within manageable input
+        limits before sending it to an LLM for content extraction. The function
+        performs a simple sequential split based on character count and does not
+        attempt to preserve paragraphs, sentences, or other semantic boundaries.
 
         Parameters
         ----------
         clean_html : str
-            Plain-text HTML content.
+            Plain-text content extracted from an HTML document.
 
-        token_limit : int
-            Maximum character length per chunk.
+        chunk_size : int, default=16000
+            Maximum number of characters per chunk.
 
         Returns
         -------
         List[str]
-            List of text segments to be processed by the LLM.
+            List of text chunks covering the full input in original order.
+
+        Notes
+        -----
+        The chunk size is measured in characters, not tokens. Actual token
+        counts will vary depending on the content and tokenizer used by the
+        downstream language model.
+
+        Empty inputs return a single empty string to preserve downstream
+        processing expectations.
         """
         if len(clean_html) == 0:
             return [""]
-        elif len(clean_html) > token_limit:
+        elif len(clean_html) > chunk_size:
             chunks: List[str] = []
             start = 0
-            end = token_limit
+            end = chunk_size
             while start < len(clean_html):
                 chunks.append(clean_html[start:end])
-                start += token_limit
-                end += token_limit
+                start += chunk_size
+                end += chunk_size
             return chunks
         else:
             return [clean_html]
@@ -530,15 +540,21 @@ class Ingestor:
 
     def _paper_ingestor(self, file_full_path: str) -> List[str]:
         """
-        Dispatch ingestion based on file type.
+        Parse a document into text segments based on file type.
 
-        This method determines the file format and routes the document to
-        the appropriate ingestion routine.
+        This method dispatches ingestion to the appropriate parser according to
+        the document extension and returns a list of text segments representing
+        the document contents.
 
-        Supported formats:
+        Supported formats
+        -----------------
+        PDF
+            Extracted page-by-page using PyMuPDF.
 
-        - PDF → parsed with PyMuPDF
-        - HTML → cleaned, chunked, and optionally processed by the LLM
+        HTML
+            Read from disk, cleaned using rule-based HTML parsing, split into
+            character-based chunks, and passed through an LLM to extract the
+            primary textual content of the page.
 
         Parameters
         ----------
@@ -548,7 +564,22 @@ class Ingestor:
         Returns
         -------
         List[str]
-            List of text segments representing the document contents.
+            Ordered text segments representing the document contents.
+
+            For PDFs, each element typically corresponds to a page.
+
+            For HTML files, each element corresponds to an LLM-processed chunk
+            of extracted page content.
+
+        Notes
+        -----
+        HTML ingestion intentionally combines deterministic cleaning with LLM
+        extraction. The cleaning step removes common structural elements such as
+        navigation menus and scripts, while the LLM pass attempts to isolate the
+        substantive content of the page.
+
+        Unsupported file types return a single-item list containing the string
+        ``"Unsupported file type"``.
         """
         if Path(file_full_path).suffix.lower() == ".pdf":
             return self._ingest_pdf(file_full_path)
@@ -565,36 +596,64 @@ class Ingestor:
 
     def ingest_papers(self) -> pd.DataFrame:
         """
-        Ingest all documents in the configured directory.
+        Ingest all PDF and HTML documents found in the configured corpus directory.
 
         This method performs the primary ingestion workflow:
 
-        1. Discover files in the ingestion directory
-        2. Parse each document into text
-        3. Track ingestion success or failure
-        4. Match ingested documents with expected `paper_id` values
-        5. Construct the `full_text` corpus table
-        6. Clean the insights table of unmatched or unused records
+        1. Discover supported files recursively under `self.file_path`.
+        2. Parse each document into page- or segment-level text.
+        3. Record ingestion success or failure for each file.
+        4. Match ingested files to existing `question_id` and `paper_id` records.
+        5. Store concatenated document text in `corpus_state.full_text`.
+        6. Filter `corpus_state.insights` to successfully ingested, matched papers.
+        7. Record unmatched, missing, failed, and dropped papers for user review.
 
-        The resulting full text representation is stored in
-        `corpus_state.full_text`.
+        File identity is derived from the filename stem as `paper_id` and from
+        the immediate parent directory name as `question_id`. These identifiers
+        are used to merge ingested text with the existing insights table.
+
+        Side Effects
+        ------------
+        Mutates `self.corpus_state` in place:
+
+        - `corpus_state.full_text` is populated with one row per successfully
+        ingested paper and columns `paper_id` and `full_text`.
+        - `corpus_state.insights` is filtered to rows with successfully ingested
+        matching files.
+        - `self.ingestion_errors` is reset and populated with files that failed
+        parsing.
+        - `self.failed_id_matches` is populated when file/metadata ID mismatches
+        are detected.
+        - `self.dropped_papers` is populated with expected records for which no
+        successfully ingested file was available.
 
         Returns
         -------
+        None
+            Returned on successful completion.
+
+        List[str]
+            Returned only if the user aborts after ingestion errors. Contains
+            paths for files that failed ingestion.
+
         pd.DataFrame
-            Updated insights table with only successfully ingested papers.
+            Returned only if the user aborts after file/metadata ID mismatches.
+            Contains the mismatched records.
+
+        Raises
+        ------
+        ValueError
+            If no supported PDF or HTML files are found in `self.file_path`.
 
         Notes
         -----
-        The method performs several integrity checks:
+        The method does not modify or delete files on disk. Records without
+        successfully ingested text are removed only from the in-memory
+        `corpus_state.insights` used for downstream processing.
 
-        - documents without matching IDs are flagged
-        - expected documents without files are reported
-        - ingestion failures are tracked in `.ingestion_errors`
-
-        User confirmation prompts are used when mismatches occur to
-        prevent accidental loss of records.
-        
+        User confirmation prompts are used when ingestion errors or ID mismatches
+        are detected, allowing the user to abort and inspect the recorded
+        diagnostic attributes before continuing.
         """
         
         working_insights = (
@@ -788,70 +847,73 @@ class Ingestor:
     
     @staticmethod
     def _metadata_type_check(x, desired_type):
-            """
-            Normalize and validate metadata values returned by the LLM.
+        """
+        Normalize metadata values returned by the LLM.
 
-            LLM responses can contain inconsistent or unexpected data types
-            (e.g., strings, lists, dictionaries, or malformed values). This
-            helper function coerces metadata values into the expected type
-            while safely handling missing or invalid entries.
+        This helper performs lightweight type coercion and missing-value
+        handling for metadata fields extracted from documents. It is primarily
+        used to standardize publication titles, authors, and publication years
+        before they are written into corpus metadata tables.
 
-            The function applies the following rules:
+        The function applies the following rules:
 
-            - Explicit missing values (`NA`, empty strings, or pandas NA)
-            are converted to `pd.NA`.
-            - If a string is provided and the desired type is `int`,
-            the function attempts to parse the string as an integer
-            (used primarily for publication year).
-            - If the value already matches the desired type, it is
-            returned unchanged.
-            - Unexpected structures (lists, dictionaries, etc.) are
-            treated as missing values and converted to `pd.NA`.
+        - Missing values (`pd.NA`, empty strings, or the string `"NA"`)
+        are converted to `pd.NA`.
+        - String values are stripped of surrounding whitespace.
+        - When `desired_type` is `int`, non-empty strings are converted
+        using `int()`.
+        - Values already matching the requested type are returned unchanged.
+        - Unexpected value types (e.g., lists, dictionaries, or unsupported
+        objects) are treated as missing and converted to `pd.NA`.
 
-            Parameters
-            ----------
-            x : Any
-                Metadata value returned by the LLM.
+        Parameters
+        ----------
+        x : Any
+            Metadata value returned by the LLM.
 
-            desired_type : type
-                Expected Python type for the metadata field. Currently
-                used with `str` (title, author) and `int` (publication year).
+        desired_type : type
+            Expected Python type for the field. Typical values are:
 
-            Returns
-            -------
-            Any
-                A cleaned value matching the desired type, or `pd.NA`
-                if the input cannot be safely converted.
+            - `str` for titles and authors
+            - `int` for publication years
 
-            Notes
-            -----
-            This function exists to protect the integrity of the corpus
-            metadata tables. LLM outputs are inherently probabilistic and
-            may occasionally return unexpected formats; treating such values
-            as missing prevents downstream type errors and preserves the
-            stability of joins and aggregations later in the pipeline.
-            """
-            # Missing or explicit NA
-            if pd.isna(x):
-                return pd.NA
-            if isinstance(x, str):
-                s = x.strip()
-                if s.upper() == "NA" or s == "":
-                    return pd.NA
-                # Convert year-like strings when int requested
-                if desired_type is int:
-                    return int(s)  # assumes s is YYYY
-                if desired_type is str:
-                    return s
+        Returns
+        -------
+        Any
+            A normalized value matching the requested type, or `pd.NA`
+            when the value is missing or unsupported.
 
-            # Non-string already correct type
-            if desired_type is int and isinstance(x, int):
-                return x
-            if desired_type is str and isinstance(x, str):
-                return x
+        Notes
+        -----
+        This function performs minimal validation. When `desired_type` is
+        `int`, string values are passed directly to `int()` and invalid
+        numeric strings will raise a `ValueError`.
 
-            # If something unexpected comes back (e.g., list/dict), treat as missing
+        The function exists primarily to enforce consistent metadata typing
+        and prevent malformed LLM outputs from propagating into downstream
+        joins, filtering operations, and corpus metadata tables.
+        """
+        # Missing or explicit NA
+        if pd.isna(x):
             return pd.NA
+        if isinstance(x, str):
+            s = x.strip()
+            if s.upper() == "NA" or s == "":
+                return pd.NA
+            # Convert year-like strings when int requested
+            if desired_type is int:
+                return int(s)  # assumes s is YYYY
+            if desired_type is str:
+                return s
+
+        # Non-string already correct type
+        if desired_type is int and isinstance(x, int):
+            return x
+        if desired_type is str and isinstance(x, str):
+            return x
+
+        # If something unexpected comes back (e.g., list/dict), treat as missing
+        return pd.NA
     
     def _populate_metadata(self, 
                            metadata_check_df: pd.DataFrame, # The dataframe containing the columns neccesary for the metadata check which is paper_id, paper_title, paper_author, paper_date, and full_text.
@@ -859,35 +921,76 @@ class Ingestor:
                            ) -> List[pd.DataFrame]:
         
         """
-        Populate document metadata using LLM extraction.
+        Populate and persist document metadata using LLM extraction.
 
-        This method iterates through papers in the corpus and extracts
-        metadata fields using `_get_metadata_from_llm`.
+        This method iterates over documents requiring metadata and extracts
+        publication information using `_get_metadata_from_llm`. Extracted values
+        are subsequently normalized using `_metadata_type_check` before being
+        stored.
 
-        Intermediate results are written to a pickle file so the process
-        can be resumed if interrupted.
+        To support long-running corpus ingestion workflows, results are written
+        to disk after each paper using a pickle file. If a previous metadata
+        extraction run was interrupted, processing can resume from the last
+        successfully completed paper by supplying `recovered_metadata_check`.
+
+        For each paper the method extracts:
+
+        - paper_title
+        - paper_author
+        - paper_date
+
+        Metadata extraction is performed using only the first 5000 characters of
+        the document text to reduce token usage and latency.
 
         Parameters
         ----------
         metadata_check_df : pd.DataFrame
-            DataFrame containing paper identifiers and text used for
-            metadata extraction.
+            DataFrame containing the metadata fields and document text required
+            for extraction. Expected columns include:
 
-        recovered_metadata_check : List[pd.DataFrame], optional
-            Previously completed metadata extraction results used when
-            resuming a partially completed run.
+            - paper_id
+            - full_text
+
+        recovered_metadata_check : Optional[List[pd.DataFrame]], default=None
+            Previously recovered metadata records from an interrupted run. When
+            supplied, completed papers are skipped and processing resumes from
+            the next unprocessed row.
 
         Returns
         -------
         List[pd.DataFrame]
-            List of metadata records, one per processed paper.
+            Metadata records keyed by `paper_id`.
+
+            Each element is a single-row DataFrame containing:
+
+            - paper_id
+            - paper_title
+            - paper_author
+            - paper_date
+
+        Side Effects
+        ------------
+        Creates or updates:
+
+            {pickle_path}/metadata_check.pkl
+
+        after each successfully processed paper, allowing interrupted runs to
+        resume without reprocessing completed documents.
+
+        Notes
+        -----
+        This method performs extraction only. Consolidation of metadata records
+        back into corpus-level tables occurs in downstream processing.
+
+        Metadata values are normalized before storage to enforce consistent
+        typing and to convert unsupported or missing values to `pd.NA`.
         """
         # If there is no recovered metadata passed to the function then start with an empty list, otherwise start with the recovered metadata
         if recovered_metadata_check is None:
             output = []
         else:
             output = recovered_metadata_check
-            # Get the lenght of this list to see how many entries have been handled and drop them
+            # Get the length of this list to see how many entries have been handled and drop them
             start = len(recovered_metadata_check) 
             metadata_check_df = metadata_check_df[start:] 
 
@@ -920,27 +1023,48 @@ class Ingestor:
 
     def update_metadata(self) -> pd.DataFrame:
         """
-        Update paper metadata using LLM extraction.
+        Update corpus metadata using LLM extraction.
 
-        This method identifies papers with missing or incomplete metadata
-        and attempts to populate the following fields:
+        This method prepares a metadata-check table by combining existing
+        `corpus_state.insights` metadata with document text from
+        `corpus_state.full_text`. It then extracts publication metadata for
+        each paper using `_populate_metadata` and replaces the existing metadata
+        columns in `corpus_state.insights` with the extracted values.
+
+        The following fields are updated:
 
         - paper_title
         - paper_author
         - paper_date
 
-        The metadata is extracted from the beginning of each document's
-        full text and then merged back into `corpus_state.insights`.
-
-        Resume support
+        Resume Support
         --------------
-        If a previous metadata extraction run was interrupted, the method
-        can resume from a stored pickle file containing partial results.
+        If `{pickle_path}/metadata_check.pkl` exists, the user is prompted to
+        either resume from the saved metadata extraction results or rerun
+        metadata extraction from the beginning.
+
+        Side Effects
+        ------------
+        Mutates `self.corpus_state.insights` in place by replacing the existing
+        metadata columns with the newly extracted metadata.
+
+        Reads from and may extend:
+
+            {pickle_path}/metadata_check.pkl
+
+        through `_populate_metadata`.
 
         Returns
         -------
         pd.DataFrame
-            Updated insights DataFrame containing the completed metadata.
+            Updated `corpus_state.insights` DataFrame containing the extracted
+            metadata columns.
+
+        Raises
+        ------
+        MergeError
+            If merging extracted metadata back into `corpus_state.insights`
+            violates the one-to-one `paper_id` validation.
         """
         #Create the metadata check which is the dataframe containing the columns i need for the check
         metadata_check_df = (
@@ -992,43 +1116,60 @@ class Ingestor:
         return self.corpus_state.insights
     
     
-    def drop_duplicates(self, threshold = 0.9) -> pd.DataFrame:
+    def drop_duplicates(self, threshold: float = 0.9) -> None:
         """
-         Perform the duplicate detection stage of the pipeline and generate a review file.
+        Detect potential duplicate documents and generate a review file.
 
-        This method identifies potential duplicate documents using full-text similarity
-        (shingles + Jaccard) and prepares a CSV file for manual review. It represents
-        the "deduplication step" in the pipeline, but does NOT modify the corpus state.
+        This method performs the duplicate-detection stage of the ingestion
+        workflow. Potential duplicates are identified using full-text similarity
+        and exported to a review file for human inspection.
 
-        The user is expected to:
-        1. Open the generated CSV file
-        2. Review grouped duplicates (`sim_group`)
-        3. Remove duplicate rows (keeping one per document)
-        4. Run `update_state()` to apply the changes
+        The method does not modify `corpus_state`. Instead, it prepares a
+        human-in-the-loop deduplication workflow in which the user reviews and
+        edits the generated file before applying changes through
+        `update_state()`.
+
+        Workflow
+        --------
+        1. Detect potential duplicate documents using full-text similarity.
+        2. Export candidate duplicate groups to a review CSV.
+        3. Manually inspect each similarity group (`sim_group`).
+        4. Remove duplicate rows while retaining a single canonical record.
+        5. Run `update_state()` to apply the reviewed results.
 
         Parameters
         ----------
         threshold : float, default=0.9
-            Similarity threshold for grouping documents using Jaccard similarity.
-            Must be between 0 and 1. Higher values result in stricter duplicate detection.
+            Jaccard similarity threshold used to group documents into
+            candidate duplicate sets.
+
+            Values should fall between 0 and 1.
+
+            Higher values require greater textual similarity before documents
+            are grouped together.
 
         Returns
         -------
         None
-            This function does not return a DataFrame. It writes a CSV file for manual review.
 
         Side Effects
         ------------
-        - Writes a CSV file to:
-        `self.fuzzy_check_path / self.RUN / duplicate_check.csv`
-        - Prints instructions for completing the deduplication workflow
+        Writes:
+
+            {self.fuzzy_check_path}/{self.RUN}/duplicate_check.csv
+
+        containing grouped candidate duplicates for manual review.
 
         Notes
         -----
-        - This function is part of a prescriptive CLI pipeline:
-        detection → manual review → update_state
-        - The corpus state remains unchanged until `update_state()` is called
-        - Uses full-text similarity for high-precision duplicate detection
+        This method intentionally separates duplicate detection from duplicate
+        removal. The final decision about whether documents are true duplicates
+        remains with the user.
+
+        Duplicate detection is based on full-text similarity using a shingle-
+        based Jaccard approach rather than metadata matching alone. This helps
+        identify duplicate content even when titles, filenames, or metadata
+        differ.
         """
         # Set the save path for use to insepct
         save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
@@ -1045,56 +1186,6 @@ class Ingestor:
         )
 
         return None
-
-    
-    # def drop_duplicates(self) -> pd.DataFrame:
-    #     """
-    #     Remove exact duplicates from insights using metadata.
-
-    #     Returns
-    #     -------
-    #     pd.DataFrame
-    #         Deduplicated DataFrame.
-    #     """
-
-    #     dropped_exact = utils.drop_exact_duplicates(self.corpus_state.insights)
-
-    #     # Store for fuzzy pass
-    #     self.dropped_exact_dupes = dropped_exact.copy()
-
-    #     return self.dropped_exact_dupes
-
-    # def drop_fuzzy_duplicates(self, similarity_threshold: int = 90) -> pd.DataFrame:
-    #     """
-    #     Generate fuzzy duplicate candidates for manual review.
-
-    #     Returns
-    #     -------
-    #     None
-    #     """
-
-    #     if not hasattr(self, "dropped_exact_dupes"):
-    #         raise ValueError("Run drop_duplicates() before drop_fuzzy_duplicates().")
-
-    #     review_df = utils.prepare_fuzzy_review_df(
-    #         self.dropped_exact_dupes,
-    #         similarity_threshold=similarity_threshold
-    #     )
-
-    #     # Create run-specific folder
-    #     save_dir = os.path.join(self.fuzzy_check_path, self.RUN)
-    #     os.makedirs(save_dir, exist_ok=True)
-
-    #     output_path = os.path.join(save_dir, "fuzzy_matches.csv")
-    #     review_df.to_csv(output_path, index=False)
-
-    #     print(
-    #         f"Fuzzy duplicate review file saved to {output_path}.\n"
-    #         "Delete duplicate rows and keep one per paper.\n"
-    #         "Then run update_state()."
-    #     )
-
-    #     return None
 
     def update_state(self, 
                      filename: str, 
