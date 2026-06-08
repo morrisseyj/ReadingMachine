@@ -8,8 +8,6 @@
 \usepackage{xcolor}
 \usepackage[margin=1in]{geometry}
 \setcounter{secnumdepth}{3} % number sections through subsubsections
-\usepackage{fontspec}
-\setmainfont{Latin Modern Roman}
 % Use upquote if available, for straight quotes in verbatim environments
 \IfFileExists{upquote.sty}{\usepackage{upquote}}{}
 \IfFileExists{microtype.sty}{% use microtype if available
@@ -141,7 +139,7 @@ information early, often flattening disagreement and discarding nuance.
 Agentic research systems explore selectively, producing analyses that
 depend heavily on intermediate decisions and paths taken \cite{he2025}. 
 In all cases, omission is common and difficult to detect
-\cite{laban2024, liu2024}.
+\cite{laban2024,liu2024}.
 
 This creates a fundamental constraint on knowledge work. As writing
 scales, reading does not---at least not in a way that preserves
@@ -280,13 +278,13 @@ representations tend toward generalization at the expense of
 specificity. Each stage of compression reduces the recoverability of the
 original material \cite{cohan2018}. Problems of missing middle and
 dropped insights during synthesis/integration repeat here as context
-window pressure grows \cite{liu2024, laban2024}.
+window pressure grows \cite{liu2024,laban2024}.
 
 Agentic research workflows attempt to mitigate these issues through
 iterative search and refinement. However, because they depend on
 sequences of intermediate decisions---what to query, what to retrieve,
 how to interpret---small variations in prompts or trajectories can
-produce substantially different results \cite{yao2022, he2025}. 
+produce substantially different results \cite{yao2022,he2025}. 
 Coverage remains partial, and omissions remain implicit.
 
 For these reasons, high-stakes synthesis tasks over large corpora
@@ -612,7 +610,7 @@ not appear in that theme's synthesized summary. As such, they represent
 omissions introduced during the theme synthesis stage. This design
 responds to known long-context failure modes, including position
 sensitivity and incomplete coverage of relevant insights during
-summarization \cite{liu2024, laban2024}.
+summarization \cite{liu2024,laban2024}.
 
 Orphan detection is performed by comparing the set of insights assigned
 to each theme with the content of the corresponding theme summary.
