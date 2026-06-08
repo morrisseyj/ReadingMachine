@@ -1,127 +1,132 @@
 """
-State management for the ReadingMachine analytical pipeline.
+Persistent state management for the ReadingMachine pipeline.
 
-This module defines the two persistent state objects that track the
-transformation of a document corpus through the ReadingMachine workflow:
+This module defines the two primary state objects used to persist and
+reconstruct analytical progress throughout the ReadingMachine workflow:
 
     CorpusState
     SummaryState
 
-The objects correspond to two distinct phases of the methodology.
+Together these classes separate the reading layer from the synthesis
+layer, allowing corpus representation and thematic synthesis to evolve
+independently while remaining linked through a common insight-level
+representation.
 
-Corpus processing
------------------
+Corpus reading
+--------------
 Handled by `CorpusState`.
 
-This stage represents the structured reading of the corpus and records
-how raw documents are transformed into analytical units.
-
-The transformation sequence is:
+CorpusState stores the structured representations generated during
+document ingestion, chunking, and insight extraction. It captures the
+progressive transformation of source material into an inspectable
+corpus-level representation:
 
     documents
-    → full text
-    → chunks
-    → insights
+        ↓
+    full_text
+        ↓
+    chunks
+        ↓
+    insights
 
-The `insights` table acts as the central semantic index of the corpus.
-All downstream analysis operates on these extracted claims rather than
-directly on the document text.
+The `insights` table serves as the primary analytical representation of
+the corpus. Downstream processes such as embedding generation,
+clustering, theme construction, orphan detection, and synthesis operate
+on insights rather than directly on source documents.
 
-`CorpusState` therefore preserves the lineage required for traceability:
-
-    theme
-    → insight
-    → chunk
-    → document
-
-Each insight retains identifiers linking it to the originating text
-segment, enabling citation-anchored synthesis and auditability.
-
-The corpus representation is intended to be **append-only**. Once
-documents are ingested and insights are generated, the corpus state
-should be treated as immutable for the duration of an analysis run.
-Changes to the corpus (for example adding documents or modifying
-extraction prompts) should result in the creation of a new
-`CorpusState`.
+CorpusState preserves the intermediate structures required for
+traceability between synthesized outputs and source material by
+maintaining the relationships between documents, chunks, and extracted
+insights.
 
 Thematic synthesis
 ------------------
 Handled by `SummaryState`.
 
-This stage represents the interpretive organization of extracted
-insights into thematic structures.
+SummaryState stores the iterative synthesis artifacts generated from the
+insight representation held in CorpusState. Rather than storing a single
+final summary, it preserves the sequence of synthesis outputs produced as
+the thematic structure is refined.
 
-Unlike `CorpusState`, which stores tidy analytical tables,
-`SummaryState` records **pipeline passes**. Each stage of the
-summarization workflow produces a DataFrame that is appended to a list,
-preserving the full history of synthesis iterations.
-
-The synthesis workflow proceeds through the following stages:
+The synthesis workflow proceeds through successive stages:
 
     cluster summaries
-    → theme schema generation
-    → insight-to-theme mapping
-    → theme population
-    → orphan detection
-    → iteration
-    → redundancy handling
+        ↓
+    theme schema generation
+        ↓
+    insight-to-theme mapping
+        ↓
+    theme population
+        ↓
+    orphan detection and reinsertion
+        ↓
+    theme refinement / re-theming
+        ↓
+    redundancy handling (optional)
 
-Each iteration of this process produces a new entry in the relevant
-artifact lists. This design allows researchers to inspect how the
-thematic structure evolves across synthesis passes.
+Each stage generates one or more DataFrame artifacts that are appended
+to stage-specific lists. This preserves the history of synthesis passes
+and enables inspection of how thematic structures evolve over time.
 
 Persistence
 -----------
-Both state objects are designed to be persisted to disk using Parquet
-serialization.
+Both state objects support persistence through Parquet serialization.
 
 CorpusState:
-    Each analytical table is stored as a separate Parquet file
-    (questions, full_text, chunks, insights).
+    Stores analytical tables as separate Parquet files representing the
+    current corpus representation.
 
 SummaryState:
-    Each synthesis pass is stored as an individual Parquet file
-    within the summary output directory.
+    Stores synthesis artifacts as sequential Parquet files representing
+    the history of thematic synthesis.
 
-This approach enables:
+This architecture supports:
 
-- resumable pipelines
+- resumable workflows
 - inspection of intermediate artifacts
+- iterative synthesis development
 - reproducible analytical runs
 
 Fingerprinting
 --------------
 Both state objects implement deterministic fingerprint functions.
 
-These hashes are computed from normalized DataFrame representations and
-are used to detect changes in the analytical state when resuming a
-pipeline. If the fingerprint differs from the expected value, the
-pipeline can warn the user that the analytical lineage has changed.
+Fingerprints are generated from normalized DataFrame representations and
+are used to validate analytical state during resume operations. These
+hashes help detect unexpected changes in corpus or synthesis state
+between runs.
 
 Design principles
 -----------------
-The state architecture is designed around several core principles:
+The state architecture reflects several methodological principles of
+ReadingMachine:
 
-Traceability
-    Every synthesized claim can be traced back to the text segment from
-    which it originated.
+Coverage preservation
+    The corpus representation is maintained separately from synthesis
+    artifacts so that thematic outputs can always be regenerated from the
+    complete insight set.
 
 Inspectability
-    Intermediate artifacts are preserved rather than overwritten,
-    allowing researchers to examine how analytical structures emerge.
+    Intermediate analytical artifacts are preserved rather than
+    discarded, allowing users to examine how representations evolve.
+
+Traceability
+    Structured intermediate representations maintain links between
+    synthesized outputs and underlying source material.
 
 Reproducibility
-    Analytical configurations and intermediate states can be persisted
-    and restored without altering results.
+    Analytical state can be persisted, restored, fingerprinted, and
+    compared across runs.
 
-Separation of phases
-    Corpus reading and thematic synthesis are represented by separate
-    state objects to preserve conceptual clarity and avoid accidental
-    coupling of extraction and interpretation stages.
+Separation of reading and synthesis
+    Corpus reading and thematic synthesis are represented by distinct
+    state objects, mirroring the methodological separation between
+    corpus mapping and thematic organization described in the
+    ReadingMachine framework.
 
-Together, these state objects provide the backbone of the ReadingMachine
-pipeline, allowing large-scale machine reading to be organized into a
-structured and inspectable analytical workflow.
+Together, these state objects provide the persistence layer for
+ReadingMachine, enabling large-scale corpus reading and iterative
+thematic synthesis to be managed as a structured, inspectable workflow.
 """
 
 # Import custom libraries
@@ -836,64 +841,75 @@ class CorpusState:
 
 class SummaryState:
     """
-    Persistent state container for the thematic synthesis stage of ReadingMachine.
+    Persistent state container for ReadingMachine's thematic synthesis layer.
 
-    `SummaryState` stores all interpretive artifacts produced after the corpus
-    reading phase. While `CorpusState` represents the structured semantic index
-    of the corpus (documents → chunks → insights), `SummaryState` represents the
-    **iterative analytical synthesis** of those insights.
+    SummaryState stores the iterative synthesis artifacts generated from the
+    insight-level corpus representation held in `CorpusState`. Whereas
+    `CorpusState` captures the structured reading of the corpus
+    (documents → chunks → insights), `SummaryState` captures the successive
+    attempts to organize, synthesize, audit, and refine that representation.
 
-    The summarization pipeline operates as a sequence of iterative passes:
+    The synthesis workflow operates over the complete insight set and
+    produces a sequence of derived artifacts:
 
         cluster summaries
-        → theme schema generation
-        → insight-to-theme mapping
-        → theme population
-        → orphan detection
-        → iteration
+            ↓
+        theme schema generation
+            ↓
+        insight-to-theme mapping
+            ↓
+        theme population
+            ↓
+        orphan detection and reinsertion
+            ↓
+        theme refinement / re-theming
+            ↓
+        redundancy handling (optional)
 
-    Each stage produces a DataFrame artifact that is appended to a list.
-    These lists preserve the full history of synthesis passes, allowing
-    inspection of how themes evolve across iterations.
+    Each synthesis stage generates a DataFrame artifact that is appended to
+    a stage-specific list. Rather than overwriting prior outputs, the class
+    retains the full history of synthesis passes, enabling inspection of how
+    the thematic structure evolves across iterations.
 
     Attributes
     ----------
     cluster_summary_list : List[pd.DataFrame]
-        Sequential cluster summaries derived from clustered insights.
-        Typically length 1.
+        Cluster-level summaries generated from semantically grouped
+        insights. Typically contains a single entry.
 
     theme_schema_list : List[pd.DataFrame]
-        Theme schemas generated during each iteration of thematic synthesis.
+        Theme schemas generated during each synthesis iteration.
 
     mapped_theme_list : List[pd.DataFrame]
-        Insight-to-theme mapping tables for each synthesis pass.
+        Insight-to-theme mappings for each synthesis iteration.
 
     populated_theme_list : List[pd.DataFrame]
-        The synthesized textual summaries for each theme.
+        Theme summaries generated from mapped insight sets.
 
     orphan_list : List[pd.DataFrame]
-        Insights that were not incorporated into theme summaries and
-        require reinsertion.
+        Outputs associated with orphan detection and coverage auditing.
 
     redundancy_list : List[pd.DataFrame]
-        Final redundancy-corrected theme summaries produced after the
-        synthesis process is complete.
+        Final redundancy-reduced synthesis outputs.
 
     Notes
     -----
-    The object functions as a **pipeline history log**. Rather than
-    overwriting earlier synthesis artifacts, each stage appends new
-    results to the relevant list.
+    SummaryState functions as a persistent synthesis history. The object
+    records how the thematic representation of the corpus evolves through
+    repeated schema generation, mapping, population, orphan handling, and
+    refinement passes.
 
     This design supports:
 
-    - reproducibility
-    - inspectability
+    - inspectability of intermediate synthesis artifacts
     - rewind and resume workflows
-    - debugging of theme evolution
+    - reproducibility of synthesis trajectories
+    - debugging and evaluation of thematic evolution
+    - auditing of information preservation during synthesis
 
-    Unlike `CorpusState`, which stores tidy analytical datasets,
-    `SummaryState` stores **pipeline passes**.
+    Unlike CorpusState, which stores the canonical insight-level
+    representation of the corpus, SummaryState stores the lineage of
+    artifacts generated while synthesizing that representation.
     """
     def __init__(
         self,
@@ -902,12 +918,37 @@ class SummaryState:
         """
         Initialize an empty SummaryState.
 
+        Creates the summary artifact directory if it does not already exist and
+        initializes empty in-memory containers for each summary-stage artifact
+        tracked by the class.
+
         Parameters
         ----------
+        summary_save_location : str, default=config.SUMMARY_SAVE_LOCATION
+            Directory where summary-state artifacts are persisted.
+
+        Attributes Initialized
+        ----------------------
         summary_save_location : str
-            Directory where summary artifacts will be persisted as
-            Parquet files. Defaults to the location specified in
-            the project configuration.
+            Location used for saving and loading summary artifacts.
+
+        cluster_summary_list : list
+            Container for cluster-level summaries.
+
+        theme_schema_list : list
+            Container for generated theme schemas.
+
+        mapped_theme_list : list
+            Container for theme-mapping outputs.
+
+        populated_theme_list : list
+            Container for populated theme summaries.
+
+        orphan_list : list
+            Container for orphan-detection and orphan-reinsertion outputs.
+
+        redundancy_list : list
+            Container for redundancy-pass outputs.
         """
         self.summary_save_location = summary_save_location
 
@@ -925,25 +966,38 @@ class SummaryState:
     @classmethod
     def load(cls, summary_save_location:str = config.SUMMARY_SAVE_LOCATION) -> "SummaryState":
         """
-        Load an existing SummaryState from disk.
+        Load a SummaryState from persisted summary artifacts.
 
-        This method reconstructs the SummaryState by locating Parquet files
-        corresponding to each synthesis artifact and loading them into the
-        appropriate lists.
+        Creates a new SummaryState instance and populates its artifact
+        collections by loading previously saved files from the summary-state
+        directory. Each artifact type is loaded independently using the
+        configured filename prefixes.
 
-        Files are loaded in chronological order to preserve the historical
-        sequence of synthesis passes.
+        The loaded artifacts represent the history of the thematic synthesis
+        process, including theme-schema iterations, theme mappings, theme
+        population passes, orphan-detection outputs, and optional redundancy
+        processing.
 
         Parameters
         ----------
-        summary_save_location : str
-            Directory containing previously saved summary artifacts.
+        summary_save_location : str, default=config.SUMMARY_SAVE_LOCATION
+            Directory containing saved summary-state artifacts.
 
         Returns
         -------
         SummaryState
-            Reconstructed summary state containing all previously saved
-            synthesis artifacts.
+            A SummaryState instance populated with all available summary
+            artifacts found in the specified directory.
+
+        Notes
+        -----
+        Artifact loading is delegated to `_load_attribute_from_file()`, which
+        retrieves all files matching a given artifact prefix and returns them in
+        saved order.
+
+        The resulting state preserves the iterative structure of the
+        ReadingMachine synthesis process, including repeated theme-generation,
+        theme-mapping, theme-population, and orphan-handling passes.
         """
 
         state = cls(summary_save_location=summary_save_location)
@@ -960,21 +1014,40 @@ class SummaryState:
 
     def _load_attribute_from_file(self, file_prefix: str) -> Optional[List[pd.DataFrame]]:
         """
-        Load a list of DataFrames corresponding to a synthesis artifact.
+        Load a sequence of persisted synthesis artifacts.
 
-        This method searches the summary save directory for Parquet files
-        matching the given prefix and loads them into a list ordered by
-        file creation time.
+        Searches the summary-state directory for Parquet files whose names begin
+        with the specified prefix, loads them as pandas DataFrames, validates the
+        resulting sequence, and returns them in chronological order.
 
         Parameters
         ----------
         file_prefix : str
-            Filename prefix used to identify the artifact group.
+            Filename prefix identifying a particular synthesis artifact type
+            (for example, cluster summaries, theme schemas, or populated
+            themes).
 
         Returns
         -------
-        List[pd.DataFrame] or []
-            List of loaded DataFrames ordered from oldest to newest.
+        list[pd.DataFrame]
+            List of loaded DataFrames ordered from oldest to newest. Returns an
+            empty list if no matching files are found.
+
+        Notes
+        -----
+        Files are discovered using the pattern
+        `{file_prefix}*.parquet` within `summary_save_location`.
+
+        Ordering is determined using file creation time (`st_birthtime`) when
+        available, falling back to modification time (`st_mtime`) on platforms
+        that do not expose creation timestamps.
+
+        After loading, the sequence is validated using
+        `_assert_state_integrity()` before being returned.
+
+        This method is used to reconstruct the historical sequence of synthesis
+        artifacts generated during iterative theme generation, mapping,
+        population, orphan handling, and redundancy reduction.
         """
         base_dir = Path(self.summary_save_location)
         
@@ -999,29 +1072,40 @@ class SummaryState:
     
     def _assert_state_integrity(self, df_list: list, context: str = ""):
         """
-        Developer-facing integrity checks for summary artifacts.
+        Perform non-blocking integrity checks on summary-state artifacts.
 
-        The method verifies that loaded or generated synthesis artifacts
-        maintain expected structural properties.
+        This helper inspects a sequence of loaded or generated synthesis
+        artifacts and emits warnings when common structural issues are detected.
+        The checks are intended for debugging and state diagnostics rather than
+        strict validation.
 
-        Checks include:
+        Current checks include:
 
-        - confirming objects are DataFrames
-        - verifying that `theme_id` columns retain integer dtype
-        - warning if unexpected structures are encountered
-
-        The function intentionally **prints warnings instead of raising
-        exceptions** so that developers can continue execution while
-        diagnosing state inconsistencies.
+        - verifying that the input is a list
+        - detecting `None` entries
+        - detecting objects that are not DataFrames
+        - checking that `theme_id` columns retain an integer dtype
 
         Parameters
         ----------
         df_list : list
-            List of DataFrames to validate.
+            Sequence of objects expected to contain pandas DataFrames.
 
-        context : str
-            Optional label indicating where the check is occurring
-            (e.g., "Load", "Save", "Post-populate").
+        context : str, default=""
+            Optional label describing where the check is being performed
+            (for example, "Load", "Save", or "Post-populate"). Included in
+            warning messages to aid debugging.
+
+        Notes
+        -----
+        This method intentionally emits warnings rather than raising exceptions.
+        SummaryState artifacts represent intermediate synthesis outputs, and
+        allowing execution to continue can be useful when diagnosing state drift,
+        serialization issues, or schema inconsistencies.
+
+        The primary integrity check currently focuses on `theme_id`, as dtype
+        drift in this field can lead to ordering, mapping, and join errors during
+        iterative theme synthesis.
         """
 
         if not isinstance(df_list, list):
@@ -1065,11 +1149,32 @@ class SummaryState:
         """
         Persist the current SummaryState to disk.
 
-        Writes all synthesis artifacts to a temporary directory, then replaces
-        the previous summary directory using safer Windows-compatible renames.
+        Writes each summary-state artifact list to a temporary directory as a
+        sequence of Parquet files, then atomically swaps the completed temporary
+        directory into `summary_save_location`. Existing saved state is first
+        renamed to a backup directory and is only removed after the new directory
+        has been successfully moved into place.
 
-        The old directory is not deleted until the new one has been successfully
-        moved into place.
+        Each artifact list is saved using the configured summary-state prefixes.
+        Files are numbered according to their position in the list, for example
+        `theme_schema_list_1.parquet`, `theme_schema_list_2.parquet`, and so on.
+
+        Raises
+        ------
+        Exception
+            Re-raises any exception encountered during serialization or directory
+            replacement. If possible, the previous saved state is restored before
+            the exception is raised.
+
+        Notes
+        -----
+        Before each artifact list is written, `_assert_state_integrity()` is
+        called to emit non-blocking warnings about possible structural issues.
+
+        The directory replacement logic uses retrying renames to handle transient
+        Windows file-locking errors. If saving fails, the temporary directory is
+        removed and the prior saved state is restored when it has already been
+        moved to backup.
         """
         # rename retry util
         def rename_with_retry(src: Path, dst: Path, attempts: int = 60) -> None:
@@ -1100,7 +1205,6 @@ class SummaryState:
         backup_path = save_path.parent / f"{save_path.name}_old_{uuid4().hex}"
 
         temp_path.mkdir()
-
 
         try:
             for name in config.summary_state_prefix.values():
@@ -1135,29 +1239,49 @@ class SummaryState:
 
     def rewind_to(self, stage: str, index: int):
         """
-        Rewind the synthesis pipeline to a previous stage.
+        Rewind SummaryState to a specified synthesis stage and iteration.
 
-        This method truncates summary artifact lists so that the pipeline
-        appears as though it had only progressed to a specified stage and
-        iteration.
+        Truncates the iterative synthesis artifact lists so that the saved
+        summary state reflects progress only through the requested stage and
+        iteration. This is useful when rerunning part of the synthesis pipeline
+        from an earlier theme-schema, mapping, population, or orphan-handling
+        pass.
 
         Parameters
         ----------
         stage : str
-            Target stage to rewind to. Must be one of:
+            Stage to retain through. Must be one of:
 
-            - "schema"
-            - "mapping"
-            - "populate"
-            - "orphan"
+            - `"schema"`: retain theme schemas through `index`
+            - `"mapping"`: retain theme schemas and mapped themes through `index`
+            - `"populate"`: retain theme schemas, mappings, and populated themes
+            through `index`
+            - `"orphan"`: retain theme schemas, mappings, populated themes, and
+            orphan outputs through `index`
 
         index : int
-            Iteration index to retain.
+            Zero-based iteration index to retain for the target stage.
+
+        Raises
+        ------
+        ValueError
+            If `stage` is not valid.
+
+        ValueError
+            If `index` is negative.
+
+        ValueError
+            If `index` exceeds the available entries for the selected stage.
 
         Notes
         -----
-        Rewinding automatically clears the redundancy stage and saves
-        the updated state to disk.
+        Rewinding realigns the dependent synthesis artifact lists so that later
+        stages do not remain ahead of earlier stages. The redundancy list is
+        always cleared, since redundancy reduction is only valid after the final
+        synthesis state has been reached.
+
+        After truncating the in-memory artifact lists, this method immediately
+        calls `save()` to persist the rewound state to disk.
         """
 
         stage_order = {
@@ -1219,44 +1343,48 @@ class SummaryState:
 
     def restart(self, confirm = None):
         """
-        Reset the entire SummaryState and remove all persisted synthesis artifacts.
+        Reset SummaryState and remove all persisted synthesis artifacts.
 
-        This method clears both the in-memory state and the corresponding files
-        stored on disk in the summary save directory. It is intended for situations
-        where a user wishes to completely restart the thematic synthesis stage
-        from the beginning.
-
-        The method prompts the user for confirmation before proceeding in order
-        to prevent accidental deletion of summary artifacts.
+        Clears all in-memory synthesis artifacts and deletes the corresponding
+        saved summary-state directory. This effectively resets the thematic
+        synthesis process to an empty state while leaving the underlying corpus
+        representation unchanged.
 
         Parameters
         ----------
         confirm : str, optional
-            Confirmation flag used to bypass the interactive prompt. If set to
-            `"yes"` or `"no"`, the method will use that value directly instead
-            of prompting the user.
+            Confirmation response. If set to `"yes"` or `"no"`, the method uses
+            that value directly. Otherwise, the user is prompted interactively
+            until a valid response is provided.
 
         Behavior
         --------
         If confirmation is `"yes"`:
 
-        - All in-memory summary artifact lists are cleared.
-        - The summary output directory is deleted.
-        - A new empty directory is created at the same location.
+        - Clears all in-memory synthesis artifact lists.
+        - Deletes the summary-state directory and all saved artifacts.
+        - Recreates an empty summary-state directory.
 
         If confirmation is `"no"`:
 
-        - No changes are made.
+        - Leaves both in-memory and persisted state unchanged.
 
         Notes
         -----
-        This operation affects only the summarization stage (`SummaryState`).
-        It does not modify the underlying `CorpusState` or any corpus-level
-        artifacts such as documents, chunks, or insights.
+        This operation affects only SummaryState and its associated synthesis
+        artifacts, including cluster summaries, theme schemas, theme mappings,
+        populated themes, orphan outputs, and redundancy outputs.
 
-        This method is primarily intended for interactive CLI workflows where
-        users may wish to discard previous synthesis passes and rerun the
-        summarization pipeline.
+        CorpusState is not modified. The underlying corpus reading layer,
+        including questions, documents, chunks, and insights, remains intact.
+
+        This method is primarily intended for restarting the synthesis process
+        from the beginning while reusing an existing corpus representation.
+
+        Warning
+        -------
+        This is a destructive operation. When confirmed, all persisted synthesis
+        history is permanently removed from `summary_save_location`.
         """
         while confirm not in ["yes", "no"]:
             confirm = input(
@@ -1285,63 +1413,63 @@ class SummaryState:
 
     def status(self, diagnostic = False):
         """
-        Report the current progress of the summarization pipeline.
+        Report the current progress of the summary pipeline.
 
-        This method inspects the lengths of each synthesis artifact list to
-        determine which stage of the summarization workflow has most recently
-        completed.
-
-        The pipeline stages are inferred from the following artifact lists:
-
-        - cluster_summary_list
-        - theme_schema_list
-        - mapped_theme_list
-        - populated_theme_list
-        - orphan_list
-        - redundancy_list
+        Inspects the lengths of the SummaryState artifact lists and infers the
+        most recently completed synthesis stage. In normal mode, the method
+        prints the current artifact counts and a recommended next step. In
+        diagnostic mode, it returns a compact machine-readable status dictionary.
 
         Parameters
         ----------
-        diagnostic : bool, default False
-            If False (default), the method prints a human-readable status
-            message describing the current pipeline stage and recommended
-            next step.
-
-            If True, the method returns a structured dictionary describing
-            the current stage and iteration depth instead of printing output.
+        diagnostic : bool, default=False
+            If False, print the artifact-list counts and a human-readable status
+            message. If True, return a dictionary instead of printing the inferred
+            status message.
 
         Returns
         -------
         dict or None
-            If `diagnostic=True`, returns a dictionary containing:
+            If `diagnostic=True`, returns a dictionary with:
 
-            - `stage` : the inferred pipeline stage
-            - `max_stage` : the highest iteration index across artifact lists
+            - `stage`: inferred most recently completed stage
+            - `max_stage`: maximum artifact-list length across tracked stages
 
-            If `diagnostic=False`, the function prints status information
-            and returns None.
+            If `diagnostic=False`, prints status information and returns None.
 
         Notes
         -----
-        The stage inference logic assumes that synthesis artifacts are
-        generated sequentially according to the pipeline order:
+        The method infers progress from these artifact lists:
+
+        - `cluster_summary_list`
+        - `theme_schema_list`
+        - `mapped_theme_list`
+        - `populated_theme_list`
+        - `orphan_list`
+        - `redundancy_list`
+
+        Stage inference assumes artifacts are generated in the expected
+        ReadingMachine synthesis order:
 
             cluster summaries
-            → theme schema
-            → insight mapping
-            → theme population
-            → orphan detection
-            → redundancy handling
+                ↓
+            theme schemas
+                ↓
+            mapped themes
+                ↓
+            populated themes
+                ↓
+            orphan handling
+                ↓
+            redundancy handling
 
-        Because synthesis is iterative, multiple entries may exist in
-        each artifact list. The function determines the current stage
-        by identifying which artifact list contains the most recent
-        completed pass.
+        Because theme synthesis can iterate, multiple entries may exist in the
+        schema, mapping, population, and orphan lists. The inferred stage is based
+        on which list has reached the most recent pass.
 
-        This method is primarily intended as a user-facing diagnostic
-        tool for interactive workflows.
+        If any redundancy artifact exists, the method treats the summary process
+        as complete and reports the `"redundancy"` stage.
         """
-
 
         # Get the status of the current summary state by checking the lengths of each list of artifacts.            
         status = {
@@ -1404,20 +1532,40 @@ class SummaryState:
 
     def fingerprint(self):
         """
-         Generate a deterministic fingerprint of the summarization state.
+        Generate a deterministic fingerprint of the current SummaryState.
 
-        The fingerprint is computed using the most recent DataFrame
-        from each synthesis artifact list.
+        The fingerprint is computed from the most recent DataFrame in each
+        summary artifact list:
+
+        - `cluster_summary_list`
+        - `theme_schema_list`
+        - `mapped_theme_list`
+        - `populated_theme_list`
+        - `orphan_list`
+        - `redundancy_list`
+
+        For each non-empty list, the latest DataFrame is normalized, serialized
+        to JSON, and hashed with SHA-256. Empty lists contribute the sentinel
+        string `"EMPTY"`. The resulting per-list hashes are concatenated and
+        hashed again to produce the final fingerprint.
 
         Returns
         -------
         str
-            SHA-256 hash representing the current summarization state.
+            SHA-256 hexadecimal digest representing the current summary state.
 
         Notes
         -----
-        This hash is used to validate resume operations and detect
-        changes to synthesis artifacts between runs.
+        Only the most recent artifact in each list contributes to the
+        fingerprint. Earlier iterations in the synthesis history do not affect
+        the hash unless they are also the latest artifact for their list.
+
+        DataFrames are normalized before hashing by replacing missing values,
+        inferring object dtypes, sorting columns, sorting rows by all columns,
+        and resetting the index.
+
+        This fingerprint supports resume validation and detection of unexpected
+        changes to the current synthesis state.
         """
 
         parts = []
@@ -1457,14 +1605,36 @@ class SummaryState:
         """
         Create a deep copy of the SummaryState.
 
-        This method creates a new instance of `SummaryState` with deep copies
-        of all synthesis artifact lists. This is useful for creating modified
-        versions of the state without altering the original.
+        Constructs a new SummaryState instance and populates it with deep copies
+        of all synthesis artifact lists:
+
+        - `cluster_summary_list`
+        - `theme_schema_list`
+        - `mapped_theme_list`
+        - `populated_theme_list`
+        - `orphan_list`
+        - `redundancy_list`
+
+        Each DataFrame in each artifact list is copied independently, producing
+        a fully detached summary state that can be modified without affecting the
+        original.
 
         Returns
         -------
         SummaryState
-            A new `SummaryState` instance with copied data.
+            A new SummaryState instance containing deep copies of all synthesis
+            artifacts.
+
+        Notes
+        -----
+        The copied state retains the same `summary_save_location` as the source
+        state but does not write any files to disk. Persistence occurs only if
+        `save()` is subsequently called.
+
+        Unlike CorpusState, SummaryState preserves the full synthesis history.
+        The copied object therefore contains copies of all recorded iterations
+        of theme generation, mapping, population, orphan handling, and
+        redundancy processing.
         """
         new_state = SummaryState(summary_save_location=self.summary_save_location)
         new_state.cluster_summary_list = [df.copy(deep=True) for df in self.cluster_summary_list]
