@@ -1,138 +1,139 @@
 """
-Core pipeline components for ReadingMachine.
+Core analytical pipeline for ReadingMachine.
 
-This module implements the primary analytical workflow used by
-ReadingMachine to transform a corpus of documents into a structured
-thematic synthesis. Each class corresponds to a conceptual stage in the
-reading pipeline and operates by transforming the persistent pipeline
-state objects (`CorpusState` and `SummaryState`).
+This module implements the primary ReadingMachine workflow for converting
+source documents into an inspectable, insight-level corpus representation
+and then into an iterative thematic synthesis.
 
-The module is organized around four major processing stages:
+The core pipeline is organized around four classes:
 
     Ingestor
     Insights
     Clustering
     Summarize
 
-
-Pipeline Overview
------------------
-
-The ReadingMachine pipeline converts a corpus of natural-language
-documents into a structured thematic synthesis through the following
-sequence of transformations:
+Together these classes transform a corpus through the following stages:
 
     documents
-    → chunks
-    → insights
-    → embeddings
-    → clusters
-    → cluster summaries
-    → theme schemas
-    → insight–theme mappings
-    → populated themes
-    → orphan integration
-    → redundancy reduction
+        ↓
+    full text
+        ↓
+    chunks
+        ↓
+    chunk insights
+        ↓
+    meta-insights
+        ↓
+    embeddings
+        ↓
+    semantic clusters
+        ↓
+    cluster summaries
+        ↓
+    theme schemas
+        ↓
+    insight-to-theme mappings
+        ↓
+    populated themes
+        ↓
+    orphan detection and reintegration
+        ↓
+    schema repair / re-theming
+        ↓
+    redundancy reduction
 
+Corpus Reading
+--------------
+Implemented by `Ingestor`, `Insights`, and `Clustering`.
 
-Classes
--------
+The reading portion of the pipeline converts source documents into a
+structured insight representation. Documents are ingested, cleaned,
+chunked, read against explicit research questions, embedded, and grouped
+into provisional semantic clusters.
 
-Ingestor
-    Reads source documents (PDF or HTML) and converts them into the
-    structured corpus representation used by the pipeline. This stage
-    populates the `CorpusState.full_text` table and ensures document
-    metadata is correctly associated with paper identifiers.
+The resulting insights are the primary analytical unit of the pipeline.
+Clusters are used as computational scaffolding for later synthesis, not as
+final themes or analytical conclusions.
 
-Insights
-    Extracts atomic insights from the corpus using a two-pass reading
-    process:
+Thematic Synthesis
+------------------
+Implemented by `Summarize`.
 
-        • chunk-level insight extraction
-        • whole-document (meta) insight extraction
+The synthesis portion of the pipeline converts clustered insights into
+theme-level narratives. It generates cluster summaries, builds theme
+schemas, maps insights to themes, populates themes, audits coverage through
+orphan detection, reintegrates omitted insights, repairs unstable schemas,
+and performs a final redundancy pass.
 
-    Insights represent the smallest analytical unit of the pipeline and
-    serve as the basis for all downstream organization and synthesis.
-
-Clustering
-    Generates vector embeddings for insights and groups them into
-    provisional clusters using dimensionality reduction and density-
-    based clustering.
-
-    Clusters are used only as an organizational scaffold that helps
-    structure the first pass of theme generation. They are not treated
-    as analytical conclusions and do not determine the final thematic
-    structure.
-
-Summarize
-    Performs the thematic synthesis process. This stage transforms
-    clustered insights into narrative thematic summaries through a
-    controlled multi-step workflow:
-
-        1. Cluster summarization
-        2. Theme schema generation
-        3. Insight-to-theme mapping
-        4. Theme population
-        5. Orphan detection and reintegration
-        6. Redundancy reduction
-
-    These steps may be iterated to refine the thematic structure before
-    producing the final synthesis output.
-
+Theme structures are expected to evolve across iterations. Schema revision
+is driven by synthesis outcomes, orphan patterns, failed integrations, and
+evidence of representational overload.
 
 State Architecture
 ------------------
-
-All classes in this module operate on two persistent state objects
-defined in `readingmachine.state`:
+The module operates over two persistent state objects:
 
 CorpusState
-    Stores the structured representation of the corpus including
-    documents, chunks, and extracted insights.
+    Stores the corpus-reading layer: questions, full text, chunks, and
+    insights, including embeddings and cluster assignments when generated.
 
 SummaryState
-    Records the evolving artifacts of the synthesis stage such as
-    cluster summaries, theme schemas, mappings, and theme summaries.
+    Stores the thematic-synthesis layer: cluster summaries, theme schemas,
+    mappings, populated themes, orphan outputs, and redundancy-reduced
+    summaries.
 
-This separation preserves traceability between the original text and
-the final synthesis.
+This separation preserves the distinction between reading and synthesis
+while maintaining traceability from final summaries back to source
+insights and citations.
 
+Persistence and Recovery
+------------------------
+Long-running stages support persistence and recovery through Parquet
+state files, pickle checkpoints, and deterministic fingerprints.
+
+This allows interrupted workflows to resume safely and helps detect state
+drift between runs.
 
 Design Principles
 -----------------
+The core pipeline reflects several ReadingMachine principles:
 
-The pipeline is designed around several methodological principles:
-
-Atomic insight extraction
-    Insights represent the smallest analytical units in the corpus.
+Coverage preservation
+    The workflow audits and reintegrates omitted insights rather than
+    allowing early summarization losses to become permanent.
 
 Traceability
-    Every synthesized claim remains linked to its source document and
-    text segment.
+    Insights, themes, summaries, and citations remain linked through
+    persistent identifiers.
+
+Inspectability
+    Intermediate artifacts are stored explicitly so users can examine how
+    the corpus representation and thematic structure evolve.
 
 Iterative synthesis
-    Theme structures are refined through repeated schema generation and
-    orphan reintegration.
-
-Resumable computation
-    Long-running LLM operations persist intermediate results so that
-    interrupted processes can safely resume.
+    Theme schemas are revised in response to observed synthesis failures
+    rather than treated as fixed outputs.
 
 Separation of reading and synthesis
-    Corpus processing (`Ingestor`, `Insights`, `Clustering`) is kept
-    distinct from interpretive synthesis (`Summarize`).
+    Document reading, insight extraction, clustering, and thematic
+    organization are represented as distinct stages.
 
+Scalability
+    Chunking, batching, clustering, checkpointing, and context-window-aware
+    synthesis support large corpora and long-running LLM workflows.
 
-Usage
------
-
-The pipeline is typically executed as a sequence of class
-instantiations that progressively transform the pipeline state:
+Typical Usage
+-------------
+The pipeline is typically executed as a sequence of state-transforming
+operations:
 
     corpus = CorpusState.load(...)
 
     ingestor = Ingestor(...)
     ingestor.ingest_papers()
+    ingestor.update_metadata()
+    ingestor.gen_unique_citations()
+    ingestor.chunk_papers()
 
     insights = Insights(...)
     insights.get_chunk_insights()
@@ -149,10 +150,14 @@ instantiations that progressively transform the pipeline state:
     summarizer.map_insights_to_themes()
     summarizer.populate_themes()
     summarizer.address_orphans()
+    summarizer.gen_theme_schema()
+    summarizer.map_insights_to_themes()
+    summarizer.populate_themes()
+    summarizer.address_orphans()
     summarizer.address_redundancy()
 
-Each stage updates the pipeline state, allowing intermediate artifacts
-to be inspected or reused across runs.
+Each stage updates CorpusState or SummaryState, enabling intermediate
+outputs to be inspected, persisted, rewound, or reused across runs.
 """
 # import custom libraries
 
@@ -4509,8 +4514,217 @@ class Clustering:
 
         return self.corpus_state.insights
 
-
 class Summarize:
+    """
+    Thematic synthesis stage of the ReadingMachine pipeline.
+
+    The Summarize class converts the clustered insight representation
+    generated during corpus reading into a structured thematic synthesis.
+    It implements the iterative synthesis workflow described in the
+    ReadingMachine methodology, transforming insight-level representations
+    into theme-level narratives while preserving coverage, traceability,
+    and opportunities for revision.
+
+    Unlike earlier pipeline stages, which focus on extracting and organizing
+    information, the Summarize stage is responsible for constructing the
+    thematic representation of the corpus.
+
+    The synthesis workflow proceeds through a sequence of stages:
+
+        cluster summaries
+            ↓
+        theme schema generation
+            ↓
+        insight-to-theme mapping
+            ↓
+        theme population
+            ↓
+        orphan detection
+            ↓
+        orphan reintegration
+            ↓
+        schema repair / re-theming
+            ↓
+        schema optimization
+            ↓
+        redundancy reduction
+
+    These stages may be repeated multiple times. Theme schemas are not
+    treated as fixed structures; instead they evolve in response to
+    representational failures, orphan patterns, and evidence that certain
+    themes are carrying too much conceptual load.
+
+    Cluster Summaries
+    -----------------
+    The synthesis process begins by summarizing semantically related
+    clusters of insights.
+
+    Clusters are processed in semantic-proximity order using centroid-based
+    path estimation. The resulting cluster summaries serve as a compressed
+    representation of the clustered insight space and provide the initial
+    scaffolding for theme generation.
+
+    Importantly, clusters are not treated as themes. They function as
+    organizational structures that help the model reason over large insight
+    sets prior to thematic synthesis.
+
+    Theme Schema Generation
+    -----------------------
+    Theme schemas define the conceptual categories used to organize
+    insights.
+
+    Each theme contains:
+
+    - a theme label
+    - a theme description
+    - mapping instructions
+
+    Theme schemas are generated independently for each research question
+    and may be revised repeatedly as synthesis progresses.
+
+    Mapping and Population
+    ----------------------
+    Once a schema exists, insights are mapped into one or more themes.
+
+    Themes are then populated by synthesizing their assigned insights into
+    narrative summaries. Theme lengths are allocated proportionally based
+    on mapped insight volume while respecting practical model-output
+    constraints.
+
+    The resulting populated themes become the primary analytical
+    representation of the corpus.
+
+    Coverage Preservation
+    ---------------------
+    ReadingMachine prioritizes coverage over compression.
+
+    To support this objective, populated themes undergo a completeness
+    audit in which mapped insights are checked against the synthesized
+    narrative.
+
+    Insights that are not represented in the summary are identified as
+    orphans and are reintroduced through an iterative integration process.
+
+    Orphan handling serves as the primary mechanism for preventing
+    information loss during synthesis.
+
+    Schema Repair and Stabilization
+    -------------------------------
+    When orphan integration fails, when themes become overloaded, or when
+    summaries exhibit signs of excessive compression, the schema may be
+    revised.
+
+    The repair workflow operates in two stages:
+
+        repair planning
+            ↓
+        repair implementation
+
+    This separation helps reduce performative repair and maintains an
+    inspectable record of why schema modifications were proposed.
+
+    Once representational adequacy is achieved, schemas may undergo a
+    separate optimization stage focused on improving thematic coherence.
+
+    Stable schemas are preserved across iterations and excluded from
+    unnecessary reprocessing.
+
+    Redundancy Reduction
+    --------------------
+    After thematic synthesis has stabilized, a final redundancy pass is
+    performed.
+
+    Theme summaries are reviewed sequentially within each research
+    question and revised to reduce repeated content while preserving unique
+    information.
+
+    This step improves readability without modifying the underlying
+    thematic structure.
+
+    Persistence and Recovery
+    ------------------------
+    The class operates over two complementary state objects:
+
+        CorpusState
+        SummaryState
+
+    CorpusState contains the insight-level representation generated by the
+    reading stages of the pipeline.
+
+    SummaryState stores the evolving synthesis artifacts generated during
+    thematic analysis, including:
+
+    - cluster summaries
+    - theme schemas
+    - insight mappings
+    - populated themes
+    - orphan audits
+    - redundancy outputs
+
+    Long-running operations support checkpoint-based recovery through
+    pickle serialization and state fingerprinting.
+
+    Resume operations verify both CorpusState and SummaryState before
+    continuing execution, helping prevent corruption caused by state drift
+    between synthesis sessions.
+
+    Design Principles
+    -----------------
+    The Summarize stage reflects several core ReadingMachine principles:
+
+    Coverage Preservation
+        Information omitted during synthesis is identified and reintroduced
+        through orphan detection and reintegration.
+
+    Iterative Synthesis
+        Theme schemas are expected to evolve in response to observed
+        representational failures.
+
+    Traceability
+        Theme summaries remain linked to mapped insights, citations, and
+        research questions.
+
+    Inspectability
+        Intermediate synthesis artifacts are preserved rather than
+        discarded, allowing users to examine how thematic structures
+        develop over time.
+
+    Separation of Reading and Synthesis
+        Corpus reading produces the insight representation; thematic
+        synthesis operates over that representation without re-reading the
+        source documents.
+
+    Stability Through Evidence
+        Schema revisions are driven by synthesis outcomes, completeness
+        audits, and failed integrations rather than arbitrary regeneration.
+
+    Attributes
+    ----------
+    corpus_state : CorpusState
+        Insight-level corpus representation used as the foundation for
+        thematic synthesis.
+
+    summary_state : SummaryState
+        Persistent synthesis-state object storing cluster summaries,
+        schemas, mappings, populated themes, orphan outputs, and redundancy
+        passes.
+
+    llm_client : Any
+        Language model client used throughout the synthesis workflow.
+
+    ai_model : str
+        Model identifier used for synthesis operations.
+
+    paper_output_length : int
+        Approximate target length for synthesized outputs.
+
+    insight_embeddings_array : np.ndarray
+        Embedding representation loaded from the clustering stage and used
+        for cluster ordering operations.
+
+    summary_save_location : str
+        Directory used to persist SummaryState artifacts.
+    """
     def __init__(self,
                  corpus_state: Any,
                  llm_client: Any,
@@ -4520,114 +4734,93 @@ class Summarize:
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")):
         """
-        Initialize the thematic synthesis stage of the ReadingMachine pipeline.
+        Initialize the summarization stage.
 
-        The `Summarize` class implements the interpretive phase of the
-        ReadingMachine methodology. It transforms the structured insight
-        corpus into thematic summaries through a controlled, multi-stage
-        workflow coordinated with large language models.
-
-        The synthesis pipeline implemented by this class proceeds through
-        the following stages:
-
-            1. Cluster summarization
-               Summaries are generated for each insight cluster. Clusters
-               are processed in semantic proximity order to improve
-               contextual continuity for the model.
-
-            2. Theme schema generation
-               The model proposes a thematic schema based on cluster
-               summaries. This schema defines the thematic categories and
-               the rules used to assign insights to themes.
-
-            3. Insight-to-theme mapping
-               Insights are classified into one or more themes defined by
-               the schema. This stage operates in batches and supports
-               resumable execution.
-
-            4. Theme population
-               Each theme is populated by synthesizing the insights mapped
-               to it into a narrative summary.
-
-            5. Orphan detection and reintegration
-               The system audits the synthesized summaries to ensure that
-               all mapped insights are reflected in the narrative.
-               Missing insights ("orphans") are reintegrated into the
-               summaries through a targeted revision process.
-
-            6. Redundancy reduction
-               A final sequential pass reduces repeated information across
-               themes while preserving distinct arguments.
-
-        These steps can be iterated multiple times: theme schemas may be
-        regenerated after orphan integration to refine the thematic
-        structure before final synthesis.
-
-        The class operates on two state objects:
-
-            CorpusState
-            SummaryState
-
-        `CorpusState` contains the structured insight corpus produced by
-        earlier pipeline stages (ingestion, chunking, insight extraction,
-        embedding, clustering).
-
-        `SummaryState` tracks all synthesis artifacts generated during the
-        summarization process, including cluster summaries, theme schemas,
-        mappings, populated themes, orphan audits, and redundancy passes.
-
-        Initialization performs three setup steps:
-
-            1. Verify that insight embeddings exist (produced during clustering)
-            2. Load or initialize the SummaryState used to track synthesis artifacts
-            3. Configure the LLM client and synthesis parameters
+        Sets up the Summarize object used to convert clustered insights into
+        iterative thematic synthesis artifacts. The initializer verifies that
+        insight embeddings from the clustering stage are available, deep-copies
+        the supplied CorpusState, loads or initializes SummaryState, and stores
+        LLM and output-length configuration for downstream summarization methods.
 
         Parameters
-        ----------
+
         corpus_state : CorpusState
-            Corpus state containing extracted insights and associated
-            metadata produced during earlier pipeline stages.
+        Corpus state containing clustered insight records and associated
+        metadata from earlier pipeline stages.
 
         llm_client : Any
-            Client used to call the LLM for summarization and synthesis tasks.
+        Client used for LLM calls during cluster summarization, theme
+        generation, theme mapping, theme population, orphan handling, citation
+        repair, and redundancy reduction.
 
         ai_model : str
-            Model identifier used for LLM completions.
+        Model identifier used for summarization-stage LLM calls.
 
         paper_output_length : int
-            Approximate total word length for the final synthesized output.
-            This value is used to proportionally allocate target lengths for
-            theme summaries based on the number of insights assigned to each
-            theme.
+        Approximate target length, in words, for the final synthesized output.
+        Downstream methods use this value to allocate summary lengths across
+        research questions and themes.
+
+        summary_save_location : str, default=config.SUMMARY_SAVE_LOCATION
+        Directory used by SummaryState to persist summarization artifacts as
+        Parquet files.
+
+        pickle_save_location : str, default=config.PICKLE_SAVE_LOCATION
+        Directory used by downstream summarization methods for intermediate
+        pickle-based recovery artifacts.
+
+        insight_embedding_path : str, default=os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
+        Path to the serialized insight embeddings generated during the
+        clustering stage.
+
+        Raises
+
+        FileNotFoundError
+        If insight_embedding_path does not exist.
+
+        Side Effects
+
+        Creates summary_save_location if it does not already exist.
+
+        If existing summary Parquet files are found, prompts the user to either
+        reload the existing SummaryState or delete those files and start with a
+        new empty SummaryState.
+
+        Attributes
+
+        insight_embeddings_array : np.ndarray or pd.DataFrame
+        Embedding artifact loaded from insight_embedding_path.
+
+        corpus_state : CorpusState
+        Deep-copied corpus state used by the summarization stage.
+
+        summary_state : SummaryState
+        Summary-state object used to store cluster summaries, theme schemas,
+        theme mappings, populated themes, orphan outputs, and redundancy outputs.
+
+        llm_client : Any
+        LLM client stored for downstream calls.
+
+        ai_model : str
+        Model identifier stored for downstream calls.
+
+        paper_output_length : int
+        Target final output length used by downstream synthesis methods.
 
         summary_save_location : str
-            Directory where summarization artifacts managed by SummaryState
-            will be stored as Parquet files.
-
-        pickle_save_location : str
-            Directory used to persist intermediate artifacts during long
-            summarization operations to support resumable execution.
-
-        insight_embedding_path : str
-            Path to the serialized insight embeddings generated during the
-            clustering stage.
+        Directory used for persisted SummaryState artifacts.
 
         Notes
-        -----
-        If existing summary artifacts are detected in `summary_save_location`,
-        the user is prompted to either:
 
-            (1) reload the existing SummaryState and resume synthesis
-            (2) regenerate summaries from scratch (overwriting existing files)
+        The summarization stage operates on both CorpusState and SummaryState.
+        CorpusState provides the clustered insight-level representation generated
+        by earlier ReadingMachine stages. SummaryState records the evolving
+        synthesis artifacts produced by the summarization workflow.
 
-        This behavior supports resumable workflows for large corpora where
-        synthesis may be executed across multiple sessions.
-
-        The summarization stage intentionally preserves intermediate
-        artifacts at each step so that the evolution of the thematic
-        structure can be inspected and reproduced.
-        """
-        
+        Existing summary artifacts are not silently overwritten. When Parquet
+        files are detected in summary_save_location, the user must choose
+        whether to resume from them or regenerate the summary state from scratch.
+        """ 
         # Check that the embeddings have been created from the clustering step. If so, load. If not send the user back to run clustering
         if not os.path.exists(insight_embedding_path):
             raise FileNotFoundError(f"Insight embeddings pickle not found at {insight_embedding_path}. Please run clustering first or amend the path to where you pickled your insight embeddings.")
@@ -4674,40 +4867,55 @@ class Summarize:
 
     def _calculate_centroid(self, col="full_insight_embedding"):
         """
-        Compute cluster centroids for each research question.
+        Compute cluster centroids for downstream cluster ordering.
 
-        For each `(question_id, cluster)` pair, this method aggregates the
-        embedding vectors associated with the cluster and computes their
-        mean vector (centroid). These centroids are later used to estimate
-        an ordering of clusters based on semantic proximity.
+        Generates a centroid vector for each `(question_id, cluster)` pair by
+        averaging the embedding vectors assigned to that cluster. These
+        centroids provide a compact representation of cluster location within
+        the embedding space and are subsequently used to estimate semantic
+        proximity between clusters.
+
+        Within ReadingMachine, cluster ordering is used during cluster
+        summarization to arrange semantically related clusters adjacent to one
+        another. This supports the generation of a structured cluster-summary
+        narrative that later serves as the input to theme-schema generation.
 
         Parameters
         ----------
         col : str, default="full_insight_embedding"
-            Column in `corpus_state.insights` containing the embedding
-            vectors used to compute centroids.
+            Column in `corpus_state.insights` containing the embedding vectors
+            used to compute cluster centroids.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing centroid vectors for each cluster with
-            columns:
+            DataFrame containing one row per `(question_id, cluster)` pair
+            with the columns:
 
-                - question_id
-                - cluster
-                - centroid
+            - `question_id`
+            - `cluster`
+            - `centroid`
+
+            The `centroid` column contains the mean embedding vector for the
+            corresponding cluster.
 
         Notes
         -----
-        Several safeguards are applied during centroid calculation:
+        Centroids are computed independently within each research question.
 
-        - Insights without valid embeddings are skipped.
-        - Ragged embedding vectors (inconsistent lengths) are filtered
-        using the modal vector length.
-        - Embeddings containing NaN values are excluded.
+        Several validation and cleaning steps are applied before centroid
+        calculation:
 
-        These checks ensure centroid computation remains stable even if
-        some embeddings are malformed or missing.
+        - rows without valid embedding vectors are excluded
+        - ragged embeddings are filtered using the modal vector length
+        - embeddings containing NaN values are removed
+
+        Clusters that contain no valid embeddings after cleaning are skipped.
+
+        Centroids are used only as a geometric representation of cluster
+        position. They do not determine thematic structure and should be
+        understood as part of the semantic scaffolding used to organize
+        insights prior to theme generation.
         """
         rows = []
         for rq, d in self.corpus_state.insights.groupby("question_id", sort=False):
@@ -4734,48 +4942,58 @@ class Summarize:
 
     def _estimate_shortest_path(self):
         """
-        Estimate an ordering of clusters based on centroid similarity.
+        Estimate semantic ordering paths through non-outlier clusters.
 
-        This method computes centroids for each cluster and then determines
-        an approximate shortest path through those clusters using pairwise
-        cosine distances between centroid embeddings.
+        Computes cluster centroids and uses pairwise cosine distance between
+        centroid embeddings to derive an ordered path through the clusters for
+        each research question. The resulting order places semantically nearby
+        clusters adjacent to one another, providing a coherent sequence for
+        downstream cluster summarization.
 
-        The resulting ordering places semantically similar clusters next
-        to one another. This ordering is later used when generating cluster
-        summaries so that related clusters appear in adjacent positions,
-        providing the model with coherent contextual scaffolding during
-        theme generation.
+        In ReadingMachine, this ordering is used to construct the cluster-summary
+        narrative that scaffolds initial theme-schema generation. It affects the
+        order in which cluster summaries are produced and presented, but does not
+        itself determine the final thematic structure.
 
         Procedure
         ---------
         1. Compute cluster centroids from insight embeddings.
-        2. Compute pairwise cosine distances between centroids.
-        3. Estimate a shortest path through the clusters:
+        2. Remove the HDBSCAN outlier cluster (`-1`) from path estimation.
+        3. Compute pairwise cosine distances between remaining centroids.
+        4. Estimate an ordered path through the clusters:
 
-        - For small cluster counts (<10), all permutations are evaluated
-            to find the optimal path.
-        - For larger cluster sets, an approximate Traveling Salesman
-            solution from NetworkX is used.
+        - for zero or one non-outlier cluster, use the available cluster order
+        - for fewer than 10 clusters, evaluate all permutations exactly
+        - for 10 or more clusters, use NetworkX's approximate traveling
+            salesman path algorithm
 
-        4. Append the outlier cluster (-1) at the end of the ordering.
+        5. Append `-1` to the end of each returned order so outlier-derived
+        insights are summarized after core clusters.
 
         Returns
         -------
         dict
-            Dictionary mapping each research question to an ordered list
-            of clusters:
+            Dictionary mapping each research question with at least one valid
+            non-outlier centroid to an ordered cluster list:
 
-                {
-                    question_id: {
-                        "order": [cluster_1, cluster_2, ..., -1]
-                    }
+            {
+                question_id: {
+                    "order": [cluster_1, cluster_2, ..., -1]
                 }
+            }
 
         Notes
         -----
-        This ordering step does not influence the final thematic structure.
-        It is used only to provide a coherent sequence of cluster summaries
-        during the initial theme generation stage.
+        Outlier cluster `-1` is excluded from centroid-path estimation and appended
+        at the end of the returned ordering. The value is appended even when no
+        outlier insights are present for a given research question.
+
+        Research questions with no valid non-outlier centroids are omitted from the
+        returned dictionary.
+
+        The path is based on centroid geometry and should be understood as semantic
+        scaffolding for summary generation, not as a conceptual or thematic
+        ordering of the corpus.
         """
         print("Calculating centroids for each cluster...")
         centroids = self._calculate_centroid(col="full_insight_embedding")
@@ -4826,74 +5044,97 @@ class Summarize:
 
     def summarize_clusters(self, frozen_summary_window = 5):
         """
-        Generate summaries for each cluster of insights across all research questions.
+        Generate cluster summaries for all research questions.
 
-        This method performs the first stage of the thematic synthesis process by
-        summarizing the insights contained within each cluster. Cluster summaries
-        provide an initial structural overview of the corpus and act as scaffolding
-        for the subsequent theme generation stage.
+        Produces the cluster-summary narrative that forms the first synthesis
+        layer of the ReadingMachine thematic workflow. Each cluster is
+        summarized independently and the resulting summaries are stored as a
+        structured representation of the corpus that is subsequently used for
+        theme-schema generation.
 
-        The clusters are processed in the order determined by the centroid shortest
-        path algorithm (`_estimate_shortest_path`). This ordering places semantically
-        similar clusters adjacent to each other so that the model receives coherent
-        contextual information when generating summaries.
+        Clusters are processed in the semantic order estimated by
+        `_estimate_shortest_path()`. This ordering places nearby clusters in the
+        embedding space adjacent to one another, creating a locally coherent
+        narrative of the corpus while avoiding the need to expose the model to
+        the full cluster set simultaneously.
 
-        During summarization, previously generated cluster summaries are passed to
-        the model as frozen context. This context is:
+        To maintain local continuity, previously generated cluster summaries are
+        provided as frozen context using a bounded sliding window. Context is:
 
-            • scoped at the **research question level** (no cross-question context is used)
-            • restricted to a **bounded sliding window** of the most recent summaries
-            (e.g., last N clusters, where N = `frozen_summary_window`)
+            - restricted to the current research question
+            - limited to the most recent `frozen_summary_window` summaries
 
-        This design provides local semantic continuity while avoiding global path
-        dependence. It ensures that:
+        This approach allows neighboring clusters to influence one another while
+        reducing long-range path dependence and limiting the impact of early
+        summaries on later synthesis.
 
-            • summaries remain coherent with nearby clusters
-            • early clusters do not disproportionately shape later ones
-            • small variations in ordering or phrasing do not propagate across the
-            entire sequence
+        The workflow proceeds as follows:
 
-        Unlike earlier implementations that accumulated all prior summaries, this
-        approach treats cluster summarization as a locally conditioned process rather
-        than a single evolving narrative. Global structure is instead resolved at the
-        theme-generation stage.
+            shortest-path cluster ordering
+                ↓
+            cluster summarization
+                ↓
+            cluster-summary narrative
+                ↓
+            theme-schema generation
 
-        If cluster summaries already exist on disk, the user is prompted to either:
+        If cluster summaries already exist, the user may either:
 
-            (1) reload existing summaries
+            (1) reload the existing summaries
             (2) regenerate summaries
 
-        Regenerating summaries will reset the entire summarization pipeline because
-        all downstream artifacts depend on cluster summaries. Specifically, the
-        following artifacts are cleared if regeneration is selected:
+        Regeneration resets all downstream synthesis artifacts because they are
+        derived from the cluster-summary representation.
 
-            - theme schemas
-            - insight-to-theme mappings
-            - populated theme summaries
-            - orphan detection results
-            - redundancy pass outputs
+        Parameters
+        ----------
+        frozen_summary_window : int, default=5
+            Number of previously generated cluster summaries to provide as
+            frozen context when generating each new summary.
 
         Returns
         -------
-        List[pd.DataFrame]
-            A list containing a single DataFrame with the generated cluster
-            summaries. The DataFrame includes the following columns:
+        list[pd.DataFrame] or None
+            Returns `self.summary_state.cluster_summary_list`, which contains a
+            single DataFrame with the columns:
 
-                - question_id
-                - question_text
-                - cluster
-                - summary
+            - `question_id`
+            - `question_text`
+            - `cluster`
+            - `summary`
+
+            Returns `None` when existing summaries are reloaded and no new
+            summarization is performed.
+
+        Side Effects
+        ------------
+        Mutates:
+
+        - `self.summary_state.cluster_summary_list`
+
+        May reset:
+
+        - `theme_schema_list`
+        - `mapped_theme_list`
+        - `populated_theme_list`
+        - `orphan_list`
+        - `redundancy_list`
+
+        Persists the resulting summaries through `SummaryState.save()`.
 
         Notes
         -----
-        Cluster summaries are not treated as analytical conclusions. They serve
-        only as a structural aid for theme generation, which subsequently operates
-        directly on the underlying insights and is refined iteratively through
-        orphan detection and schema updates.
+        Cluster summaries are not treated as analytical conclusions or final
+        themes. They function as a compressed structural representation of the
+        clustered insight space and provide the scaffolding used to construct
+        the initial theme schema.
 
-        The generated summaries are stored in `self.summary_state.cluster_summary_list`
-        and persisted to disk via `SummaryState.save()` to support resumable
-        workflows.
+        Outlier cluster `-1`, when present, is summarized after all core
+        clusters for a research question.
+
+        The generated summaries remain linked to the underlying clustered
+        insights through the retained cluster identifiers, preserving
+        traceability between thematic synthesis and the source corpus.
         """
         
         if self.summary_state.cluster_summary_list is not None and len(self.summary_state.cluster_summary_list) > 0:
@@ -5049,9 +5290,60 @@ class Summarize:
 
         return self.summary_state.cluster_summary_list
     
-    
     def _llm_gen_initial_schema(self, user_prompt, sys_prompt):
-        
+        """
+        Generate an initial theme schema from cluster-summary narratives.
+
+        Calls the configured language model to construct a thematic schema from
+        the cluster-summary representation of a research question. The schema
+        defines the conceptual categories that will be used during subsequent
+        insight-to-theme mapping and theme population stages.
+
+        The model is required to return a structured schema consisting of one
+        or more themes. Each theme contains:
+
+        - a theme label
+        - a theme description
+        - mapping instructions describing which insights belong in the theme
+
+        The method enforces a strict JSON response schema and returns only the
+        extracted theme definitions.
+
+        Parameters
+        ----------
+        user_prompt : str
+            Prompt containing the cluster-summary narrative and any additional
+            context required for schema generation.
+
+        sys_prompt : str
+            System prompt defining the rules, objectives, and constraints for
+            theme-schema generation.
+
+        Returns
+        -------
+        list[dict]
+            List of theme definitions. Each theme contains:
+
+            - `theme_label`
+            - `theme_description`
+            - `instructions`
+
+            Returns an empty list if schema generation fails or no themes are
+            produced.
+
+        Notes
+        -----
+        This method performs only the LLM schema-generation call. It does not
+        validate, persist, or apply the resulting schema.
+
+        The underlying JSON response also includes a `no_change` flag used by
+        later iterative schema-refinement workflows. This flag is intentionally
+        discarded here because the initial schema-generation stage requires only
+        the theme definitions themselves.
+
+        Errors returned by the LLM wrapper are logged and result in an empty
+        theme list rather than an exception.
+        """
         fall_back = {
             "themes": [],
             "no_change": False
@@ -5116,7 +5408,68 @@ class Summarize:
         return themes
     
     def _llm_gen_schema_repair_plan(self, user_prompt, sys_prompt):
+        """
+        Generate a structured repair plan for an overloaded or incomplete theme schema.
 
+        Calls the configured language model to produce a schema-repair plan when
+        theme population, orphan reinsertion, or completeness checks indicate
+        that the current thematic structure is failing to adequately represent
+        the underlying insight set.
+
+        The generated repair plan identifies:
+
+        - themes that failed completeness checks
+        - concepts contributing most to representational overload
+        - concepts that should be extracted into new themes
+        - concepts that should be moved to existing themes
+        - proposed scope changes for affected themes
+        - schema-level adjustments required to improve coverage
+
+        The repair plan functions as an intermediate planning artifact rather
+        than a direct schema modification. Downstream methods use the plan to
+        construct revised theme schemas while maintaining an inspectable record
+        of why changes were proposed.
+
+        Parameters
+        ----------
+        user_prompt : str
+            Prompt containing the current schema, failed themes, orphan
+            information, completeness diagnostics, and any other context
+            required for schema repair.
+
+        sys_prompt : str
+            System prompt defining the objectives and constraints of the repair
+            process.
+
+        Returns
+        -------
+        dict
+            Structured repair plan containing:
+
+            - `theme_repairs`
+            - `schema_repairs`
+
+            If repair generation fails, returns an empty repair plan of the form:
+
+            {
+                "theme_repairs": [],
+                "schema_repairs": []
+            }
+
+        Notes
+        -----
+        This method corresponds to the schema-repair stage described in the
+        ReadingMachine methodology, where overloaded themes are decomposed into
+        smaller conceptual units before later optimization and recombination.
+
+        The repair plan is intentionally separated from schema implementation.
+        This separation supports inspectability and reduces the risk of
+        performative repair, where a model reports changes without actually
+        modifying the thematic structure.
+
+        The returned object is a planning artifact only. It does not directly
+        modify SummaryState or any stored theme schema.
+        """
         fall_back = {
             "repair_plan": {
                 "theme_repairs": [],
@@ -5313,8 +5666,50 @@ class Summarize:
 
         return repair_plan
 
-
     def _llm_apply_schema_repair_plan(self, unstable_schema_rq, sys_prompt, user_prompt):
+        """
+        Apply a schema-repair plan to an unstable question-specific schema.
+
+        Calls the configured language model to implement a previously generated
+        schema-repair plan against the current unstable schema for a single
+        research question. The method returns a revised list of theme definitions
+        using the standard theme-schema structure required by downstream mapping
+        and population stages.
+
+        Parameters
+        ----------
+        unstable_schema_rq : pd.DataFrame
+            Current unstable theme schema for one research question. Used to build
+            the fallback schema returned if the LLM call fails.
+
+        sys_prompt : str
+            System prompt defining the constraints for applying the repair plan.
+
+        user_prompt : str
+            Prompt containing the unstable schema and the repair plan to apply.
+
+        Returns
+        -------
+        list[dict]
+            Revised theme schema containing dictionaries with:
+
+            - `theme_label`
+            - `theme_description`
+            - `instructions`
+
+            If the LLM call fails or returns invalid JSON, returns the existing
+            unstable schema converted to this dictionary format.
+
+        Notes
+        -----
+        This method implements the repair plan only. It does not optimize the
+        resulting schema, assign theme IDs, persist the schema, or mutate
+        SummaryState.
+
+        Separating repair-plan generation from repair-plan implementation helps
+        reduce performative repair by requiring the model first to diagnose
+        structural problems and then to apply those repairs in a separate call.
+        """
         fall_back = {
             "themes": unstable_schema_rq[
                 ["theme_label", "theme_description", "instructions"]
@@ -5365,7 +5760,47 @@ class Summarize:
         return themes
 
     def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
+        """
+        Optimize a repaired theme schema without reintroducing overload.
 
+        Calls the configured language model to review a repaired schema and make
+        conservative improvements to theme coherence, boundaries, and organization.
+        The optimizer may return a revised schema or indicate that no improvement is
+        needed.
+
+        Parameters
+        ----------
+        sys_prompt : str
+            System prompt defining the optimization rules and constraints.
+
+        user_prompt : str
+            Prompt containing the repaired schema and any context needed to assess
+            whether optimization is safe.
+
+        Returns
+        -------
+        list[dict] or str
+            Returns a list of optimized theme definitions when changes are proposed.
+            Each theme dictionary contains:
+
+            - `theme_label`
+            - `theme_description`
+            - `instructions`
+
+            Returns the string `"no change"` when the optimizer indicates that the
+            existing schema should be retained.
+
+        Notes
+        -----
+        Optimization is intentionally separate from decomposition and repair. The
+        repair step prioritizes resolving overloaded or incomplete themes; the
+        optimization step may then improve conceptual coherence only when doing so
+        does not recreate the representational overload that caused earlier
+        failures.
+
+        This method performs only the LLM optimization call. It does not assign
+        theme IDs, persist outputs, or mutate SummaryState.
+        """
         fallback_optimizer_response = {
             "no_change": True,
             "themes": []
@@ -5429,101 +5864,189 @@ class Summarize:
 
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
         """
-        Generate or refine the thematic schema using the LLM.
+        Generate, repair, optimize, and stabilize a thematic schema.
 
-        This method performs per-question schema generation across the corpus,
-        supporting both initial schema construction and iterative refinement.
+        This method is the central schema-generation and schema-refinement
+        orchestrator within the ReadingMachine synthesis workflow. It is used both
+        for initial theme-schema generation and for subsequent schema revisions
+        triggered by theme-population diagnostics.
 
-        Two input modes are supported:
+        Two operating modes are supported:
 
-            - "cluster summaries":
-                Used for the first schema pass. The model generates a conceptual
-                schema from semantically clustered summaries.
+            "cluster summaries"
+                Generates an initial theme schema from the cluster-summary
+                narrative produced during cluster summarization.
 
-            - "populated themes":
-                Used for iterative refinement. The model receives:
-                    • the current schema (unstable portion only)
-                    • theme-level summaries
-                    • completeness signals (pass/fail)
-                    • summaries of unintegrated content
-                and updates the schema accordingly.
+            "populated themes"
+                Revises an existing schema using evidence generated during
+                theme population, completeness checking, orphan handling,
+                and schema evaluation.
 
-        Schema refinement operates at the level of individual research questions.
-        Questions whose schemas are already marked as stable are skipped and
-        carried forward unchanged.
+        Initial Schema Generation
+        -------------------------
+        When operating on cluster summaries, the method generates an initial
+        theme schema independently for each research question.
 
-        For each question, the LLM returns:
+        For each question:
 
-            {
-                "themes": [
-                    {
-                        "theme_label": str,
-                        "theme_description": str,
-                        "instructions": str
-                    }
-                ],
-                "no_change": bool
-            }
+            cluster summaries
+                ↓
+            LLM schema generation
+                ↓
+            initial theme schema
 
-        The "no_change" flag indicates whether the schema for that question
-        should remain unchanged.
+        The generated schema consists of:
 
-        Stability Handling
-        ------------------
-        - Each theme row carries a boolean "stable" flag.
-        - Stable questions are excluded from further processing.
-        - Only unstable questions are passed to the LLM.
-        - Newly processed questions are marked:
-            • stable = True  → if "no_change" is True
-            • stable = False → otherwise
+            - theme labels
+            - theme descriptions
+            - mapping instructions
 
-        - The final schema is constructed by concatenating:
-            • updated unstable schemas
-            • previously stable schemas
+        All generated themes are marked as:
+
+            stable = False
+            optimized = False
+            needs_repair = True
+
+        because they have not yet undergone empirical testing through the
+        mapping and population stages.
+
+        Schema Refinement
+        -----------------
+        When operating on populated themes, the method performs iterative
+        schema stabilization.
+
+        Questions are divided into:
+
+            stable schemas
+            unstable schemas
+
+        Stable schemas are carried forward unchanged.
+
+        Only unstable schemas are processed further.
+
+        For each unstable question, one of two pathways is followed:
+
+        1. Schema Repair
+        ----------------
+        If the schema has been flagged as requiring repair
+        (`needs_repair == True`):
+
+            schema history
+                ↓
+            repair-plan generation
+                ↓
+            repair-plan implementation
+                ↓
+            revised schema
+
+        The repair workflow uses:
+
+            - previous schema iterations
+            - completeness-check failures
+            - failed summary batches
+            - representational overload signals
+
+        to identify concepts that should be:
+
+            - extracted into new themes
+            - reassigned to existing themes
+            - used to redefine theme boundaries
+
+        2. Schema Optimization
+        ----------------------
+        If the schema does not require repair:
+
+            schema history
+                ↓
+            optimization review
+                ↓
+            optimized schema
+
+        The optimizer may either:
+
+            - propose schema improvements
+            - indicate that no further changes are required
+
+        Schemas receiving a "no change" decision are marked as stable and are
+        excluded from future refinement iterations.
 
         Convergence Logic
-        ----------------
-        - The method tracks the number of stable questions.
-        - Convergence is reached when all questions are stable.
-        - When this occurs, the method returns None.
+        -----------------
+        Schema stabilization is tracked at the research-question level.
+
+        A question is considered converged when the optimizer indicates that no
+        further modifications are necessary.
+
+        When all research questions are stable, the method terminates and returns
+        `None`, signalling that schema development has converged and that
+        downstream synthesis can proceed directly to redundancy handling and
+        rendering.
 
         Parameters
         ----------
         source : str
-            Input data source for schema generation. Must be one of:
+            Source representation used to generate or refine the schema.
 
-                "cluster summaries"
-                "populated themes"
+            Must be one of:
+
+            - `"cluster summaries"`
+            - `"populated themes"`
 
         Returns
         -------
         pd.DataFrame or None
-            A DataFrame containing the updated theme schema, or None if all
-            questions are stable (i.e., convergence has been reached).
+            Updated theme schema containing:
 
-            Output columns:
-                - theme_id
-                - theme_label
-                - theme_description
-                - instructions
-                - question_id
-                - question_text
-                - stable
+            - `theme_id`
+            - `theme_label`
+            - `theme_description`
+            - `instructions`
+            - `question_id`
+            - `question_text`
+            - `needs_repair`
+            - `optimized`
+            - `stable`
+            - `schema_produced_by`
+
+            Returns `None` when all research questions have reached schema
+            stability.
+
+        Side Effects
+        ------------
+        Mutates:
+
+        - `self.last_schema_repair_theme_repairs`
+        - `self.last_schema_repair_schema_repairs`
+
+        Reads from:
+
+        - `self.summary_state.cluster_summary_list`
+        - `self.summary_state.theme_schema_list`
+        - `self.summary_state.populated_theme_list`
+
+        Uses and updates schema-state metadata including:
+
+        - `stable`
+        - `optimized`
+        - `needs_repair`
 
         Notes
         -----
-        - Only unstable questions are processed during refinement.
-        - Stable schemas are preserved exactly as they were in the previous pass.
-        - A numeric `theme_id` is assigned after concatenation to maintain a
-        consistent global ordering for downstream rendering.
+        Theme IDs are regenerated on every schema iteration to maintain a
+        contiguous global numbering scheme.
 
-        - Fallback behavior:
-            • If the LLM call fails, the previous schema is reused
-            • Fallback responses are always treated as "no_change": False
-            to avoid false convergence signals
+        Schema repair and schema optimization are intentionally separated into
+        distinct LLM operations. Repair addresses representational failures and
+        coverage problems, while optimization focuses on improving thematic
+        coherence once representational adequacy has been established.
 
-        - The method assumes that stability is consistent per question
-        (i.e., all themes for a given question share the same "stable" value).
+        This method does not persist the generated schema directly. Persistence
+        is handled by the higher-level schema-generation workflow that appends
+        the resulting DataFrame to `SummaryState.theme_schema_list`.
+
+        The method assumes that stability is evaluated at the research-question
+        level and that all themes belonging to a question share the same
+        stability status during a given iteration.
         """
         if source not in ["cluster summaries", "populated themes"]:
             raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
@@ -5823,81 +6346,111 @@ class Summarize:
         return(output)
 
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
-        
         """
-        Generate or update the theme schema for the synthesis pipeline.
+        Generate, reload, append, or regenerate a theme-schema pass.
 
-        This method manages the iterative theme schema generation process.
-        The schema defines the conceptual categories used to organize and
-        synthesize insights.
+        Public entry point for theme-schema generation in the summarization
+        workflow. This method manages sequencing around schema creation and
+        refinement, while delegating the actual LLM-based schema generation,
+        repair, optimization, and stabilization logic to `_run_llm_schema_gen()`.
 
-        Schema generation operates in three modes:
+        The theme schema defines the conceptual categories and mapping
+        instructions used to assign insights to themes and later synthesize
+        theme-level summaries.
 
-            1. Initial pass
-            If no schema exists, themes are generated from cluster summaries.
+        Operating Modes
+        ---------------
+        Initial schema generation
+            If no schema exists, generate the first schema from the cluster
+            summaries stored in `summary_state.cluster_summary_list`.
 
-            2. Iterative refinement
-            After insights have been mapped, themes populated, and orphan
-            handling completed, a new schema can be generated using the
-            updated thematic summaries and failure signals.
+        Iterative refinement
+            If a schema already exists, optionally generate a new schema pass
+            from populated-theme outputs after the current mapping, population,
+            and orphan-handling cycle has been completed.
 
-            3. Regeneration
-            The most recent schema pass can be overwritten and regenerated
-            from the previous pipeline state.
+        Latest-pass regeneration
+            Replace the most recent schema pass and clear downstream artifacts
+            that depend on it.
+
+        Forced generation
+            If `force=True`, bypass normal sequencing checks and append a new
+            schema pass generated from cluster summaries. This mode is intended
+            for development and can leave SummaryState internally inconsistent.
 
         Parameters
         ----------
         force : bool, default=False
-            If True, bypass sequencing validation and generate a new schema
-            directly from cluster summaries.
-
-            This mode is intended for development or testing and may leave the
-            pipeline state inconsistent.
+            If True, bypass sequencing checks and append a schema generated from
+            cluster summaries. Must be a boolean.
 
         Returns
         -------
         pd.DataFrame or None
-            The newly generated theme schema, or None if the model determines
-            that no further improvements are required.
+            Newly generated schema DataFrame, or None when:
+
+            - the user chooses to load the latest existing schema
+            - schema refinement reaches convergence and no new schema is produced
+
+            Generated schemas typically contain:
+
+            - `theme_id`
+            - `theme_label`
+            - `theme_description`
+            - `instructions`
+            - `question_id`
+            - `question_text`
+            - `needs_repair`
+            - `optimized`
+            - `stable`
+            - `schema_produced_by`
 
         Raises
         ------
         ValueError
-            If required upstream stages have not been completed or if schema
-            sequencing rules are violated.
+            If `force` is not a boolean.
 
-        Workflow
-        --------
-        The method enforces a structured pipeline:
+        ValueError
+            If cluster summaries have not yet been generated.
 
-            1. Cluster summaries → initial schema
-            2. Insight mapping → theme population
-            3. Orphan detection and reintegration
-            4. Schema refinement using updated summaries
+        ValueError
+            If the user attempts to generate a new refinement pass before
+            populated themes exist.
 
-        The refinement step uses failure signals (e.g. inability to integrate
-        insights without excessive compression) to adjust theme definitions.
+        ValueError
+            If the user attempts to generate a new refinement pass before orphan
+            handling has been completed for the current population pass.
+
+        Side Effects
+        ------------
+        May mutate:
+
+        - `self.summary_state.theme_schema_list`
+        - `self.summary_state.mapped_theme_list`
+        - `self.summary_state.populated_theme_list`
+        - `self.summary_state.orphan_list`
+        - `self.summary_state.redundancy_list`
+
+        Persists SummaryState after successful schema generation or regeneration.
 
         Notes
         -----
-        - Theme schemas are stored as sequential passes in
+        Schema passes are stored sequentially in
         `self.summary_state.theme_schema_list`.
 
-        - Each new schema pass reflects an updated conceptual partition of the
-        data, informed by synthesis outcomes and failure diagnostics.
+        A new refinement pass may only be appended after a complete synthesis
+        cycle has been run through orphan handling. This guardrail helps ensure
+        that schema revisions are based on evidence from actual mapping and
+        population behavior rather than on untested schema definitions.
 
-        - If the model returns "no_change": True for all research questions,
-        the method returns None, indicating convergence.
+        When regenerating the latest schema pass, downstream artifacts are cleared
+        through `SummaryState.rewind_to()` before the latest schema is replaced.
+        This preserves the invariant that mapping, population, orphan, and
+        redundancy artifacts do not remain ahead of the active schema.
 
-        - Convergence implies:
-            • all themes successfully integrate assigned insights
-            • no clear structural improvements are identified
-
-        - This method is designed to iteratively refine the schema until it
-        reaches a stable conceptual structure that supports high-fidelity
-        synthesis without excessive compression.
+        If `_run_llm_schema_gen()` returns None, schema convergence has been
+        reached and no new schema is appended or overwritten.
         """
-        
         if force not in [True, False]:
             raise ValueError("Invalid value for 'force' parameter. Must be a boolean (True or False).")
 
@@ -6003,32 +6556,58 @@ class Summarize:
 
     def _validate_and_cast_theme_ids(self, df, allowed_ids):
         """
-        Validate theme identifiers returned by the LLM.
+        Validate and normalize LLM-generated theme assignments.
 
-        During insight-to-theme mapping, the LLM returns theme IDs that
-        correspond to themes defined in the schema. This method verifies
-        that all returned IDs are valid and converts them to integer type.
+        Verifies that all theme identifiers returned during the insight-to-theme
+        mapping stage correspond to themes present in the active schema. After
+        validation, theme identifiers are converted to integer type to maintain
+        consistency with the schema representation used throughout SummaryState.
+
+        This validation acts as a guardrail against schema drift, hallucinated
+        theme identifiers, and formatting inconsistencies in LLM outputs.
 
         Parameters
         ----------
         df : pd.DataFrame
             DataFrame containing theme assignments returned by the LLM.
-            Must include a `theme_id` column.
+
+            Must contain:
+
+            - `theme_id`
 
         allowed_ids : Iterable
-            Collection of valid theme identifiers defined by the current
-            theme schema.
+            Collection of valid theme identifiers defined by the current theme
+            schema.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame with validated and type-cast `theme_id` values.
+            Input DataFrame with:
+
+            - validated theme assignments
+            - `theme_id` converted to integer dtype
 
         Raises
         ------
         ValueError
-            If the LLM returns any theme identifiers not present in the
-            allowed set.
+            If one or more returned theme identifiers are not present in the
+            current schema.
+
+        Notes
+        -----
+        Validation is performed using string representations of theme IDs before
+        integer conversion. This allows the method to accept identifiers that may
+        be returned by the LLM as either strings or integers while still enforcing
+        membership in the active schema.
+
+        The method performs only identifier validation and type normalization. It
+        does not verify that individual insight assignments are conceptually
+        correct, only that they reference valid themes.
+
+        Maintaining integer `theme_id` values is important because downstream
+        SummaryState operations assume integer identifiers when ordering themes,
+        joining synthesis artifacts, validating state integrity, and generating
+        stable theme references across schema iterations.
         """
         allowed_set = set(str(i) for i in allowed_ids)
         returned_set = set(df["theme_id"].astype(str))
@@ -6053,77 +6632,137 @@ class Summarize:
         mode
         ):
         """
-        Map insights to themes using the LLM.
+        Map insights to themes using the active theme schema.
 
-        This internal method performs the core insight-to-theme classification
-        stage of the pipeline. Insights are processed in batches and assigned
-        to one or more themes defined in the current theme schema.
+        Performs the core insight-to-theme classification stage of the
+        ReadingMachine synthesis workflow. Insights are processed in batches
+        and assigned to one or more themes defined in the current theme schema.
 
-        The method supports incremental execution and resume-safe behavior.
-        Only insights belonging to *unstable* questions are processed by the LLM.
-        Insights associated with *stable* questions are reused from the previous
-        mapping pass and seeded into the current result.
+        Mapping is performed independently for each research question using
+        the most recent schema stored in
+        `self.summary_state.theme_schema_list[-1]`.
 
-        All mapping artifacts are maintained as a complete snapshot of the system
-        state. Even when only a subset of insights is processed, the final output
-        always contains mappings for all insights.
+        The workflow proceeds as follows:
 
-        To ensure consistency, intermediate results are normalized during execution:
-            • mappings are concatenated incrementally
-            • duplicate rows are removed based on:
-                ("insight_id", "theme_id", "question_id")
+            active theme schema
+                ↓
+            batched insight classification
+                ↓
+            insight-to-theme mappings
+                ↓
+            complete mapping snapshot
 
-        This guarantees idempotent behavior across resume and partial execution.
+        Stable Schema Reuse
+        -------------------
+        Questions whose schemas have already been marked as stable are not
+        remapped.
+
+        Instead, mappings from the previous mapping pass are reused and seeded
+        into the current result set. Only insights belonging to unstable
+        questions are submitted to the LLM.
+
+        This reduces unnecessary remapping and helps preserve stability across
+        schema iterations.
+
+        Resume and Recovery
+        -------------------
+        The method supports resumable execution.
+
+        Previously mapped insights can be supplied through
+        `already_mapped_insight_ids`, allowing interrupted mapping runs to
+        continue from the last completed batch.
+
+        A state fingerprint containing:
+
+        - CorpusState fingerprint
+        - SummaryState fingerprint
+
+        is stored alongside intermediate outputs. These fingerprints can be
+        used to detect state drift between mapping sessions.
 
         Parameters
         ----------
         batch_size : int
-            Number of insights to process per LLM call.
+            Number of insights to include in each LLM mapping request.
 
         already_mapped_insight_ids : list
-            List of insight IDs that have already been mapped. Used during
-            resume operations and to skip processing of stable insights.
+            Insight identifiers that have already been mapped. These insights
+            are excluded from processing.
 
-        mapped_insights_df_list : list
-            List of DataFrames containing mapping results. This list is
-            incrementally normalized into a single deduplicated DataFrame
-            to maintain a consistent state across batches and resumes.
+        mapped_insights_df_list : list[pd.DataFrame]
+            Existing mapping outputs accumulated from previous batches or
+            recovery operations.
 
         in_progress_path : str
-            File path where intermediate mapping progress is serialized
-            during execution.
+            Path where intermediate mapping state is serialized during
+            execution.
 
         mode : str
-            Execution mode controlling validation behavior. Must be one of:
+            Mapping mode.
 
-                "normal" — standard execution with state validation
-                "force"  — bypasses state integrity safeguards
+            Must be one of:
+
+            - `"normal"`: standard execution with state validation
+            - `"force"`: bypass resume-state validation safeguards
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing the complete set of mapped insights with
-            the following columns:
+            Complete insight-to-theme mapping table containing:
 
-                - insight_id
-                - theme_id
-                - question_id
+            - `insight_id`
+            - `theme_id`
+            - `question_id`
+
+            Each row represents a single insight-theme assignment.
+
+            Because insights may map to multiple themes, a single
+            `insight_id` may appear in multiple rows.
+
+        Raises
+        ------
+        ValueError
+            If `mode` is not `"normal"` or `"force"`.
+
+        Side Effects
+        ------------
+        Writes incremental progress to `in_progress_path` after every
+        successfully processed batch.
+
+        Stores:
+
+        - mapping outputs
+        - state fingerprints
+        - execution mode
+
+        in the serialized checkpoint object.
 
         Notes
         -----
-        - Stable questions (as defined in the current theme schema) are not
-        reprocessed. Their mappings are reused from the previous pass.
+        Mapping is constrained by the active theme schema. Theme identifiers
+        returned by the LLM are validated against the schema using
+        `_validate_and_cast_theme_ids()` before being accepted.
 
-        - The method ensures that all insights are represented exactly once
-        per (insight_id, theme_id, question_id) combination.
+        The method uses a strict JSON schema to constrain LLM outputs to
+        valid `(insight_id, theme_id)` assignments.
 
-        - A state fingerprint is stored alongside intermediate results to
-        ensure that the corpus and summary states have not changed between
-        resume attempts. If a mismatch is detected, resume is aborted to
-        prevent corruption of the synthesis pipeline.
+        Mapping outputs are treated as a complete state snapshot rather than
+        a delta. Even when only unstable questions are processed, the final
+        output contains mappings for all insights through a combination of:
 
-        - The function is designed to be resume-safe and idempotent:
-        repeated execution will not introduce duplicate mappings.
+        - reused stable mappings
+        - newly generated unstable mappings
+
+        Duplicate mappings are removed using:
+
+            (insight_id, theme_id)
+
+        ensuring idempotent behavior across retries, resumes, and repeated
+        executions.
+
+        This method performs only classification. It does not populate
+        themes, generate summaries, evaluate completeness, or perform orphan
+        handling.
         """
         
         if mode not in ["force", "normal"]:
@@ -6315,61 +6954,138 @@ class Summarize:
         return(mapped_insights_df)
     
     def map_insights_to_themes(
-        self,                       
-        batch_size=75, 
-        force = False
-        )-> pd.DataFrame:
+        self,
+        batch_size: int = 75,
+        force: bool = False
+    ) -> pd.DataFrame:
         """
-        Map all insights to themes defined in the current theme schema.
+        Generate, resume, reload, or regenerate an insight-to-theme mapping pass.
 
-        This method is the public entry point for the insight-to-theme
-        mapping stage of the synthesis pipeline. It orchestrates batch
-        classification of insights using the LLM and manages resume logic,
-        state validation, and persistence of mapping results.
+        Public entry point for the insight-to-theme mapping stage of the
+        ReadingMachine synthesis workflow. This method coordinates mapping
+        execution, resume handling, state validation, state realignment, and
+        persistence of mapping outputs.
+
+        Mapping assigns individual insights to one or more themes defined by
+        the most recent theme schema and produces the thematic membership layer
+        used by downstream theme-population and orphan-handling stages.
+
+        Workflow
+        --------
+        The mapping stage transforms:
+
+            theme schema
+                ↓
+            insight classification
+                ↓
+            insight-to-theme mappings
+                ↓
+            populated themes
+
+        Mapping is performed independently for each research question and is
+        constrained by the active theme schema.
+
+        Resume and Recovery
+        -------------------
+        The method supports resumable execution through an intermediate
+        checkpoint file.
+
+        When a partial mapping process is detected, the user may:
+
+            (1) resume the previous mapping run
+            (2) discard the partial run and start again
+
+        Resume operations verify that both CorpusState and SummaryState remain
+        unchanged by comparing stored fingerprints against the current state.
+
+        If state drift is detected, resume is aborted to prevent corruption of
+        the synthesis history.
+
+        Existing Mapping Passes
+        -----------------------
+        When mapping passes already exist, the user may:
+
+            (1) reload the most recent mapping pass
+            (2) regenerate mappings for the latest schema
+
+        Regeneration realigns schema and mapping history before constructing a
+        replacement mapping pass.
+
+        Force Mode
+        ----------
+        If `force=True`, normal sequencing validation and history-alignment
+        safeguards are bypassed.
+
+        The resulting mapping pass is appended directly to
+        `SummaryState.mapped_theme_list` regardless of the existing state.
+
+        This mode is intended for development and debugging and may leave the
+        synthesis state internally inconsistent.
 
         Parameters
         ----------
         batch_size : int, default=75
-            Number of insights sent to the LLM in each batch.
+            Number of insights included in each LLM mapping request.
 
         force : bool, default=False
-            If True, bypass state validation and resume checks and perform
-            a fresh mapping run. This mode is intended for development and
-            testing and may leave the pipeline state inconsistent.
+            If True, bypass sequencing validation, resume-state validation, and
+            history-alignment safeguards.
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame containing the mapping of insights to themes for the
-            most recent pass.
+        pd.DataFrame or None
+            Mapping DataFrame for the active mapping pass containing at least:
+
+            - `insight_id`
+            - `theme_id`
+            - `question_id`
+
+            Returns None when the user chooses to reload an existing mapping
+            pass rather than generating a new one.
 
         Raises
         ------
         ValueError
-            If no theme schema exists or if a resume attempt detects that
-            the underlying corpus or summary state has changed.
+            If no theme schema exists.
 
-        Workflow
-        --------
-        The method proceeds through the following stages:
+        ValueError
+            If a resume attempt detects that CorpusState or SummaryState has
+            changed since the checkpoint was created.
 
-            1. Validate that a theme schema exists.
-            2. Detect whether a partial mapping process is available for
-            resumption.
-            3. If resuming, verify that the corpus and summary states match
-            the state recorded in the progress file.
-            4. Perform batch mapping of insights using the LLM.
-            5. Persist mapping results in `SummaryState.mapped_theme_list`.
-            6. Save the updated summary state and remove any temporary
-            progress files.
+        Side Effects
+        ------------
+        Mutates:
+
+        - `self.summary_state.mapped_theme_list`
+
+        May realign:
+
+        - `self.summary_state.theme_schema_list`
+        - `self.summary_state.mapped_theme_list`
+
+        Persists SummaryState after successful mapping generation.
+
+        Creates and removes:
+
+        - `mapped_theme_in_progress.pickle`
+
+        used for checkpoint-based recovery.
 
         Notes
         -----
-        Insight-to-theme mapping is performed independently for each
-        research question and is constrained by the current theme schema.
+        Actual classification is delegated to `_map_insights_via_llm()`.
 
-        Each insight may be assigned to multiple themes if appropriate,
-        including special categories such as "Other" or "Conflict".
+        Mapping outputs are stored as iterative passes in
+        `self.summary_state.mapped_theme_list`, allowing theme schemas and
+        mappings to evolve together through successive synthesis iterations.
+
+        Stable schemas are not remapped. Their existing mappings are reused by
+        `_map_insights_via_llm()`, allowing refinement efforts to focus only on
+        unstable portions of the thematic structure.
+
+        Mapping is many-to-many. Individual insights may be assigned to
+        multiple themes, including special themes such as "Other" and
+        "Conflict" when present in the schema.
         """
 
         # Check that it is possible to run this step: i.e. there is a theme schema to map to
@@ -6564,47 +7280,56 @@ class Summarize:
 
     def _estimate_theme_lengths(self, paper_len: int, max_model_output_words: int = 2500) -> pd.DataFrame:
         """
-        Estimate target word lengths for each theme.
+        Estimate target word budgets for theme-level summaries.
 
-        This method allocates a target word length to each theme based on the
-        number of insights mapped to that theme relative to the total insight
-        count across the research question.
+        Allocates an approximate summary length to each theme based on the
+        number of mapped insights assigned to that theme. Themes with more mapped
+        insights receive larger target lengths, while themes with fewer mapped
+        insights receive shorter target lengths subject to fixed lower and upper
+        bounds.
 
-        The allocation process follows three steps:
-
-            1. Count insights mapped to each theme.
-            2. Compute each theme's proportion of the total insights.
-            3. Allocate word length proportionally based on the desired total
-            paper length.
-
-        Hard bounds are applied to prevent extreme allocations:
-
-            - Minimum theme length: 375 words
-            - Maximum theme length: model output ceiling
+        This allocation is used during theme population to guide the amount of
+        narrative space given to each theme within the overall target output
+        length.
 
         Parameters
         ----------
         paper_len : int
-            Approximate total desired length of the final synthesis document
-            in words.
+            Approximate target length, in words, for the synthesized output.
 
         max_model_output_words : int, default=2500
-            Maximum number of words the model can reliably produce in a single
-            response. This acts as the upper bound for theme summaries.
+            Maximum target word length assigned to any single theme summary.
 
         Returns
         -------
         pd.DataFrame
             DataFrame containing:
 
-                - theme_id
-                - allocated_length
+            - `theme_id`
+            - `allocated_length`
 
         Notes
         -----
-        Themes that have zero mapped insights are preserved and assigned the
-        minimum length. This maintains schema stability across synthesis passes
-        even when some themes temporarily receive no insights.
+        The allocation is based on the latest mapping pass stored in
+        `self.summary_state.mapped_theme_list[-1]` and the latest schema stored in
+        `self.summary_state.theme_schema_list[-1]`.
+
+        All themes in the active schema are preserved, including themes with no
+        mapped insights. Zero-hit themes are assigned the minimum target length so
+        that schema structure remains stable across synthesis passes.
+
+        The current hard bounds are:
+
+        - minimum theme length: 375 words
+        - maximum theme length: `max_model_output_words`
+
+        Word budgets are heuristic controls for LLM generation rather than strict
+        output guarantees. Actual generated summary lengths may differ depending
+        on model behavior, prompt structure, and the density of mapped insight
+        content.
+
+        Theme identifiers are cast to integer type before return to preserve
+        downstream ordering and join consistency.
         """
 
         MIN_THEME_WORDS = 375
@@ -6664,43 +7389,57 @@ class Summarize:
         return theme_counts[["theme_id", "allocated_length"]]
 
 
-    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float, max_model_output_words: int = 2800) -> pd.DataFrame:
+    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float, max_model_output_words: int = 2800) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Identify themes whose summaries exceed a specified proportion of
-        their allocated length.
+        Split populated themes by length-pressure status.
 
-        This function detects cases where the model has compressed a theme
-        excessively in order to fit within the allocated word limit. When
-        the current summary length exceeds the specified proportion of the
-        allocated length, the theme is flagged for potential expansion.
+        Flags themes whose generated summaries are approaching or exceeding a
+        specified proportion of their allocated word budget. This diagnostic is
+        used during theme population to identify summaries that may require
+        expansion, repartitioning, or repair because the theme may contain more
+        mapped insight content than can be represented within its current target
+        length.
 
         Parameters
         ----------
         df : pd.DataFrame
-            DataFrame of populated themes containing:
+            Populated-theme DataFrame containing at least:
 
-                - allocated_length
-                - current_length
+            - `allocated_length`
+            - `current_length`
+            - `stable`
 
         max_prop : float
-            Proportion of allocated length beyond which the summary will be
-            flagged for expansion.
+            Proportion of `allocated_length` above which a theme is flagged.
 
         max_model_output_words : int, default=2800
-            Maximum output length supported by the model. Themes already at
-            this ceiling are not flagged.
+            Hard maximum summary length. Themes already allocated this maximum are
+            not flagged.
 
         Returns
         -------
         tuple[pd.DataFrame, pd.DataFrame]
-            Two DataFrames:
+            Tuple containing:
 
-                df_len_ok
-                    Themes within acceptable length limits.
+            - `df_len_ok`: themes not flagged for length pressure
+            - `df_len_flagged`: themes flagged for length pressure
 
-                df_len_flagged
-                    Themes exceeding the specified proportion of their
-                    allocated length.
+        Notes
+        -----
+        A theme is not flagged when:
+
+        - `current_length` is missing or zero
+        - `allocated_length` equals `max_model_output_words`
+        - `stable` is True
+        - `current_length <= allocated_length * max_prop`
+
+        The method adds a `length_flag` column to the input DataFrame before
+        splitting it into flagged and unflagged subsets.
+
+        Length pressure is a heuristic signal. It does not prove that a summary is
+        incomplete, but it can indicate that the theme is carrying too much
+        representational load or that assigned insights may need to be redistributed
+        during schema repair.
         """
 
         MAX_THEME_WORDS = max_model_output_words
@@ -6732,80 +7471,130 @@ class Summarize:
         return df_len_ok, df_len_flagged
     
     def _run_theme_pop(
-        self, 
+        self,
         schema_df: pd.DataFrame,
-        mapped_themes_df: pd.DataFrame, 
-        paper_len = 8000
-        ) -> pd.DataFrame:
-
+        mapped_themes_df: pd.DataFrame,
+        paper_len: int = 8000
+    ) -> pd.DataFrame:
         """
-        Populate themes by synthesizing insights assigned to each theme.
+        Populate themes by synthesizing mapped insights into thematic narratives.
 
-        This method generates narrative summaries for each theme by synthesizing
-        the insights mapped to that theme. Each theme is processed independently
-        using the LLM.
+        Generates theme-level summaries from the insight-to-theme mappings
+        produced during the mapping stage. Each theme is synthesized
+        independently and becomes the primary analytical representation used for
+        completeness auditing, orphan detection, schema repair, and subsequent
+        thematic refinement.
 
-        The function:
+        The theme-population workflow proceeds as follows:
 
-            1. Estimates target theme lengths if not already present.
-            2. Retrieves the insights mapped to each theme.
-            3. Applies structure-preserving sampling when themes exceed a size threshold.
-            4. Builds prompts tailored to the theme type.
-            5. Calls the LLM to synthesize a thematic summary.
+            mapped insights
+                ↓
+            length allocation
+                ↓
+            theme-level synthesis
+                ↓
+            populated themes
+                ↓
+            completeness auditing
 
-        Sampling behavior
+        Stable Theme Reuse
+        ------------------
+        Themes belonging to research questions whose schemas have already been
+        marked as stable are not regenerated.
+
+        Instead, populated themes from the most recent population pass are
+        reused and carried forward unchanged. Only themes associated with
+        unstable schemas are submitted to the LLM for regeneration.
+
+        Length Allocation
         -----------------
-        When the number of insights mapped to a theme exceeds a threshold,
-        a subset of insights is selected using random sampling from the
-        mapped insight set.
+        Before synthesis, each theme receives an allocated word budget derived
+        from the relative number of mapped insights assigned to that theme.
 
-        This ensures that:
+        These allocations are used to guide summary generation and to later
+        evaluate whether themes may be experiencing representational overload.
 
-            - Sampling reflects the actual distribution of insights assigned to the theme
-            - No external structural assumptions (e.g. clustering) are imposed during synthesis
-            - Input size remains within model integration capacity
+        Theme Types
+        -----------
+        Different prompting strategies are used depending on theme type:
 
-        Importantly, sampling does NOT remove insights from the pipeline.
-        Any omitted insights will be surfaced during orphan detection and
-        reintroduced in later stages, ensuring full coverage prior to re-theming.
+        - general themes
+        - conflict themes
+        - other themes
+
+        This allows conflict-oriented and residual categories to be synthesized
+        differently from standard thematic categories.
+
+        Fallback and Sampling
+        ---------------------
+        If theme population fails or produces an empty summary, the method
+        retries synthesis using a sampled subset of insights constrained by a
+        maximum word budget.
+
+        Sampling is treated as a temporary context-management strategy rather
+        than a coverage decision. Any omitted information is expected to be
+        recovered later through completeness checking, orphan detection,
+        reintegration, and schema refinement.
 
         Parameters
         ----------
         schema_df : pd.DataFrame
-            Current theme schema containing:
+            Active theme schema containing theme definitions and synthesis-state
+            metadata.
 
-                - theme_id
-                - theme_label
-                - theme_description
+            Expected columns include:
+
+            - `theme_id`
+            - `theme_label`
+            - `theme_description`
+            - `question_id`
+            - `question_text`
+            - `stable`
 
         mapped_themes_df : pd.DataFrame
-            DataFrame mapping insights to themes.
+            Insight-to-theme mapping table containing at least:
 
-        paper_len : int
-            Target total paper length used to estimate theme summary lengths.
+            - `insight_id`
+            - `theme_id`
+            - `question_id`
+
+        paper_len : int, default=8000
+            Approximate target length of the synthesized output. Used when
+            allocating theme-level word budgets.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing populated theme summaries with metadata
-            including:
+            Populated theme table containing:
 
-                - thematic_summary
-                - theme_id
-                - theme_label
-                - theme_description
-                - allocated_length
-                - current_length
-                - perc_of_max_length
+            - `thematic_summary`
+            - `question_id`
+            - `theme_id`
+            - `theme_label`
+            - `theme_description`
+            - `allocated_length`
+            - `current_length`
+            - `perc_of_max_length`
+            - `needs_repair`
+            - `optimized`
+            - `stable`
 
         Notes
         -----
-        - Sampling reduces initial synthesis pressure but preserves structure.
-        - Full insight coverage is enforced later via orphan handling.
-        - Themes with no mapped insights are retained with empty summaries.
-        """
+        Themes with no mapped insights are retained and returned with empty
+        summaries. This preserves schema stability and allows structural
+        categories such as "Other" and "Conflict" to remain present even when
+        they are temporarily unused.
 
-    
+        Summary length diagnostics are calculated for every generated theme.
+        These diagnostics are later used to identify themes that may require
+        schema repair, decomposition, or redistribution of representational
+        load.
+
+        This method performs synthesis only. It does not evaluate completeness,
+        detect orphaned insights, modify the schema, or persist outputs to
+        SummaryState.
+        """
         # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
         # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
         # Normalise the id columsn as they come back from the LLM so could be str
@@ -7001,47 +7790,73 @@ class Summarize:
         return(populated_themes_df)
 
     def _iterative_length_check_and_expand_loop(
-        self, 
-        populated_themes_df: pd.DataFrame, 
-        max_prop: float, 
+        self,
+        populated_themes_df: pd.DataFrame,
+        max_prop: float,
         paper_len: int
-        ) -> pd.DataFrame:  
-
+    ) -> pd.DataFrame:
         """
-        Iteratively expand theme summaries that exceed length thresholds.
+        Iteratively rerun length-pressured theme summaries with larger budgets.
 
-        After theme summaries are generated, this method checks whether the
-        model compressed any themes too aggressively relative to their
-        allocated word length. If a theme exceeds the specified proportion
-        of its allocation, the user is given the option to expand the theme.
+        Reviews populated theme summaries for length pressure and optionally
+        regenerates flagged themes with expanded word allocations. This provides a
+        human-in-the-loop mechanism for reducing over-compression before moving to
+        downstream orphan handling and schema refinement.
 
-        Expansion occurs by increasing the allocated word length by 20%
-        and rerunning the theme population step for the affected themes.
+        The loop proceeds as follows:
+
+            populated themes
+                ↓
+            length-pressure check
+                ↓
+            optional budget expansion
+                ↓
+            targeted theme repopulation
+                ↓
+            updated populated themes
 
         Parameters
         ----------
         populated_themes_df : pd.DataFrame
-            DataFrame containing populated theme summaries.
+            Current populated-theme table containing generated summaries, theme
+            metadata, allocated lengths, current lengths, and stability flags.
 
         max_prop : float
-            Maximum acceptable proportion of allocated length before a theme
-            is flagged for expansion.
+            Proportion of allocated length above which a theme is flagged for
+            possible expansion.
 
         paper_len : int
-            Target total paper length used during theme population.
+            Approximate target output length used when rerunning theme population.
 
         Returns
         -------
         pd.DataFrame
-            Updated DataFrame of populated themes reflecting any expansions
-            performed during the iterative process.
+            Updated populated-theme table with any regenerated summaries replacing
+            their previous versions.
+
+        Raises
+        ------
+        ValueError
+            If expanded `allocated_length` values fail to merge onto the rerun
+            schema for flagged themes.
 
         Notes
         -----
-        The loop continues until either:
+        Flagged themes are rerun with a 20 percent increase in allocated length.
 
-            - no themes exceed the threshold, or
-            - the user chooses to accept the current summaries.                                    
+        Only flagged themes are regenerated. Unflagged themes are carried forward
+        unchanged.
+
+        Stable themes are not flagged by `_check_length_and_flag()` and therefore
+        are not regenerated by this loop.
+
+        The loop continues until either no themes remain flagged or the user chooses
+        to accept the current populated themes.
+
+        Length pressure is treated as a heuristic signal of possible excessive
+        abstraction or representational overload. It does not prove that a theme is
+        incomplete, but it gives the user an opportunity to expand summaries before
+        orphan detection and schema repair evaluate coverage more directly.
         """
         # Check whether any of the populated themes exceed a certain proportion of th total allocated length
         df_len_ok, df_len_flagged = self._check_length_and_flag(populated_themes_df, max_prop)
@@ -7118,57 +7933,90 @@ class Summarize:
         populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
         return(populated_themes_df)
    
-    def populate_themes(self, 
-                        paper_len: int = 8000, 
-                        max_prop: float = 0.9, 
-                        force: bool = False) -> pd.DataFrame:
-        
+    def populate_themes(
+        self,
+        paper_len: int = 8000,
+        max_prop: float = 0.9,
+        force: bool = False
+    ) -> pd.DataFrame:
         """
-        Generate narrative summaries for each theme.
+        Generate, reload, or regenerate populated theme summaries.
 
-        This method synthesizes insights mapped to each theme into coherent
-        narrative summaries. The resulting thematic summaries form the core
-        narrative structure of the synthesis output.
+        Public entry point for the theme-population stage of the ReadingMachine
+        synthesis workflow. This method synthesizes mapped insights into
+        theme-level narrative summaries, manages state sequencing, supports
+        regeneration of existing population passes, and persists populated-theme
+        outputs to SummaryState.
+
+        The population stage transforms:
+
+            theme schema
+                ↓
+            insight-to-theme mappings
+                ↓
+            theme-level narrative summaries
+                ↓
+            orphan detection and schema refinement
 
         Parameters
         ----------
         paper_len : int, default=8000
-            Approximate total desired word length of the final synthesis
-            document.
+            Approximate target length, in words, for the synthesized output. Used
+            to allocate theme-level word budgets.
 
         max_prop : float, default=0.9
-            Threshold proportion of allocated theme length used to detect
-            overly compressed summaries.
+            Proportion of allocated theme length above which a populated theme is
+            flagged for possible expansion.
 
         force : bool, default=False
-            If True, bypass validation and state checks and perform a fresh
-            population run. This mode is intended for development and testing.
+            If True, bypass normal sequencing and state-alignment checks, populate
+            themes from the latest schema and mapping pass, and append the result
+            directly to `summary_state.populated_theme_list`.
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame containing the populated theme summaries.
+        pd.DataFrame or None
+            Populated-theme DataFrame for the active population pass.
+
+            Returns None when the user chooses to reload the latest existing
+            populated themes rather than regenerate them.
 
         Raises
         ------
         ValueError
-            If no insight-to-theme mappings exist.
+            If no mapped themes exist.
 
-        Workflow
-        --------
-        The method performs the following steps:
+        ValueError
+            If no mapped themes are available after state-alignment checks.
 
-            1. Validate that insights have been mapped to themes.
-            2. Optionally realign pipeline state if previous population
-            passes exist.
-            3. Generate theme summaries from mapped insights.
-            4. Iteratively expand themes that exceed compression thresholds.
-            5. Persist the resulting summaries in `SummaryState`.
+        Side Effects
+        ------------
+        May mutate:
+
+        - `self.summary_state.mapped_theme_list`
+        - `self.summary_state.populated_theme_list`
+
+        Persists SummaryState after successful population.
 
         Notes
         -----
-        Theme summaries are stored in `summary_state.populated_theme_list`
-        to preserve the full history of synthesis passes.
+        Actual theme synthesis is delegated to `_run_theme_pop()`.
+
+        After population, `_iterative_length_check_and_expand_loop()` gives the
+        user the option to regenerate length-pressured themes with expanded word
+        budgets before outputs are saved.
+
+        If populated themes already exist, regeneration realigns mapping and
+        population history so that downstream artifacts do not remain ahead of the
+        active mapping pass.
+
+        Force mode is intended for development and debugging. It may leave the
+        synthesis history internally inconsistent because it bypasses normal
+        sequencing safeguards.
+
+        Populated themes are stored as sequential passes in
+        `self.summary_state.populated_theme_list`, preserving the history of
+        synthesis attempts across schema iterations.
         """
         
         # Check that themes have been mapped before we try to populate
@@ -7253,59 +8101,106 @@ class Summarize:
         self.summary_state.save()
         return self.summary_state.populated_theme_list[-1]
 
-
     def _identify_orphans(
-            self, 
-            checked_insights_df, 
-            mode, 
-            batch_size
-        ) -> pd.DataFrame:
-
+        self,
+        checked_insights_df,
+        mode,
+        batch_size
+    ) -> pd.DataFrame:
         """
-        Identify orphan insights not reflected in thematic summaries.
+        Audit populated theme summaries for omitted mapped insights.
 
-        This method audits each populated theme summary to determine whether
-        all insights assigned to that theme are represented in the narrative
-        synthesis. Insights that are not reflected in the summary are labeled
-        as "orphans".
+        Identifies orphan insights: mapped insights that are not reflected in the
+        populated thematic summaries to which they were assigned. This method
+        performs the coverage-audit stage that checks whether theme population
+        preserved the underlying insight content.
 
-        The function operates in batches and supports resumable execution.
-        Intermediate progress is written to a pickle file so that long-running
-        audit operations can safely recover from interruptions.
+        The audit proceeds theme by theme:
+
+            populated theme summary
+                ↓
+            mapped source insights
+                ↓
+            LLM mention audit
+                ↓
+            orphan insight set
+
+        Resume and Recovery
+        -------------------
+        The method supports checkpoint-based recovery. Previously checked insights
+        can be supplied through `checked_insights_df`, and intermediate progress is
+        written to `self.orphan_pickle_resume_path` after each batch.
+
+        Each checkpoint stores:
+
+        - checked insight results
+        - CorpusState fingerprint
+        - SummaryState fingerprint
+        - orphan-handling mode
+
+        Stable Question Reuse
+        ---------------------
+        Research questions whose schemas are marked stable are not re-audited.
+        Their orphan results are reused from the previous orphan pass and seeded
+        into the current audit output.
 
         Parameters
         ----------
         checked_insights_df : pd.DataFrame or None
-            DataFrame containing insights already checked during a previous
-            run. Used when resuming an interrupted audit process.
+            Previously checked insight-audit results, usually recovered from a
+            checkpoint. If None, a new empty audit table is initialized.
 
         mode : str
-            Determines how orphan results will be incorporated into the
-            pipeline state.
+            Orphan-handling mode associated with the current run.
 
-            Allowed values:
+            Must be one of:
 
-                "replace" — overwrite the most recent orphan audit
-                "append"  — append a new orphan audit to the history
+            - `"replace"`: overwrite the most recent orphan audit
+            - `"append"`: append a new orphan audit to the history
 
         batch_size : int
-            Number of insights checked in each LLM call.
+            Number of mapped insights included in each LLM audit request.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing orphan insights with the following columns:
+            DataFrame containing only orphaned insights, with columns:
 
-                - question_id
-                - theme_id
-                - insight_id
-                - found (False for orphan insights)
+            - `question_id`
+            - `theme_id`
+            - `insight_id`
+            - `found`
+
+            Returned rows have `found == False`.
+
+        Raises
+        ------
+        ValueError
+            If `mode` is not `"replace"` or `"append"`.
+
+        Side Effects
+        ------------
+        Writes checkpoint data to `self.orphan_pickle_resume_path` after each
+        processed batch.
 
         Notes
         -----
-        A state fingerprint is stored alongside progress checkpoints to
-        ensure that the corpus and summary states have not changed between
-        resume attempts.
+        The method uses the latest populated themes and latest insight-to-theme
+        mappings stored in SummaryState.
+
+        For each populated theme, the method retrieves all mapped source insights
+        and asks the LLM which insight IDs are reflected in the theme summary.
+        Insights not returned as reflected are treated as orphans.
+
+        The method checks coverage, not conceptual quality. It does not determine
+        whether the populated summary is well written, only whether mapped insight
+        content appears to be represented.
+
+        Citations are appended to insight text during the audit so the LLM can
+        assess whether cited source material is reflected in the thematic summary.
+
+        `theme_id` is cast to integer type before return to preserve downstream
+        merge and ordering consistency.
         """
 
         if mode not in ["replace", "append"]:
@@ -7440,55 +8335,50 @@ class Summarize:
         return(orphans_df)
     
 
-    def _summarize_failed_orphan_batch(self,
-                                      orphans: str,
-                                      question_text: str,
-                                      theme_label: str
-                                      ) -> str:
+    def _summarize_failed_orphan_batch(
+        self,
+        orphans: str,
+        question_text: str,
+        theme_label: str
+    ) -> str:
         """
-        Summarize a batch of orphan insights that could not be fully integrated.
+        Summarize orphan insights that could not be integrated directly.
 
-        This method is invoked when orphan integration fails (typically due to
-        output truncation under capacity constraints). It compresses the failed
-        batch into a concise, structured summary so that the information can be
-        retained and passed downstream (e.g. for theme restructuring or schema
-        adjustment).
-
-        Unlike the integration step, this method prioritizes successful
-        completion over full fidelity. It allows abstraction, merging, and
-        omission of lower-importance detail in order to produce a complete,
-        non-truncated summary of the batch.
-
-        The summary is generated via a constrained LLM call that enforces a
-        strict JSON structure.
+        Compresses a failed orphan-integration batch into a shorter diagnostic
+        summary so that its content is not lost when direct reintegration fails.
+        This method is used as a fallback pathway when orphan insertion cannot
+        produce a complete revised theme summary, often because the orphan batch is
+        too large or the generated output is truncated.
 
         Parameters
         ----------
         orphans : str
-            Formatted string containing the orphan insights to be summarized.
-            Typically a bullet list of insight texts.
+            Formatted orphan-insight text to summarize.
 
         question_text : str
-            The research question providing context for interpretation.
+            Research question used to contextualize the orphan batch.
 
         theme_label : str
-            The theme label associated with the orphan batch.
+            Theme label associated with the failed orphan batch.
 
         Returns
         -------
         str
-            A concise summary of the orphan insights capturing their core claims
-            and major themes. If the LLM call fails or returns invalid output,
-            a fallback summary string is returned.
+            Concise summary of the orphan batch. Returns `"No summary available."`
+            if the LLM call fails or cannot be parsed.
 
         Notes
         -----
-        - This function is part of the failure-handling pathway and is designed
-        to always return a usable output.
-        - Abstraction and controlled loss of detail are acceptable and expected.
-        - The output is intended for diagnostic and restructuring purposes,
-        not as a final thematic synthesis.
-        - JSON structure is strictly enforced to ensure reliable parsing.
+        This method intentionally prioritizes completion over full fidelity.
+        Unlike direct orphan reintegration, it may compress, abstract, or merge
+        details in order to preserve the main representational content of the
+        failed batch.
+
+        The returned summary is a diagnostic and schema-repair artifact, not a
+        final thematic synthesis. It is intended to keep failed orphan content
+        available for downstream repair, restructuring, or re-theming.
+
+        A strict JSON schema is used so the response can be parsed reliably.
         """
         sys_prompt = Prompts().summarize_failed_orphan_batch()
         user_prompt = (
@@ -7497,7 +8387,7 @@ class Summarize:
             f"ORPHANS:\n{orphans}\n\n"
         )
 
-        json_schema = json_schema = {
+        json_schema = {
             "name": "failed_orphan_batch_summarizer",
             "strict": True,
             "schema": {
@@ -7531,6 +8421,43 @@ class Summarize:
 
     def _identify_missing_citations(self, summary: str, required_citations: list) -> list:
         """
+        Identify citations missing from a synthesized summary.
+
+        Compares a set of required citation strings against a generated summary
+        and returns any citations that do not appear in the summary text. This
+        helper is used during citation-repair and orphan-handling workflows to
+        detect source references that may have been omitted during synthesis.
+
+        Parameters
+        ----------
+        summary : str
+            Generated summary text to inspect.
+
+        required_citations : list
+            Citation strings that should be represented in the summary.
+
+        Returns
+        -------
+        list[str]
+            Citation strings from `required_citations` that do not appear in the
+            summary.
+
+            Returns an empty list if:
+
+            - no required citations are supplied
+            - all required citations are present
+
+        Notes
+        -----
+        Citation matching is performed using simple string containment checks.
+        Citations are normalized by converting to strings and stripping leading
+        and trailing whitespace before comparison.
+
+        Duplicate citation requirements are removed before checking.
+
+        This method verifies citation presence only. It does not determine
+        whether a citation is attached to the correct claim or whether the cited
+        content is adequately represented in the summary.
         """
         if not required_citations:
             return []
@@ -7545,111 +8472,59 @@ class Summarize:
 
         return missing_citations
 
-        # #Turn the citations into json string
-        # citations_json = json.dumps(required_citations, ensure_ascii=False, indent = 2)
-
-        # user_prompt = (
-        #     f"THEMATIC SUMMARY:\n{summary}\n\n"
-        #     f"REQUIRED CITATIONS:\n{citations_json}\n\n"
-        # )
-
-        # print(f"User prompt for identifying missing citations:\n\n{user_prompt}")
-
-        # sys_prompt = Prompts().identify_citations()
-
-        # json_schema = {
-        #     "name": "identify_citations",
-        #     "strict": True,
-        #     "schema": {
-        #         "type": "object",
-        #         "properties": {
-        #             "identified_citations": {
-        #                 "type": "array",
-        #                 "items": {"type": "string"},
-        #                 "description": "A list of required in_text_citation strings that are explicitly present in the thematic summary."
-        #             }
-        #         },
-        #         "required": ["identified_citations"],
-        #         "additionalProperties": False
-        #     }
-        # }
-        
-        # fall_back = {"identified_citations": []}
-
-        # response = utils.call_chat_completion(
-        #     sys_prompt=sys_prompt,
-        #     user_prompt=user_prompt,
-        #     llm_client=self.llm_client,
-        #     ai_model=self.ai_model,
-        #     fall_back=fall_back,
-        #     return_json=True,
-        #     json_schema=json_schema
-        # )
-
-        # found_citations = [
-        #     str(c)
-        #     for c in response["identified_citations"] # Make sure nothing was hallucinated
-        #     if str(c) in required_citations         # ensure string comparison against required citation strings
-        # ]   
-
-        # print(f"Citations identified as present in the thematic summary:\n\n{found_citations}\n\n")
-
-        # # Now compare to get missing citations
-        # missing_citations = [
-        #     c for c in required_citations
-        #     if c not in found_citations
-        # ]
-
-        # return missing_citations
     
     def _address_missing_citations(
         self,
         summary: str,
         missing_citations_df: pd.DataFrame
-        ) -> str:
-
+    ) -> str:
         """
-        Repair missing citation provenance in a thematic summary
-        using only insights associated with missing paper_ids.
+        Repair citation omissions in a synthesized thematic summary.
+
+        Uses the insights associated with missing citations to generate targeted
+        sentence-level patches for a thematic summary. The method asks the LLM to
+        propose either revisions to existing sentences or new sentences anchored
+        after existing text, then applies those patches deterministically.
+
+        Parameters
+        ----------
+        summary : str
+            Thematic summary text to repair.
+
+        missing_citations_df : pd.DataFrame
+            DataFrame containing omitted citation evidence. Expected columns are:
+
+            - `in_text_citation`
+            - `insight`
+
+        Returns
+        -------
+        str
+            Summary text after applying any valid citation-repair patches. If no
+            missing citations are supplied, returns the original summary unchanged.
+
+        Notes
+        -----
+        Missing citations are grouped by `in_text_citation` before being passed to
+        the LLM, along with the associated insight texts. The LLM returns structured
+        patch instructions rather than a fully rewritten summary.
+
+        Patches are applied only when their target sentence is found exactly in the
+        current summary. This prevents uncontrolled rewrites and keeps the repair
+        process deterministic.
+
+        Two patch types are supported:
+
+        - revise an existing sentence
+        - insert a new sentence after an anchor sentence
+
+        This method repairs citation presence, not full evidentiary accuracy. It
+        does not verify that citations are attached to the most appropriate claims
+        beyond the LLM-generated patch instructions.
+
+        The method may print missing-citation inputs, prompts, and proposed patches
+        for debugging.
         """
-
-        # ## UTILS ---
-        # def build_missing_citation_json(df: pd.DataFrame) -> str:
-
-        #     def format_citation(r):
-        #         author = str(r.get("paper_author", "")).strip()
-        #         date = r.get("paper_date", "")
-
-        #         if pd.isna(date):
-        #             date = ""
-        #         elif isinstance(date, float) and date.is_integer():
-        #             date = str(int(date))
-        #         else:
-        #             date = str(date).strip()
-
-        #         if date.lower() in ["nan", "none", ""]:
-        #             return author
-
-        #         if author.lower() in ["nan", "none", ""]:
-        #             return date
-
-        #         return f"{author} {date}"
-
-        #     working = df.copy()
-
-        #     working["citation"] = working.apply(format_citation, axis=1)
-
-        #     grouped = (
-        #         working.groupby("citation")["insight"]
-        #         .apply(list)
-        #         .reset_index()
-        #     )
-
-        #     payload = grouped.to_dict(orient="records")
-
-        #     return json.dumps(payload, indent=2)
-
-        # ## UTILS END ---
 
         if missing_citations_df.empty:
             return summary
@@ -7777,6 +8652,60 @@ class Summarize:
 
     def _load_failed_themes(self, remove_latest_iteration: bool = False) -> defaultdict:
         """
+        Load and reconcile persisted failed-theme records.
+
+        Retrieves the stored history of theme-population failures and aligns it
+        with the current synthesis state. The method removes records associated
+        with impossible future iterations and optionally excludes failures from
+        the most recent visible synthesis pass.
+
+        Failed-theme records are used during schema repair and re-theming to
+        preserve information that could not be fully integrated during theme
+        population. These records provide evidence of representational overload,
+        truncation, or other synthesis failures that may indicate a need for
+        schema restructuring.
+
+        Parameters
+        ----------
+        remove_latest_iteration : bool, default=False
+            If True, remove failure records associated with the latest visible
+            synthesis iteration.
+
+            This is primarily used during schema-generation workflows where the
+            most recent failed content is already represented in the current
+            populated-theme outputs through embedded failure summaries.
+
+        Returns
+        -------
+        collections.defaultdict[list]
+            Dictionary keyed by research-question identifier containing lists of
+            failed-theme records.
+
+            Returns an empty `defaultdict(list)` if no failed-theme file exists.
+
+        Notes
+        -----
+        Failed-theme records are loaded from:
+
+            {config.FAILED_THEMES_PATH}/failed_themes.json
+
+        The method reconciles failure history against the current synthesis state
+        using:
+
+            summarize_iteration = len(self.summary_state.orphan_list)
+
+        Records whose iteration exceeds the current visible synthesis state are
+        discarded. These can arise from interrupted runs, partial crashes, or
+        state rewinds that leave persisted failure records ahead of the active
+        SummaryState.
+
+        When `remove_latest_iteration=True`, failures from the latest visible
+        iteration are also removed because they are already represented in the
+        current populated themes through embedded `"FAILED BATCH SUMMARIES"`
+        content and should not be double-counted during schema repair.
+
+        The returned object is always a `defaultdict(list)` to simplify
+        downstream accumulation and lookup operations.
         """
         os.makedirs(config.FAILED_THEMES_PATH, exist_ok=True)
 
@@ -7808,58 +8737,153 @@ class Summarize:
         return defaultdict(list, failed_themes_dict)        
 
     def _integrate_orphans(
-            self,
-            orphans_df: pd.DataFrame
-            ) -> pd.DataFrame:
+        self,
+        orphans_df: pd.DataFrame
+    ) -> pd.DataFrame:
         """
-        Reintegrate orphan insights into theme summaries using capacity-bounded batching.
+        Reintegrate orphan insights and audit thematic coverage.
 
-        This method updates each theme summary by incorporating insights that were
-        identified as missing during the orphan detection stage. Orphan insights are
-        processed in large, capacity-aware batches to ensure that all assigned insights
-        are eventually represented, while avoiding model degradation or failure due to
-        excessive input size.
+        Performs the coverage-recovery stage of the ReadingMachine synthesis
+        workflow. Orphan insights identified during completeness auditing are
+        reintegrated into their assigned theme summaries, ensuring that mapped
+        insight content is represented before schema refinement and re-theming.
+
+        The integration workflow proceeds as follows:
+
+            populated themes
+                ↓
+            orphan identification
+                ↓
+            capacity-bounded reintegration
+                ↓
+            citation-provenance repair
+                ↓
+            coverage-corrected themes
+
+        Stable Theme Reuse
+        ------------------
+        Themes belonging to research questions whose schemas are marked stable
+        are not modified.
+
+        Stable themes are carried forward unchanged and are excluded from orphan
+        integration.
+
+        Capacity-Bounded Integration
+        ----------------------------
+        Orphan insights are integrated in large batches sized according to a
+        practical model-input budget.
 
         For each theme:
 
-            1. The current summary and associated orphan insights are retrieved.
-            2. Orphan insights are divided into batches sized to fit within a safe
-            model input budget, accounting for prompt overhead and expected
-            summary expansion.
-            3. The model iteratively rewrites the summary, incorporating each batch
-            in turn until all orphan insights have been processed.
+            current summary
+                ↓
+            orphan batch
+                ↓
+            summary revision
+                ↓
+            next orphan batch
+                ↓
+            final integrated summary
 
-        This approach preserves full coverage (no orphan insights are dropped) while
-        minimizing the number of LLM calls by maximizing batch size within safe limits.
+        Batching is deterministic and capacity-driven. Orphans are never
+        discarded simply because they exceed a context limit.
+
+        Failure Handling
+        ----------------
+        If a batch cannot be successfully integrated, the batch is summarized
+        using `_summarize_failed_orphan_batch()`.
+
+        These summaries are:
+
+        - appended to the theme output
+        - recorded as failed-theme diagnostics
+        - preserved for future schema-repair operations
+
+        This allows representational failures to become explicit repair signals
+        rather than silent information loss.
+
+        Citation Provenance Repair
+        --------------------------
+        After successful integration, the method verifies that all citations
+        associated with mapped insights remain represented in the summary.
+
+        Missing citations are identified and repaired using:
+
+            _identify_missing_citations()
+                ↓
+            _address_missing_citations()
+
+        This preserves traceability between synthesized narratives and the
+        underlying source corpus.
 
         Parameters
         ----------
         orphans_df : pd.DataFrame
-            DataFrame containing orphan insights with at least:
-                - insight_id
-                - theme_id
-                - question_id
+            Orphan-insight table containing at least:
+
+            - `question_id`
+            - `theme_id`
+            - `insight_id`
 
         Returns
         -------
         pd.DataFrame
-            DataFrame of updated theme summaries where all orphan insights have been
-            reintegrated. Each row corresponds to a theme and includes:
+            Updated populated-theme table containing:
 
-                - thematic_summary
-                - question_id
-                - theme_id
-                - theme_label
-                - theme_description
+            - `thematic_summary`
+            - `question_id`
+            - `theme_id`
+            - `theme_label`
+            - `theme_description`
+            - `question_text`
+            - `stable`
+            - `needs_repair`
+            - `optimized`
+
+        Side Effects
+        ------------
+        Updates and persists failed-theme history in:
+
+            {config.FAILED_THEMES_PATH}/failed_themes.json
+
+        Uses:
+
+        - `self.summary_state.populated_theme_list[-1]`
+        - `self.summary_state.mapped_theme_list[-1]`
+        - `self.summary_state.theme_schema_list[-1]`
+
+        to determine integration targets and repair metadata.
 
         Notes
         -----
-        - This method enforces completeness at the theme level: all assigned insights
-        are reintroduced prior to any subsequent re-theming step.
-        - Batching is deterministic and capacity-driven, not heuristic or sampled.
-        - The model input limit used here reflects practical integration capacity,
-        not the theoretical maximum context window.
-        - Themes without orphan insights are returned unchanged.
+        This method enforces coverage rather than thematic optimization. Its
+        purpose is to ensure that mapped insights are represented in the
+        synthesis output before subsequent schema evaluation.
+
+        Themes that experience integration failures are marked:
+
+            needs_repair = True
+
+        These flags become important inputs to later schema-repair and
+        re-theming workflows.
+
+        Failed orphan batches are intentionally preserved rather than discarded.
+        In ReadingMachine, inability to integrate information is treated as
+        evidence that the current thematic structure may be overloaded or
+        conceptually unstable.
+
+        Citation repair is performed only when orphan integration succeeds
+        without failed batches. Themes containing failed batch summaries skip
+        citation-provenance repair because their content is already known to be
+        incomplete.
+
+        The returned DataFrame is sorted by:
+
+            question_id
+            theme_id
+
+        to preserve alignment with the active theme schema and support
+        deterministic rendering.
         """
 
         # Load failed themes so that we can update as we go - keep all iterations to preserve history
@@ -7880,26 +8904,6 @@ class Summarize:
         # ---- Capacity parameters (tune once) ----
         MODEL_INPUT_WORD_LIMIT = 22000   # practical integration limit (well below 128k hard cap)
         # ----------------------------------------
-
-        # # get back sensible citations
-        # def format_citation(r):
-        #     author = str(r.get("paper_author", "")).strip()
-        #     date = r.get("paper_date", "")
-
-        #     if pd.isna(date):
-        #         date = ""
-        #     elif isinstance(date, float) and date.is_integer():
-        #         date = str(int(date))
-        #     else:
-        #         date = str(date).strip()
-
-        #     if date.lower() in ["nan", "none", ""]:
-        #         return author
-
-        #     if author.lower() in ["nan", "none", ""]:
-        #         return date
-
-        #     return f"{author} {date}"
 
         # Packs as many insights as possible into a single batch without exceeding capacity
         # This maximizes efficiency (few passes) while avoiding model overload
@@ -8204,47 +9208,51 @@ class Summarize:
         return theme_no_orphans
 
     def _get_orphans_and_updated_summary(
-            self, 
-            checked_insights_df, 
-            mode,
-            batch_size
-        ) -> pd.DataFrame:
+        self,
+        checked_insights_df,
+        mode,
+        batch_size
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Run the orphan audit and integrate any missing insights.
+        Run orphan detection and reintegration.
 
-        This method coordinates the two main steps of the orphan handling
-        stage:
-
-            1. Identify orphan insights not reflected in theme summaries.
-            2. Update summaries to incorporate those insights.
+        Coordinates the two internal stages of orphan handling: first auditing
+        populated theme summaries for omitted mapped insights, then reintegrating
+        any identified orphan insights into the relevant summaries.
 
         Parameters
         ----------
         checked_insights_df : pd.DataFrame or None
-            Previously processed insights used during resume operations.
+            Previously checked orphan-audit results, usually recovered from a
+            checkpoint. Passed through to `_identify_orphans()`.
 
         mode : str
-            Determines how orphan results should be stored in the summary
-            state ("replace" or "append").
+            Orphan-handling mode passed to `_identify_orphans()`.
+
+            Must be one of:
+
+            - `"replace"`
+            - `"append"`
 
         batch_size : int
-            Number of insights processed per audit batch.
+            Number of mapped insights included in each orphan-audit LLM request.
 
         Returns
         -------
-        tuple
-            (orphans_df, updated_summary_df)
+        tuple[pd.DataFrame, pd.DataFrame]
+            Tuple containing:
 
-            orphans_df
-                DataFrame containing orphan insights.
-
-            updated_summary_df
-                Updated theme summaries after orphan integration.
+            - `orphans_df`: orphan insights identified by the audit
+            - `updated_summary_df`: populated themes after orphan integration
 
         Notes
         -----
-        If no orphan insights are detected, the existing populated themes
-        are returned unchanged.
+        If no orphans are identified, the latest populated-theme pass is returned
+        unchanged as `updated_summary_df`.
+
+        This method is a coordination helper only. Orphan auditing is delegated to
+        `_identify_orphans()`, and reintegration is delegated to
+        `_integrate_orphans()`.
         """
 
         orphans_df = self._identify_orphans(checked_insights_df=checked_insights_df, mode = mode, batch_size=batch_size)
@@ -8259,70 +9267,130 @@ class Summarize:
 
 
     def address_orphans(
-            self, 
-            force = False,
-            batch_size = 75
-        ) -> pd.DataFrame:
+        self,
+        force: bool = False,
+        batch_size: int = 75
+    ) -> pd.DataFrame:
         """
-        Perform the orphan audit and integration stage of the synthesis pipeline.
+        Audit thematic coverage and reintegrate orphan insights.
 
-        This method ensures that all insights mapped to themes are represented
-        in the corresponding thematic summaries. If insights are missing,
-        they are reinserted into the summaries through an LLM-assisted
-        integration process.
+        Public entry point for the orphan-handling stage of the ReadingMachine
+        synthesis workflow. This method identifies mapped insights that are not
+        represented in populated theme summaries and, when necessary,
+        reintegrates those insights into the affected summaries.
 
-        The method includes three operational modes:
+        Orphan handling functions as the primary coverage-correction mechanism
+        within ReadingMachine:
 
-            1. Resume mode
-            If a partial orphan audit exists on disk, the user can resume
-            the process from the last checkpoint.
+            populated themes
+                ↓
+            orphan audit
+                ↓
+            orphan reintegration
+                ↓
+            coverage-corrected themes
+                ↓
+            schema refinement
 
-            2. Normal mode
-            The method determines whether to append a new orphan audit or
-            replace the most recent one depending on pipeline state.
+        Resume and Recovery
+        -------------------
+        The method supports checkpoint-based recovery.
 
-            3. Force mode
-            All validation and resume checks are bypassed and a new orphan
-            audit is appended to the state.
+        When an orphan-identification process is interrupted, progress is stored
+        in:
+
+            orphan_check_in_progress.pickle
+
+        On subsequent runs the user may:
+
+            (1) resume the previous audit
+            (2) discard the checkpoint and start again
+
+        Resume operations verify both CorpusState and SummaryState fingerprints
+        before continuing.
+
+        Existing Orphan Passes
+        ----------------------
+        The method maintains alignment between populated-theme passes and orphan
+        passes.
+
+        When orphan outputs already exist for the latest populated themes, the
+        user may:
+
+            (1) reload the existing orphan audit
+            (2) rerun orphan identification and reintegration
+
+        Reruns replace the latest orphan pass rather than appending a new one.
+
+        Force Mode
+        ----------
+        If `force=True`, sequencing checks and history-alignment safeguards are
+        bypassed.
+
+        The resulting orphan audit is appended directly to
+        `SummaryState.orphan_list` regardless of the current synthesis state.
 
         Parameters
         ----------
         force : bool, default=False
-            If True, bypass pipeline sequencing safeguards and execute the
-            orphan process regardless of current state.
+            If True, bypass sequencing validation and append a new orphan audit.
 
         batch_size : int, default=75
-            Number of insights evaluated in each orphan audit batch.
+            Number of mapped insights included in each orphan-audit request.
 
         Returns
         -------
-        pd.DataFrame
-            DataFrame containing orphan insights identified during the audit.
+        pd.DataFrame or None
+            Orphan-insight DataFrame for the active orphan pass.
+
+            Returns None when the user chooses to reload an existing orphan audit
+            rather than rerun orphan handling.
 
         Raises
         ------
         ValueError
-            If populated themes do not exist or if a resume attempt detects
-            a state mismatch.
+            If no populated themes exist.
 
-        Workflow
-        --------
-        The method performs the following steps:
+        ValueError
+            If a resume attempt detects that CorpusState or SummaryState has
+            changed since the checkpoint was created.
 
-            1. Validate that theme summaries exist.
-            2. Check for resumable orphan audit progress.
-            3. Identify orphan insights.
-            4. Integrate orphan insights into summaries.
-            5. Update the summary state and persist results.
+        Side Effects
+        ------------
+        May mutate:
+
+        - `self.summary_state.populated_theme_list`
+        - `self.summary_state.orphan_list`
+
+        Updates the latest populated-theme pass with coverage-corrected
+        summaries.
+
+        Persists SummaryState after successful completion.
+
+        Creates, reads, and removes:
+
+            orphan_check_in_progress.pickle
+
+        used for checkpoint-based recovery.
 
         Notes
         -----
-        The orphan detection stage is designed to reduce silent omission of
-        insights during synthesis. If orphan insights are identified, the
-        summaries are regenerated with those insights incorporated before
-        the next iteration of theme schema generation.
-        """
+        Orphan detection is delegated to `_identify_orphans()`.
 
+        Orphan reintegration is delegated to `_integrate_orphans()`.
+
+        Themes that cannot successfully integrate all orphan content are marked
+        as requiring repair. These failures become important inputs to the next
+        schema-generation cycle.
+
+        The orphan stage is not primarily a quality-improvement step. Its
+        purpose is to enforce coverage by ensuring that mapped insights are
+        represented before schema optimization and re-theming are attempted.
+
+        Orphan audits are stored as iterative passes in
+        `self.summary_state.orphan_list`, preserving the history of coverage
+        corrections across schema iterations.
+        """
         # The logic for this function is as follows:
         # First check if there is a resume file, if so resume according to the mode passed originally
         # Then run a force flag, which passes the mode append and skips the sequencing validation checks
@@ -8488,41 +9556,55 @@ class Summarize:
         return self.summary_state.orphan_list[-1]
 
     
-    def _llm_redundancy_check(self):
+    def _llm_redundancy_check(self) -> pd.DataFrame:
         """
-        Reduce redundancy across theme summaries.
+        Reduce redundancy across populated theme summaries.
 
-        This method performs a sequential redundancy pass over the populated
-        theme summaries. Each theme is processed in order and compared against
-        the summaries of previously processed themes within the same research
-        question.
+        Performs a final sequential redundancy-reduction pass over the latest
+        populated themes. Each theme summary is reviewed against the already
+        refined summaries that precede it within the same research question, and
+        the LLM rewrites the current theme to reduce repeated content while
+        preserving information unique to that theme.
 
-        The LLM receives:
+        The redundancy workflow proceeds as follows:
 
-            - the research question
-            - the already-refined summaries of preceding themes
-            - the current theme text
+            populated themes
+                ↓
+            sequential within-question review
+                ↓
+            theme-level redundancy reduction
+                ↓
+            refined theme summaries
 
-        It then rewrites the current theme summary so that information already
-        covered by earlier themes is minimized while preserving all unique
-        content relevant to the theme.
-
-        The process is sequential within each research question, meaning that
-        each refined theme becomes part of the context for refining subsequent
-        themes.
+        Processing resets at each research question. Summaries from one research
+        question are not used as context for another.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing the refined theme summaries with the same
-            schema as the populated theme summaries.
+            DataFrame containing refined theme summaries with the same columns as
+            the latest populated-theme pass. The `thematic_summary` column is
+            replaced with redundancy-reduced text.
 
         Notes
         -----
-        The redundancy pass is applied after the thematic synthesis process
-        has stabilized. It does not modify the underlying insight-to-theme
-        mappings and is intended only to improve readability and reduce
-        repeated information across themes.
+        The method assumes that thematic synthesis has already stabilized through
+        mapping, population, orphan handling, and schema refinement.
+
+        Redundancy reduction is applied only to the rendered summary text. It does
+        not modify:
+
+        - the theme schema
+        - insight-to-theme mappings
+        - orphan records
+        - underlying CorpusState insights
+
+        Because the pass is sequential, earlier refined themes shape the context
+        used to revise later themes within the same research question. The ordering
+        is determined by `question_id` and `theme_id`.
+
+        A strict JSON schema is used for the LLM response. If the call fails, the
+        fallback refined theme is an empty string.
         """
 
         ordered_themes = self.summary_state.populated_theme_list[-1].sort_values(by=["question_id", "theme_id"]).reset_index(drop=True).copy()
@@ -8552,7 +9634,7 @@ class Summarize:
                     f"CURRENT THEME TEXT TO REFINE:\n{current_theme_text}"
                 )
                 
-                fall_back = {"refined_theme": ""}
+                fall_back = {"refined_theme": current_theme_text}
 
                 # Execute the reduction
                 response = utils.call_chat_completion(
@@ -8590,48 +9672,71 @@ class Summarize:
         refined_df["theme_id"] = refined_df["theme_id"].astype(int)
         return(refined_df)
 
-    def address_redundancy(self, 
-                           force = False) -> pd.DataFrame:
+    def address_redundancy(
+        self,
+        force: bool = False
+    ) -> pd.DataFrame:
         """
-        Perform the final redundancy reduction pass on theme summaries.
+        Generate, reload, or regenerate the final redundancy-reduction pass.
 
-        This method runs a sequential redundancy check across the most recent
-        populated themes to reduce repeated information between theme summaries.
+        Public entry point for the final text-refinement stage of the
+        ReadingMachine synthesis workflow. This method reduces repeated content
+        across populated theme summaries after orphan handling has completed.
+
+        Redundancy reduction transforms:
+
+            coverage-corrected populated themes
+                ↓
+            sequential redundancy review
+                ↓
+            refined final theme summaries
+                ↓
+            rendering
 
         Parameters
         ----------
         force : bool, default=False
-            If True, bypass sequencing validation and run the redundancy
-            reduction regardless of pipeline state.
+            If True, bypass sequencing checks and run redundancy reduction on the
+            latest populated themes regardless of orphan-state alignment.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing the refined theme summaries after redundancy
-            reduction.
+            Redundancy-reduced theme summaries.
 
         Raises
         ------
         ValueError
-            If populated themes do not exist or if orphan handling has not
-            been completed prior to the redundancy pass.
+            If no populated themes exist.
 
-        Workflow
-        --------
-        The method proceeds through the following steps:
+        ValueError
+            If orphan handling has not been completed for the current populated
+            theme pass.
 
-            1. Validate that populated themes exist.
-            2. Ensure orphan handling has been completed.
-            3. Optionally reload an existing redundancy pass.
-            4. Run redundancy reduction using the LLM.
-            5. Store the refined summaries in `SummaryState.redundancy_list`.
+        Side Effects
+        ------------
+        Mutates:
+
+        - `self.summary_state.redundancy_list`
+
+        Persists SummaryState after successful redundancy reduction.
 
         Notes
         -----
-        The redundancy pass represents the final transformation applied to
-        theme summaries before rendering. It improves narrative clarity by
-        removing repeated material while preserving all distinct information
-        contained in the themes.
+        Redundancy reduction is intended to run after coverage has been corrected
+        through orphan handling. This sequencing ensures repeated material is
+        removed only after mapped insights have been represented in the populated
+        summaries.
+
+        Only one redundancy pass is retained. Re-running this method overwrites
+        `self.summary_state.redundancy_list` with a single new refined DataFrame.
+
+        Force mode is intended for development and debugging and may leave the
+        synthesis state internally inconsistent.
+
+        The underlying LLM refinement is delegated to `_llm_redundancy_check()`.
+        This method handles sequencing, reload/regeneration behavior, persistence,
+        and state updates.
         """
         # Make sure this can run
         if not self.summary_state.populated_theme_list:
@@ -8671,270 +9776,3 @@ class Summarize:
         self.summary_state.save()
         return self.summary_state.redundancy_list[-1]
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                
-                        
-
-
-
-        
-
-
-            
-
-
-
-        # # Utility function to estimate the length of each theme based on the number of insights mapped to it, relative to the total number of insights for that research question, and allocate a proportion of the total paper length to each theme accordingly. This will be used to prompt the LLM on how much to write for each theme when we get to the population stage.
-        
-        
-        # # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
-        # # Prior to doing the caluclation remove any wordcounts that might have been calculated on prior runs
-        # self.summary_state.theme_schema_list[-1] = self.summary_state.theme_schema_list[-1].drop(columns=["allocated_length"], errors="ignore")
-        # # Then populate the new lengths and merge to the theme schema
-        # self.summary_state.theme_schema_list[-1] = (
-        #     self.summary_state.theme_schema_list[-1].
-        #     merge(
-        #         self._estimate_theme_lengths(),
-        #         on=["question_id", "theme_id"],
-        #         how="left"
-        #         )
-        #     )
-        
-        # populated_themes = []    
-        # for _, row in self.summary_state.theme_schema_list[-1].iterrows():
-        #     rq_id = row["question_id"]
-        #     rq_text = row["question_text"]
-        #     theme_id = row["theme_id"]
-        #     theme_label = row["theme_label"]
-        #     theme_description = row["theme_description"]
-        #     allocated_length = row["allocated_length"]
-        #     insight_ids = self.summary_state.mapped_theme_list[-1][
-        #         (self.summary_state.mapped_theme_list[-1]["question_id"] == rq_id) & 
-        #         (self.summary_state.mapped_theme_list[-1]["theme_id"] == theme_id)
-        #     ]["insight_id"].tolist()
-        #     insights = self.corpus_state.insights[self.corpus_state.insights["insight_id"].isin(insight_ids)]["insight"].tolist()
-        #     if len(insights) == 0:
-        #         no_insight_df = pd.DataFrame([{
-        #             "thematic_summary": "",
-        #             "question_id": rq_id,
-        #             "theme_id": theme_id,
-        #             "theme_label": theme_label,
-        #             "theme_description": theme_description,
-        #             "allocated_length": allocated_length
-        #         }])
-        #         populated_themes.append(no_insight_df)
-        #         continue
-        #     insights_str = "\n".join(insights)
-
-        #     sys_prompt = Prompts().populate_themes(theme_len=allocated_length)
-        #     user_prompt = (
-        #         f"RESEARCH QUESTION: {rq_text}\n"
-        #         f"THEME LABEL: {theme_label}\n"
-        #         f"THEME DESCRIPTION: {theme_description}\n"
-        #         f"INSIGHTS TO SYNTHESIZE:\n"
-        #         f"{insights_str}\n\n"
-        #     )
-        #     fall_back = {"thematic_summary": ""}
-
-        #     json_schema = {
-        #         "name": "theme_populator",
-        #         "strict": True,
-        #         "schema": {
-        #             "type": "object",
-        #             "properties": {
-        #                 "thematic_summary": {"type": "string"}
-        #             },
-        #             "required": ["thematic_summary"],
-        #             "additionalProperties": False
-        #         }
-        #     }
-
-        #     response = utils.call_chat_completion(
-        #         sys_prompt=sys_prompt,
-        #         user_prompt=user_prompt,
-        #         llm_client=self.llm_client,
-        #         ai_model=self.ai_model,
-        #         fall_back=fall_back,
-        #         return_json=True,
-        #         json_schema=json_schema
-        #     )
-            
-        #     thematic_summary = pd.DataFrame([response.get("thematic_summary", "")], columns=["thematic_summary"])
-        #     thematic_summary["question_id"] = rq_id
-        #     thematic_summary["theme_id"] = theme_id
-        #     thematic_summary["theme_label"] = theme_label
-        #     thematic_summary["theme_description"] = theme_description
-        #     thematic_summary["allocated_length"] = allocated_length
-
-        #     thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
-        #     thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
-            
-        #     populated_themes.append(thematic_summary)
-
-        
-        # populated_themes_df = pd.concat(populated_themes, ignore_index=True)
-
-    
-
-
-        
-        
-        
-
-
-        # self.summary_state.populated_theme_list.append(populated_themes_df)
-        # os.makedirs(self.summary_save_location, exist_ok=True)
-        # for idx, df in enumerate(self.summary_state.populated_theme_list):
-        #     df.to_parquet(os.path.join(self.summary_save_location, f"populated_themes_{idx+1}.parquet"), index=False)
-        
-        # return self.summary_state.populated_theme_list[-1]
-
-
-
-
-
-
-
-
-
-
-        
-        
-        # # utils
-        # def build_frozen_block(frozen_content: list[dict]) -> str:
-        #     if not frozen_content:
-        #         return "(none)\n"
-        #     parts = []
-        #     for t in frozen_content:
-        #         parts.append(
-        #             f"Theme ID: {t.get('theme_id','')}\n"
-        #             f"Label: {t.get('label','')}\n"
-        #             f"Criteria: {t.get('criteria','')}\n"
-        #             f"Content:\n{t.get('contents','')}\n"
-        #             "--- END THEME ---"
-        #         )
-        #     return "\n".join(parts) + "\n"
-
-        # def build_remaining_themes_block(rq_df: pd.DataFrame, current_theme_id: str, processed_ids: set[str]) -> str:
-        #     # remaining = all themes for this RQ not yet processed, excluding the current one
-        #     rem = rq_df.loc[~rq_df["id"].isin(processed_ids | {current_theme_id}), ["label", "criteria"]]
-        #     if rem.empty:
-        #         return "(none)\n"
-        #     parts = []
-        #     for _, r in rem.iterrows():
-        #         parts.append(
-        #             f"Theme label: {r['label']}\n"
-        #             f"Criteria: {r['criteria']}\n"
-        #             "--- END THEME ---"
-        #         )
-        #     return "\n".join(parts) + "\n"
-
-        # # guard
-        # if not hasattr(self, "summary_themes"):
-        #     raise ValueError("No summary themes found. Please run identify_themes() first.")
-
-        # save_dir = self.summary_save_location
-        # save_path = os.path.join(save_dir, save_file_name)
-
-        # if os.path.exists(save_path):
-        #     recover = None
-        #     while recover not in ['r', 'n']:
-        #         recover = input("Populated themes already exist on disk. Recover (r) or generate new (n)? ").lower()
-        #     if recover == 'r':
-        #         self.populated_themes = pd.read_parquet(save_path)
-        #         return self.populated_themes
-        #     else:
-        #         print("Re-running population of themes...")
-
-        # out_rows = []
-        # total_themes = len(self.summary_themes)
-        # counter = 0
-
-        # # iterate per research question
-        # for question_id, rq_df in self.summary_themes.groupby("question_id", sort=False):
-        #     # reset frozen content per question to avoid leakage
-        #     frozen_content: list[dict] = []
-        #     processed_ids: set[str] = set()
-
-        #     # source text for this RQ
-        #     summary_text_list = self.summaries.loc[self.summaries["question_id"] == question_id, "summary"].tolist()
-        #     summary_text = "\n\n".join(summary_text_list)
-
-        #     # iterate themes for this question in the given order
-        #     for _, row in rq_df.iterrows():
-        #         counter += 1
-        #         print(f"Populating theme {counter} of {total_themes}")
-
-        #         question_text = row["question_text"]
-        #         theme_id = row["id"]
-        #         theme_label = row["label"]
-        #         theme_criteria = row["criteria"]
-
-        #         frozen_block = build_frozen_block(frozen_content)
-        #         remaining_theme_block = build_remaining_themes_block(rq_df, theme_id, processed_ids)
-
-        #         sys_prompt = Prompts().populate_themes()
-        #         user_prompt = (
-        #             f"Research question id: {question_id}\n"
-        #             f"Research question text: {question_text}\n"
-        #             "FROZEN CONTENT (read-only; text already assigned to themes):\n"
-        #             f"{frozen_block}"
-        #             "---CURRENT THEME TO POPULATE:---\n"
-        #             f"Theme ID: {theme_id}\n"
-        #             f"Theme label: {theme_label}\n"
-        #             f"Criteria: {theme_criteria}\n\n"
-        #             "CLUSTER SUMMARY TEXT (source material):\n"
-        #             f"{summary_text}\n\n"
-        #             "--- THEMES STILL TO PROCESS (context only):---\n"
-        #             f"{remaining_theme_block}"
-        #         )
-
-        #         fall_back = {"question_id": question_id, "theme_id": theme_id, "assigned_content": ""}
-
-        #         resp = utils.call_chat_completion(
-        #             sys_prompt=sys_prompt,
-        #             user_prompt=user_prompt,
-        #             llm_client=self.llm_client,
-        #             ai_model=self.ai_model,
-        #             return_json=True,
-        #             fall_back=fall_back,
-        #         )
-
-        #         assigned = (resp.get("assigned_content") or "").strip()
-
-        #         out_row = {
-        #             "question_id": question_id,
-        #             "question_text": question_text,
-        #             "theme_id": theme_id,
-        #             "label": theme_label,
-        #             "criteria": theme_criteria,
-        #             "contents": assigned,
-        #         }
-        #         out_rows.append(out_row)
-
-        #         # update frozen and processed sets
-        #         frozen_content.append(out_row)
-        #         processed_ids.add(theme_id)
-
-        # output = pd.DataFrame(
-        #     out_rows, columns=["question_id", "question_text", "theme_id", "label", "criteria", "contents"]
-        # )
-
-        # self.populated_themes = output
-        # os.makedirs(save_dir, exist_ok=True)
-        # self.populated_themes.to_parquet(save_path)
-        # return self.populated_themes
-        
