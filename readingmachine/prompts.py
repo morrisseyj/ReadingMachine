@@ -1,98 +1,169 @@
 """
 Prompt registry for ReadingMachine.
 
-This module centralizes all prompt templates used throughout the
-ReadingMachine pipeline and supporting tools. Each method in the
-`Prompts` class returns a formatted prompt string designed for a
-specific stage of the workflow.
+This module contains the prompt definitions that coordinate language-model
+behavior throughout the ReadingMachine workflow.
+
+The prompts act as the operational specification layer for the system.
+While pipeline classes manage state transitions and workflow execution,
+the prompts define how individual model calls should behave, what outputs
+they should produce, and which constraints they must obey.
 
 The prompts are organized to mirror the architecture of the system,
 which separates corpus discovery, document ingestion, insight
-extraction, thematic synthesis, and final rendering.
+extraction, thematic synthesis, auditing and repair, and final
+rendering.
 
-Pipeline alignment
+Pipeline Alignment
 ------------------
 
 The prompts correspond to the following stages of the ReadingMachine
 methodology:
 
-1. Corpus discovery (getlit tools)
-       - Generate search queries
-       - Retrieve academic and grey literature
-       - Identify missing literature
+1. Corpus Discovery
+       - Search-string generation
+       - Academic-literature retrieval
+       - Grey-literature retrieval
+       - Literature-completeness checking
+       - Metadata normalization
 
-2. Document ingestion
-       - Extract primary text from HTML documents
-       - Identify document metadata
+2. Document Ingestion
+       - HTML-content extraction
+       - Citation generation
 
-3. Insight extraction
-       - Extract atomic insights from text chunks
-       - Identify cross-chunk meta-insights
+3. Insight Extraction
+       - Chunk-level insight extraction
+       - Paper-level meta-insight extraction
 
-4. Thematic synthesis
-       - Summarize clusters of insights
-       - Generate thematic schemas
-       - Map insights to themes
-       - Populate thematic summaries
-       - Detect orphan insights
-       - Reintegrate missing insights
-       - Reduce cross-theme redundancy
+4. Thematic Synthesis
+       - Cluster summarization
+       - Theme-schema generation
+       - Insight-to-theme mapping
+       - Theme population
 
-5. Rendering
-       - Refine narrative style
-       - Generate question-level summaries
-       - Generate executive summaries and titles
+5. Audit and Repair
+       - Orphan detection
+       - Orphan reintegration
+       - Citation auditing
+       - Citation repair
+       - Schema repair planning
+       - Schema repair implementation
+       - Schema optimization
+       - Redundancy reduction
 
-Design principles
+6. Rendering
+       - Stylistic rewriting
+       - Question-level summaries
+       - Executive summaries
+       - Title generation
+
+Design Principles
 -----------------
 
-The prompt registry isolates prompt logic from pipeline logic so that:
+The prompt registry separates behavioral instructions from workflow
+orchestration so that:
 
-    • prompt text can evolve independently of pipeline code
-    • prompts can be audited and versioned easily
-    • different models can reuse the same prompt definitions
+    • prompt design can evolve independently of pipeline code
+    • prompts can be audited and revised systematically
+    • prompt behavior remains inspectable
+    • different model backends can reuse the same task definitions
 
-All prompts are designed to return structured outputs whenever
-possible so that downstream pipeline stages can parse model responses
-deterministically.
+Many prompts are designed to operate within structured-output workflows
+and are paired with explicit JSON schemas during execution.
 
 Notes
 -----
 
 Prompt design is a core component of the ReadingMachine methodology.
-The prompts in this module enforce strict behavioral constraints on
-the model in order to support reproducible large-scale corpus reading
-and synthesis.
+
+Many methodological guarantees within the system—including bounded
+reading, coverage preservation, traceability, schema repair, and
+structured synthesis—are implemented jointly through prompt design,
+state management, validation logic, and repair workflows.
+
+This module defines prompt behavior only. It does not execute model
+calls, validate responses, manage state, or orchestrate workflow
+execution.
 """
 
 class Prompts:
-
     """
     Prompt registry for ReadingMachine.
 
-    This class centralizes all prompt templates used across the
-    ReadingMachine system. Each method returns a formatted prompt
-    string tailored for a specific task in the pipeline or corpus
-    discovery tools.
+    This class centralizes all prompt templates used throughout the
+    ReadingMachine workflow.
 
-    The prompts are grouped by functional category, including:
+    The prompts define the operational instructions used to coordinate large
+    language models across corpus discovery, corpus reading, thematic
+    synthesis, auditing, repair, rendering, and export preparation.
 
-        - search string generation
-        - grey literature discovery
-        - literature completeness checking
-        - JSON formatting validation
+    The prompt registry serves as the interface between the ReadingMachine
+    methodology and the underlying language models. While the pipeline
+    orchestrates state transitions and workflow execution, the prompts define
+    the behavior expected from individual model calls.
 
-    Keeping prompts in a dedicated registry ensures that:
+    Prompt Categories
+    -----------------
 
-        • prompt logic remains separate from pipeline logic
-        • prompts can be easily updated or audited
-        • different LLM models can reuse the same prompt definitions
+    Corpus Discovery
+        Prompts for search-string generation, grey-literature retrieval,
+        literature-completeness checking, and metadata normalization.
+
+    Corpus Reading
+        Prompts for extracting chunk-level insights, document-level
+        meta-insights, citation generation, and HTML-content extraction.
+
+    Thematic Synthesis
+        Prompts for cluster summarization, schema generation, insight-to-theme
+        mapping, theme population, orphan detection, orphan reintegration,
+        schema repair, and redundancy reduction.
+
+    Audit and Repair
+        Prompts for completeness auditing, citation auditing, citation
+        repair, schema decomposition planning, and schema optimization.
+
+    Rendering
+        Prompts for stylistic rewriting, question summaries, executive
+        summaries, and document-level presentation artifacts.
+
+    Design Principles
+    -----------------
+
+    Prompts throughout the registry are designed to support several
+    ReadingMachine principles:
+
+    Bounded Reading
+        Models operate on explicit intermediate representations rather than
+        repeatedly revisiting the entire corpus.
+
+    Coverage Preservation
+        Missing content is identified and reintroduced through explicit audit
+        and repair stages.
+
+    Structured Outputs
+        Most prompts are paired with strict JSON schemas to support automated
+        validation and downstream processing.
+
+    Traceability
+        Prompts are designed to preserve links between synthesized outputs
+        and source insights, citations, and documents.
+
+    Iterative Refinement
+        Many prompts participate in multi-stage workflows where model outputs
+        are subsequently audited, repaired, or optimized.
 
     Notes
     -----
-    All prompts returned by this class are designed to be used with
-    the utility functions defined in `utils.py`, which handle LLM
-    interactions and JSON parsing.
+    This class contains prompt definitions only. It does not execute model
+    calls, validate responses, manage state, or perform workflow
+    orchestration.
+
+    Prompt execution, retry handling, and JSON validation are implemented
+    elsewhere in the ReadingMachine codebase, primarily through utility
+    functions and state-aware pipeline components.
+
+    Many prompts assume the use of structured-output constraints and are
+    designed to be paired with explicit JSON schemas supplied at call time.
     """
 
     def __init__(self):
@@ -104,12 +175,12 @@ class Prompts:
 
     def question_make_sys_prompt(self, num_prompts, search_engine='CrossRef and OpenAlex'):
         """
-        Generate a system prompt for literature search string generation.
+        Construct the system prompt used for literature-search generation.
 
-        This prompt instructs the LLM to produce a set of search queries
-        derived from a research question. The generated search strings
-        are intended for use with scholarly search engines such as
-        Crossref or OpenAlex.
+        Creates the instruction set used to generate search queries from a
+        research question. The resulting prompt guides the LLM to transform a
+        research question into multiple literature-search strings suitable for
+        scholarly discovery systems.
 
         Parameters
         ----------
@@ -117,14 +188,27 @@ class Prompts:
             Number of search queries the model should generate.
 
         search_engine : str, default="CrossRef and OpenAlex"
-            Name of the search engine context used to guide query
-            generation.
+            Search-system context used to frame the query-generation task.
 
         Returns
         -------
         str
-            Formatted system prompt instructing the LLM to produce
-            structured JSON search queries.
+            System prompt instructing the LLM to return a JSON object containing
+            generated search queries.
+
+        Notes
+        -----
+        The prompt instructs the model to:
+
+        - generate discoverable literature-search strings rather than restating
+        the research question
+        - target evidence likely to exist in published literature
+        - reformulate forward-looking questions into searches for relevant
+        empirical or conceptual evidence
+        - return structured JSON suitable for automated parsing
+
+        This prompt is used during corpus-discovery workflows and is not part of
+        the core ReadingMachine synthesis pipeline.
         """
 
         return (
@@ -156,28 +240,47 @@ class Prompts:
 
     def grey_lit_retrieve(self, questions: list, example_grey_literature_sources: str) -> str:
         """
-        Generate a prompt for retrieving grey literature.
+        Construct the retrieval prompt for grey-literature discovery.
 
-        This prompt instructs a reasoning-capable LLM to search the web
-        for grey literature relevant to a set of research questions.
-        Grey literature includes reports, working papers, policy briefs,
-        and institutional publications.
+        Creates a prompt instructing a search-capable language model to identify
+        grey-literature documents relevant to a set of research questions and
+        return standardized metadata in a structured JSON format.
 
         Parameters
         ----------
-        questions : list
-            List of research questions formatted as
-            "question_id: question_text".
+        questions : list[str]
+            Research questions formatted as question identifiers paired with
+            question text.
 
         example_grey_literature_sources : str
-            Example organizations that commonly publish relevant
-            grey literature.
+            Example organizations used to guide discovery of relevant grey
+            literature sources.
 
         Returns
         -------
         str
-            Prompt instructing the LLM to perform web search and
-            return results in a strict JSON format.
+            Prompt instructing the model to search for relevant grey literature,
+            associate retrieved documents with research questions, and return
+            results as structured JSON.
+
+        Notes
+        -----
+        The prompt requests retrieval of grey literature such as:
+
+        - reports
+        - policy briefs
+        - working papers
+        - case studies
+
+        Retrieved documents are expected to be linked to one or more research
+        questions using canonical question identifiers.
+
+        The prompt requires a strict JSON response containing standardized
+        metadata fields including question identifiers, title, author,
+        publication date, and DOI information.
+
+        This prompt is used during corpus-discovery workflows and is not part of
+        the core ReadingMachine synthesis pipeline.
         """
 
         question_string = "\n".join(questions)
@@ -231,17 +334,36 @@ class Prompts:
 
     def grey_literature_format_check(self) -> str:
         """
-         Generate a prompt for validating grey literature JSON output.
+        Construct the JSON-repair prompt for grey-literature retrieval results.
 
-        This prompt instructs a chat completion model to repair or
-        normalize malformed JSON returned by the grey literature
-        retrieval model.
+        Creates a prompt instructing a language model to normalize malformed
+        grey-literature retrieval output into valid JSON while preserving all
+        recovered document records and metadata.
 
         Returns
         -------
         str
-            Prompt instructing the model to return strictly valid
-            JSON representing grey literature records.
+            Prompt instructing the model to repair formatting issues and return
+            a strictly valid JSON object containing grey-literature records.
+
+        Notes
+        -----
+        The prompt is intended for recovery and validation workflows when
+        grey-literature retrieval produces output that cannot be parsed with
+        `json.loads()`.
+
+        The repaired output is expected to preserve:
+
+        - `question_id`
+        - `paper_title`
+        - `paper_author`
+        - `paper_date`
+        - `doi`
+
+        and return a single JSON object containing a `results` array.
+
+        This prompt is used during corpus-discovery workflows and is not part of
+        the core ReadingMachine synthesis pipeline.
         """
 
         return (
@@ -278,28 +400,45 @@ class Prompts:
 
     def ai_literature_retrieve(self, questions_papers_json: str) -> str:
         """
-        Generate a prompt for identifying missing literature.
+        Construct the prompt for identifying missing literature.
 
-        This prompt asks a reasoning-capable LLM to review the current
-        literature corpus and identify major publications that may
-        be missing for each research question.
+        Creates a prompt instructing a search-capable language model to review
+        the literature already associated with each research question and identify
+        major missing academic or grey-literature sources.
 
         Parameters
         ----------
         questions_papers_json : str
-            JSON string representing the currently identified literature
-            grouped by research question.
+            JSON-formatted representation of research questions and currently
+            identified literature.
 
         Returns
         -------
         str
-            Prompt instructing the LLM to return missing literature
-            records in a strict JSON format.
+            Prompt instructing the model to identify missing literature and return
+            standardized document metadata as strict JSON.
 
         Notes
         -----
-        The model is instructed to identify missing literature using both
-        its internal knowledge and external web search capabilities.
+        The prompt asks the model to use both prior knowledge and available web
+        search tools to identify candidate omissions, then verify document metadata
+        before returning results.
+
+        The expected response is a JSON object containing a `results` array with
+        records that include:
+
+        - `question_id`
+        - `paper_title`
+        - `paper_author`
+        - `paper_date`
+        - `doi`
+
+        If no missing literature is identified, the expected response is:
+
+            {"results": []}
+
+        This prompt is used during corpus-discovery or corpus-completeness checks
+        and is not part of the core ReadingMachine synthesis pipeline.
         """
         return (
             'You are an expert research assistant. Your task is to review the provided research questions '
@@ -325,7 +464,7 @@ class Prompts:
             '- Do NOT return a bare JSON array.\n'
             '- Each element of "results" must include all keys: "question_id", "paper_title", "paper_author", "paper_date", "doi".\n'
             '- "paper_author" must always be a string (names separated by semicolons).\n'
-            '- If a field is unknown, set it explicitly to None.\n'
+            '- If a field is unknown, set it explicitly to Null.\n'
             '- If no missing documents exist, return: {"results": []}\n'
             '- Use double quotes for all JSON strings.\n'
             '- Do NOT include comments, explanations, or code blocks.\n\n'
@@ -355,7 +494,7 @@ class Prompts:
             '      "paper_title": "Renewable Energy Policy Frameworks: Lessons from Emerging Economies",\n'
             '      "paper_author": "Energy Policy Institute; World Resources Institute",\n'
             '      "paper_date": "2023",\n'
-            '      "doi": None\n'
+            '      "doi": null\n'
             '    }\n'
             '  ]\n'
             '}\n'
@@ -367,22 +506,41 @@ class Prompts:
 
     def ai_literature_format_check(self):
         """
-        Generate a prompt for validating AI literature suggestions.
+        Construct the JSON-repair prompt for AI literature suggestions.
 
-        This prompt instructs a chat completion model to correct
-        malformed JSON produced during the AI literature completeness
-        check.
+        Creates a prompt instructing a language model to normalize malformed
+        literature-completeness output into valid JSON while preserving all
+        recovered document records and metadata.
 
         Returns
         -------
         str
-            Prompt instructing the model to return strictly valid
-            JSON representing literature suggestions.
+            Prompt instructing the model to repair formatting issues and return a
+            strictly valid JSON object containing literature suggestion records.
+
+        Notes
+        -----
+        The prompt is intended for recovery and validation workflows when AI
+        literature-completeness checks produce output that cannot be parsed with
+        `json.loads()`.
+
+        The repaired output is expected to preserve:
+
+        - `question_id`
+        - `paper_title`
+        - `paper_author`
+        - `paper_date`
+        - `doi`
+
+        and return a single JSON object containing a `results` array.
+
+        This prompt is used during corpus-discovery or corpus-completeness checks
+        and is not part of the core ReadingMachine synthesis pipeline.
         """
 
         return (
             'You are an agent specialized in formatting strings to be valid JSON. '
-            'The user will provide text that is an approximation of valid JSON describing grey literature documents. '
+            'The user will provide text that is an approximation of valid JSON describing an array of literature. '
             "The user content will be delivered as a JSON object with a single key 'results', containing an array of documents.\n\n"
 
             'Your task is to correct it so it can be parsed with `json.loads()`.\n\n'
@@ -477,25 +635,36 @@ class Prompts:
     
     def get_metadata(self):
         """
-        Generate a prompt for extracting document metadata.
+        Construct the prompt for extracting primary article content from HTML text.
 
-        This prompt instructs the model to parse the opening portion of a
-        document and extract key metadata fields required by the pipeline.
-
-        Extracted fields include:
-
-            - paper_title
-            - paper_author
-            - paper_date
-
-        The output must be returned as a strictly formatted JSON object so
-        that the metadata can be parsed programmatically.
+        Creates a prompt instructing a language model to identify and return the
+        main narrative content from partially cleaned HTML-derived text while
+        excluding navigation, advertising, recommendation blocks, and other
+        non-article elements.
 
         Returns
         -------
         str
-            Prompt instructing the model to extract and return paper metadata
-            in JSON format.
+            Prompt instructing the model to extract the primary article text and
+            return it as plain text.
+
+        Notes
+        -----
+        The prompt assumes that initial HTML cleanup has already been performed by
+        removing common structural tags such as navigation, header, footer, and
+        script elements.
+
+        The expected output includes:
+
+        - article title
+        - author names
+        - main article body
+
+        and excludes page chrome, promotional content, comments, related-article
+        sections, and other non-primary content.
+
+        This prompt is used during corpus-ingestion workflows to improve document
+        extraction quality before chunking and insight generation.
         """
 
         return (
@@ -530,16 +699,34 @@ class Prompts:
 
     def gen_in_text_citation(self):
         """
-        Generate a prompt for extracting in-text citations.
+        Construct the prompt for generating standardized in-text citations.
 
-        This prompt instructs the model to identify and format in-text citations
-        for a given set of papers.
+        Creates a prompt instructing a language model to convert paper metadata
+        into compact in-text citation strings suitable for use throughout the
+        ReadingMachine pipeline.
 
         Returns
         -------
         str
-            Prompt instructing the model to extract and return in-text citations
-            in a structured format.
+            Prompt instructing the model to generate one formatted citation for
+            each supplied paper identifier and return the results as JSON.
+
+        Notes
+        -----
+        The prompt requires a one-to-one mapping between input `paper_id`
+        values and output citation strings.
+
+        Citation formatting is intentionally simplified relative to formal
+        academic citation styles in order to reduce citation length within
+        synthesized outputs.
+
+        The expected response is a JSON object mapping:
+
+            paper_id → formatted citation
+
+        This prompt is used during corpus-ingestion workflows to generate the
+        standardized citation identifiers later attached to insights, summaries,
+        orphan audits, and rendered outputs.
         """
         return (
             "## ROLE\n"
@@ -586,30 +773,47 @@ class Prompts:
 
     def gen_chunk_insights(self, paper_context):
         """
-        Generate a prompt for extracting chunk-level insights.
+        Construct the prompt for chunk-level insight extraction.
 
-        This prompt instructs the model to identify atomic claims within a
-        bounded text chunk and assign those claims to the relevant research
-        question(s).
-
-        The extracted insights must:
-
-            • be directly supported by the text
-            • preserve wording where possible
-            • end with the citation appearing in the text
-            • be returned as a structured JSON object
+        Creates a prompt instructing a language model to read a bounded text chunk
+        and extract explicit, traceable claims relevant to one or more research
+        questions.
 
         Parameters
         ----------
         paper_context : str
-            Additional contextual instructions describing the corpus
-            or analytical framework.
+            Additional corpus- or project-specific context inserted into the
+            prompt before the extraction instructions.
 
         Returns
         -------
         str
-            Prompt instructing the model to extract claims from a text chunk
-            and associate them with research questions.
+            Prompt instructing the model to extract supported claims from a text
+            chunk and return them as structured JSON grouped by research-question
+            identifier.
+
+        Notes
+        -----
+        Chunk-level insight extraction is the primary reading operation in
+        ReadingMachine. The prompt emphasizes bounded reading: the model may only
+        extract claims explicitly supported by the supplied chunk and must not add
+        external knowledge or inference.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "results": {
+                "<rq_id>": ["<claim>"]
+            }
+            }
+
+        Empty extraction is represented as:
+
+            {"results": {}}
+
+        This prompt is used during the corpus-reading stage to produce the atomic
+        insight records that later support clustering, mapping, synthesis, orphan
+        auditing, and traceability.
         """
         
         return(
@@ -659,41 +863,55 @@ class Prompts:
             "Do not output markdown, explanations, or any text outside the JSON."
         )
 
-
-
-
     def gen_meta_insights(self, paper_context):
         """
-        Generate a prompt for extracting paper-level meta-insights.
+        Construct the prompt for paper-level meta-insight extraction.
 
-        Meta-insights are higher-level claims or arguments that emerge from
-        reasoning across multiple sections of a document rather than from a
-        single chunk.
-
-        The model receives:
-
-            • the full (or partial) paper text
-            • metadata describing the paper
-            • previously extracted chunk insights
-            • the specific research question being evaluated
-
-        The model must identify broader insights that:
-
-            • synthesize information across the paper
-            • relate directly to the target research question
-            • do not duplicate previously extracted chunk insights
+        Creates a prompt instructing a language model to identify higher-level
+        insights that require reasoning across multiple parts of a document and
+        are relevant to a specified research question.
 
         Parameters
         ----------
         paper_context : str
-            Additional contextual instructions describing the corpus or
-            analytical framework.
+            Additional corpus- or project-specific context inserted into the
+            prompt before the extraction instructions.
 
         Returns
         -------
         str
-            Prompt instructing the model to generate higher-level
-            cross-chunk insights in JSON format.
+            Prompt instructing the model to extract cross-document or cross-section
+            meta-insights and return them as structured JSON.
+
+        Notes
+        -----
+        Meta-insight extraction complements chunk-level extraction. Chunk insights
+        capture localized claims, while meta-insights capture broader claims,
+        patterns, mechanisms, or conclusions that become visible only when multiple
+        sections of the document are considered together.
+
+        The prompt explicitly excludes:
+
+        - restatements of chunk insights
+        - localized claims expressed more generally
+        - claims that could be extracted from a single passage
+        - insights unrelated to the specified research question
+
+        The expected response is a JSON object of the form:
+
+            {
+            "results": {
+                "meta_insight": ["<claim>"]
+            }
+            }
+
+        Empty extraction is represented as:
+
+            {"results": {}}
+
+        This prompt is used during the corpus-reading stage to add document-level
+        analytical claims to the insight table while preserving the distinction
+        between localized and document-level reasoning.
         """
 
         return (
@@ -774,37 +992,54 @@ class Prompts:
 
     def summarize_clusters(self, frozen_summary_window, max_output_words=2500):
         """
-        Generate the system prompt for cluster-level summarization.
+        Construct the prompt for cluster-level insight summarization.
 
-        This prompt instructs the model to synthesize the insights within a
-        semantic cluster into a coherent narrative summary.
+        Creates a prompt instructing a language model to synthesize all insights
+        within a single semantic cluster into a concise, citation-preserving
+        cluster summary.
 
-        The prompt provides the model with:
+        Parameters
+        ----------
+        frozen_summary_window : int
+            Number of preceding cluster summaries supplied as local context during
+            cluster summarization.
 
-            • the specific research question
-            • previously generated cluster summaries for context
-            • the cluster identifier
-            • the list of insights belonging to the cluster
-            • other research questions in the broader review
-
-        The model must produce a structured summary that:
-
-            • faithfully represents the claims contained in the insights
-            • preserves all citations exactly as provided
-            • situates the cluster within the broader thematic landscape
-            • maintains an academic literature-review tone
-
-        The output must be returned as a strict JSON object containing:
-
-            - question_id
-            - question_text
-            - cluster
-            - summary
+        max_output_words : int, default=2500
+            Hard maximum word count for the generated cluster summary.
 
         Returns
         -------
         str
-            System prompt instructing the LLM to generate a cluster summary.
+            Prompt instructing the model to summarize a cluster of insights and
+            return the result as structured JSON.
+
+        Notes
+        -----
+        Cluster summaries are the first synthesis layer in ReadingMachine. They
+        provide a compressed representation of semantically grouped insights and
+        serve as scaffolding for initial theme-schema generation.
+
+        The prompt distinguishes between:
+
+        - current-cluster insights, which may be summarized
+        - preceding cluster summaries, which provide local context only
+
+        The prompt requires the model to prioritize constraints in the following
+        order:
+
+        1. remain within the maximum word limit
+        2. represent all cluster insights where possible
+        3. preserve granularity where possible
+
+        The expected response is a JSON object of the form:
+
+            {
+            "summary": "<summary>"
+            }
+
+        This prompt is used during the cluster-summarization stage and does not
+        itself determine final themes. Clusters are treated as semantic scaffolding,
+        not analytical conclusions.
         """
 
         return (
@@ -817,7 +1052,6 @@ class Prompts:
 
             "You will receive:\n"
             "- The specific research question the insights pertain to.\n"
-            "- Other research questions providing broader context for the overall literature review.\n"
             "- A limited set of preceding cluster summaries (for context only; not to be included in your output). "
             f"These represent a small, recent window of clusters (typically {frozen_summary_window}) ordered by semantic proximity, not the full corpus. "
             f"They may be empty or less than {frozen_summary_window}; if empty/less than {frozen_summary_window}, there is no/limited preceding text.\n"
@@ -888,46 +1122,47 @@ class Prompts:
     
     def gen_theme_schema_cluster_source(self):
         """
-        Generate the system prompt for initial thematic schema construction.
+        Construct the prompt for initial theme-schema generation.
 
-        This prompt instructs the model to transform semantically clustered
-        summaries into a conceptual codebook that defines the structure of the
-        corpus. The model identifies major themes, establishes conceptual
-        boundaries, and defines assignment rules for mapping insights to themes.
-
-        The resulting codebook represents a shift from semantic grouping
-        (similarity in language or content) to conceptual organization
-        (coherent, interpretable categories aligned with the research question).
-
-        Each theme must include:
-            - theme_label
-            - theme_description (conceptual "North Star")
-            - instructions (INCLUDE / EXCLUDE logic)
-
-        Special themes:
-            - "Conflicts": captures incompatible positions using detection triggers
-            - "Other": captures residual concepts that do not warrant a standalone theme
-
-        The prompt also guides the model toward selecting an appropriate level of
-        abstraction:
-            - themes may contain multiple related concepts
-            - themes must preserve conceptual distinctions
-            - themes should not be overly broad or diffuse
+        Creates a prompt instructing a language model to transform cluster-summary
+        text into an initial thematic codebook for a research question.
 
         Returns
         -------
         str
-            System prompt instructing the LLM to generate a thematic codebook
-            in strict JSON format.
+            Prompt instructing the model to generate theme definitions and return
+            them as structured JSON.
 
         Notes
         -----
-        - This is a generative step that defines the initial conceptual partition
-        of the corpus.
-        - The prompt does not consider downstream capacity constraints directly;
-        those are evaluated later during synthesis and integration.
-        - The resulting schema is expected to be iteratively refined based on
-        integration failures.
+        This prompt is used after cluster summarization to move from semantic
+        organization to conceptual organization. Cluster summaries provide the
+        source representation, but the generated themes are not required to follow
+        cluster boundaries.
+
+        The expected response is a JSON object containing:
+
+        - `themes`
+        - `no_change`
+
+        Each theme must contain:
+
+        - `theme_label`
+        - `theme_description`
+        - `instructions`
+
+        The prompt supports optional special categories:
+
+        - `Conflict`
+        - `Other`
+
+        `Conflict` is treated as an overlay for incompatible positions, while
+        `Other` is treated as a residual category for lower-frequency concepts
+        that do not warrant standalone themes.
+
+        The resulting schema is an initial conceptual partition. It is expected
+        to be tested through mapping, population, orphan handling, and later
+        schema repair rather than treated as final.
         """
 
         return(
@@ -1039,6 +1274,59 @@ class Prompts:
         )
 
     def gen_theme_schema_repair_instructions(self):
+        """
+        Construct the prompt for schema-repair planning.
+
+        Creates a prompt instructing a language model to analyze failed theme
+        schemas and generate a structured decomposition plan for reducing
+        representational overload.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to identify overloaded conceptual
+            regions, extract independently synthesizable claim-families, and
+            return a structured schema-repair plan as JSON.
+
+        Notes
+        -----
+        This prompt is used during iterative schema refinement after theme
+        population, orphan reintegration, and completeness checks have been
+        performed.
+
+        The prompt treats synthesis failures as evidence that a theme's assigned
+        conceptual territory exceeds bounded synthesis capacity. Rather than
+        rewriting the schema directly, the model is asked to generate a repair
+        plan describing how conceptual territory should be redistributed.
+
+        The repair-planning stage is intentionally separated from schema
+        implementation. This allows:
+
+        - diagnosis of representational overload
+        - inspection of proposed repairs
+        - independent schema rewriting
+        - avoidance of performative repair
+
+        The generated repair plan identifies:
+
+        - failing themes
+        - claim-families ranked by representational load
+        - concepts to extract
+        - concepts to reassign
+        - residual theme scopes
+        - schema-level repair recommendations
+
+        The expected response is a structured JSON object containing:
+
+        - `repair_plan`
+            - `theme_repairs`
+            - `schema_repairs`
+
+        This prompt is part of the schema-stabilization workflow and does not
+        generate a new schema directly. It produces a planning artifact that is
+        subsequently consumed by the schema-repair implementation stage.
+        """
+
         return(
             "## ROLE\n"
             "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
@@ -1273,324 +1561,42 @@ class Prompts:
         )
 
 
-    # def gen_theme_schema_repair_instructions(self):
-    #     """
-    #     Generate the system prompt for iterative refinement of a thematic schema.
-
-    #     This prompt instructs the model to revise an existing thematic codebook
-    #     based on the results of a synthesis and completeness-checking process.
-    #     It uses both successful and failed theme summaries to diagnose structural
-    #     issues and improve conceptual alignment.
-
-    #     The model receives:
-    #         - the current codebook
-    #         - theme-level summaries
-    #         - pass/fail completeness indicators
-    #         - summaries of content that could not be integrated ("FAILED BATCH SUMMARIES")
-    #         - summary lengths as a proxy for representational load
-
-    #     Failures are interpreted as signals of conceptual overload:
-    #         - the theme contains more distinct ideas than can be represented
-    #         without loss of granularity under length constraints
-
-    #     The model must refine the schema by:
-    #         - splitting overloaded themes
-    #         - tightening or expanding inclusion boundaries
-    #         - reallocating content where appropriate
-    #         - introducing new themes when necessary
-
-    #     The goal is to produce a stable conceptual partition that:
-    #         - maintains internal coherence
-    #         - has clear boundaries between themes
-    #         - supports full coverage of the data
-    #         - avoids excessive reliance on "Other"
-    #         - avoids over-expansion of already dense themes
-
-    #     A convergence flag is required:
-    #         - "no_change": true if no clear improvements are needed
-    #         - "no_change": false if any structural modification is made
-
-    #     Returns
-    #     -------
-    #     str
-    #         System prompt instructing the LLM to return an updated thematic
-    #         codebook and convergence flag in strict JSON format.
-
-    #     Notes
-    #     -----
-    #     - This is a corrective step that operates on an existing conceptual schema.
-    #     - It uses integration failures as a structural diagnostic, not as
-    #     classification errors.
-    #     - The prompt enforces conservative updates: changes should only be made
-    #     when clearly justified by the input.
-    #     - This step is part of an iterative loop that converges toward a stable,
-    #     capacity-compatible schema.
-    #     """
-    #     return(
-    #         "## ROLE\n"
-    #         "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
-    #         "You are working as part of an iterative loop to refine a thematic codebook based on the results of a synthesis and completeness-checking process. "
-    #         "Your task is to articulate refinements to an existing Thematic Codebook so that it:\n"
-    #         "1. Can be successfully operationalized in subsequent calls to an LLM (i.e. complete without theme failures) - first priority\n"
-    #         "2. Maintains strong conceptual coherence\n"
-    #         "3. Accurately partitions the conceptual landscape of the data\n\n"
-
-    #         "## CODEBOOK STRUCTURE\n"
-    #         "Each theme defines a conceptual territory using:\n"
-    #         "- theme_label\n"
-    #         "- theme_description (the North Star logic)\n"
-    #         "- instructions (INCLUDE / EXCLUDE rules)\n\n"
-
-    #         "## INCLUDE/EXCLUDE LOGIC\n"
-    #         "All themes must define precise operational assignment rules:\n"
-    #         "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
-    #         "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
-
-    #         "INCLUDE rules define the bounded conceptual territory assigned to the theme.\n"
-    #         "EXCLUDE rules must define conceptual territories that belong to OTHER THEMES in the current schema.\n"
-    #         "Do NOT write EXCLUDE rules as simple inverses of the INCLUDE rule.\n"
-    #         "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
-    #         "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining conceptual partition.\n"
-    #         "When writing EXCLUDE rules:\n"
-    #         "- identify the neighboring themes most likely to overlap with the current theme\n"
-    #         "- explicitly exclude those conceptual territories\n"
-    #         "- route ambiguous material toward the appropriate neighboring themes\n\n"
-
-    #         "## SPECIAL THEMES\n"
-    #         "**Conflict Theme (Conditional)**\n"
-    #         "Create a theme where \"theme_label\" is exactly \"Conflict\" ONLY if the data contains "
-    #         "substantively incompatible interpretations, claims, or prescriptions that cannot be "
-    #         "maintained within a single coherent conceptual frame.\n\n"
-
-    #         "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
-
-    #         "Do NOT create a Conflict theme if the material merely:\n"
-    #         "- Presents reinforcing critiques\n"
-    #         "- Describes layered constraints or interacting factors\n"
-    #         "- Articulates trade-offs within a shared conceptual frame\n"
-    #         "- Expresses variation in emphasis without incompatible positions\n\n"
-
-    #         "A Conflict theme requires identifiable polarity between positions.\n\n"
-
-    #         "Instructions must use DETECTION TRIGGERS (not INCLUDE/EXCLUDE), and must:\n"
-    #         "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
-    #         "- Preserve opposing positions as distinct\n"
-    #         "- Avoid harmonizing or resolving disagreement\n\n"
-
-    #         "**'Other' Theme (Conditional)**\n"
-    #         "Create a theme where \"theme_label\" is exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
-    #         "without fragmenting the schema into excessively fine-grained themes.\n\n"
-
-    #         "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
-
-    #         "The 'Other' theme should:\n"
-    #         "- Capture valid but low-frequency or residual concepts\n"
-    #         "- Not contain a coherent or dominant conceptual grouping\n"
-    #         "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
-
-    #         "If no residual concepts exist, omit this theme entirely.\n\n"
-
-    #         "## INTERPRETING THE INPUT\n"
-    #         "You will receive:\n"
-    #         "1. The research question\n"
-    #         "2. Efforts at previous schema development to date, which will include:\n"
-    #         "   - Prior schema\n"
-    #         "   - The theme summaries those schema generated\n"
-    #         "   - The pass/fail status of each theme reflecting the result of a completeness check on the theme.\n"
-    #         "   - The word count of all currently passing themes.\n"
-    #         "   - Themes with `word_count = null` failed before synthesis completed. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
-    #         "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. The most recent codebook is flagged as such. This should be the focus of your revision.\n"
-    #         "Each codebook is flagged as to whether all the themes passed completion checks.\n\n"
-
-    #         "## UNDERSTANDING FAILURES\n"
-    #         "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
-    #         "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
-    #         "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
-    #         "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
-    #         "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
-    #         "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
-    #         "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
-
-    #         ###############################################
-    #         "## REQUIRED STRUCTURAL REPAIR\n"
-    #         "If 'schema_has_failures' = True for the most recent iteration, the current schema contains failing themes. Therefore, you **MUST** return a repair plan that would produce a structurally changed schema.\n"
-    #         "A structurally changed schema means that **for every failing theme** ('completeness_check' = 'fail') you should at least:\n"
-    #         "   - Identify the largest major concept cluster that is separable from the theme's core conceptual territory.\n"
-    #         "       - By 'largest', prioritize the cluster that:\n"
-    #         "           1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
-    #         "           2. recurs across multiple sources or batches;\n"
-    #         "           3. could plausibly function as an independent theme;\n"
-    #         "           4. could plausibly be synthesized as a coherent standalone theme within bounded output constraints;\n"
-    #         "   - Move that cluster out of the failed theme by creating a new theme unless there is an existing receiving theme with both clear conceptual fit and spare representational capacity.\n"
-    #         "   - Update the theme labels, descriptions and instructions for all affected themes (new and source) in order to maintain clear conceptual boundaries and ensure the full schema behaves as a mutually constraining partition.\n"
-    #         "   - If removing the largest conceptual cluster fundamentally breaks the coherence of the source theme and leaves only a small residual, address the residual by either merging it with another theme or creating a new theme for it.\n"
-    #         "   - If one extracted cluster is unlikely to reduce the failed theme below operational capacity, extract additional separable major clusters until the remaining source theme is coherent and likely to pass the completion requirement.\n"
-    #         "**DO NOT** return the same schema when the current schema contains failures.\n"
-    #         "A repair is insufficient if it removes only a minor example, edge case, citation-specific detail, or already-covered neighboring concept. The removed cluster must be large enough that its extraction would materially reduce the number of distinct claims assigned to the failed theme in the next iteration.\n"
-    #         "When repairing a failed theme, revise both INCLUDE and EXCLUDE rules so future assignment behavior changes materially.\n"
-    #         "When reducing the number of concepts in a failed theme, this process should include reducing the set of concepts that are included AND expanding the set of concepts that are excluded. This is necessary to avoid reintroducing conceptually distinct material into a narrowed theme during future reassignment.\n"
-
-    #         #############################################################
-
-    #         "## IDEAL CODEBOOK PROPERTIES\n"
-    #         "An effective thematic codebook/schema will:\n\n"
-    #         "- Allow for the successful expression of all assigned conceptual content, without loss of granularity, under the constraints on output length (i.e. no failing themes).\n"
-    #         "- Define themes that are internally conceptually coherent\n"
-    #         "- Ensure clear conceptual boundaries between themes\n"
-    #         "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
-    #         "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
-    #         "- Minimize reliance on the 'Other' category\n\n"
-
-    #         "## PRIORITIZATION RULE\n"
-    #         "When resolving conflicts between the imperatives to 1) address failed themes and 2) minimize theme counts, maximize conceptual coherence and minimize reliance on the 'Other' category; you must prioritize addressing failed themes and resolving completeness failures first.\n"
-    #         "Only once failures are addressed, should you optimize toward the other ideal properties defined above.\n\n"
-
-    #         "## UPDATE PRINCIPLES\n"
-    #         "Revise the codebook to advance its ideal form as stated above.\n"
-    #         "Always diagnose and revise the CURRENT ITERATION.\n"
-    #         "Historical iterations should be used to identify recurring instability patterns, repeated failures, and ineffective prior repairs.\n"
-    #         "Do not optimize older iterations independently from the current schema state.\n"
-    #         "Do not repeat articulations of themes that failed in previous iterations - substantively similar (i.e. only semantically distinct) rearticulations are not acceptable.\n"
-    #         "A revised theme may retain a similar conceptual label or broad topic if appropriate, but the assignment behavior of the rules must change substantively and materially (both inclusion and exclusion criteria).\n"
-    #         "When updating a schema, INCLUDE/EXCLUDE rules should change for both the failed theme and any receiving themes to which content is reassigned, so that the full schema behaves as a mutually constraining conceptual partition.\n" \
-    #         "If an 'Other' theme is failing you should either expand some themes to accommodate its content, or create a new theme based on the most coherent subset of the 'Other' content, rather than simply expanding the 'Other' theme to accommodate more content.\n\n"
-
-    #        "#### Use FAILED BATCH SUMMARIES and current summary lengths to determine how failed themes should be revised.\n"
-    #         "- Do not reuse previously failed INCLUDE/EXCLUDE rules or DETECTION TRIGGERS.\n"
-    #         "- Do not rely on theme_id continuity when interpreting prior iterations; themes may be renamed, reordered, merged, or split.\n"
-    #         "- Repeated failure indicates that the underlying conceptual aggregation is structurally too broad for bounded synthesis.\n"
-    #         "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
-    #         "- Use FAILED BATCH SUMMARIES together with current summary lengths to decide whether failed material should be reassigned to existing themes or split into narrower new themes.\n"
-    #         "- Reallocate failed material to an existing theme only when there is BOTH clear conceptual alignment and clear representational capacity in the receiving theme.\n"
-    #         "   - If either conceptual alignment or representational capacity is uncertain, create a narrower new theme instead of reallocating.\n"
-    #         "- When content is reassigned, update the receiving theme's instructions to explicitly accommodate it and narrow the originating theme so boundaries remain clear and non-overlapping.\n"
-    #         "- Do not overload passing themes merely to avoid creating additional themes.\n\n"
-
-    #         "## REPEATED FAILURE PATTERNS\n"
-    #         "Identify repeated failure patterns when substantially similar conceptual territories continue to appear inside themes that fail across iterations, even if the themes are renamed, reordered, merged, or split.\n"
-    #         "Repeated failure indicates that the underlying conceptual aggregation is operationally invalid for bounded synthesis, regardless of how conceptually elegant, comprehensive, or theoretically coherent the theme may appear.\n"
-    #         "When a conceptual territory repeatedly fails:\n"
-    #         "- do NOT preserve the broad aggregation through minor reformulation\n"
-    #         "- do NOT prioritize conceptual elegance over operational viability\n"
-    #         "- strongly prefer narrower, less elegant, more operationally bounded themes instead\n"
-    #         "- treat successful bounded synthesis as more important than preserving high-level conceptual integration\n\n"
-
-    #         "### Improve overall schema quality and conceptual coherence.\n"
-    #         "- Only prioritize conceptual coherence on boundary clarity after making efforts to resolve failures. An elegant and coherent schema is desirable but secondary to operational viability.\n"
-    #         "- Use both passing and failing themes as evidence for improving overall conceptual structure and capacity balance.\n"
-    #         "- If the current schema has no failing themes, treat the passing schema conservatively and do not optimize it speculatively.\n"
-    #         "- If the current schema has any failing themes, do not let individually passing themes prevent structural repair; passing themes may be narrowed, split, or reorganized when needed to resolve failures and rebalance conceptual load.\n"            
-    #         "- A correct and operationally viable conceptual partition is more important than continuity with the previous schema.\n"
-    #         "- Avoid unnecessary restructuring ONLY when the current schema already resolves completeness failures.\n\n"
-
-    #         "You may revise multiple parts of the schema simultaneously when attempting to resolve failed themes or improve conceptual coherence and theme distinction.\n\n"
-
-    #         "## CONVERGENCE CONDITION\n"
-    #         "You must always include a field \"no_change\" in your output.\n\n"
-
-    #         "HARD RULE:\n"
-    #         "- If the most recent iteration contains any theme with \"completeness_check\": \"fail\", you MUST set \"no_change\": false.\n\n"
-
-    #         "- Set \"no_change\": true ONLY if:\n"
-    #         "   - all themes in the most recent iteration pass the completeness check, AND\n"
-    #         "   - there are no obvious unresolved opportunities to improve conceptual partitioning without risking new cases of theme overload.\n\n"
-
-    #         "Do NOT set \"no_change\": true if any theme has failed the completeness check.\n"
-    #         "Do NOT make speculative improvements. Only propose repairs when improvements would be obvious based on the input.\n\n"
-            
-    #        "## OUTPUT FORMAT (STRICT JSON)\n"
-    #         "{\n"
-    #         "  \"repair_plan\": {\n"
-    #         "    \"theme_repairs\": [\n"
-    #         "      {\n"
-    #         "        \"source_theme_id\": <integer>,\n"
-    #         "        \"source_theme_label\": <string>,\n"
-    #         "        \"completeness_check\": \"fail\",\n"
-    #         "        \"repair_action\": \"retain_and_shrink\" | \"remove_and_redistribute\",\n"
-    #         "        \"receiving_theme_ids\": [<integer>],\n"
-    #         "        \"new_theme_needed\": <boolean>,\n"
-    #         "        \"new_theme_label\": <string | null>,\n"
-    #         "        \"label_change\": <string | null>,\n"
-    #         "        \"description_change\": <string>,\n"
-    #         "        \"include_change\": <string>,\n"
-    #         "        \"exclude_change\": <string>,\n"
-    #         "        \"trigger_change\": <string | null>,\n"
-    #         "        \"reallocated_concepts\": [\n"
-    #         "          {\n"
-    #         "            \"concept\": <string>,\n"
-    #         "            \"from_theme_id\": <integer>,\n"
-    #         "            \"to_theme_id\": <integer | null>,\n"
-    #         "            \"to_new_theme_label\": <string | null>\n"
-    #         "          }\n"
-    #         "        ],\n"
-    #         "        \"repair_narrative\": <string>\n"
-    #         "      }\n"
-    #         "    ],\n"
-    #         "    \"schema_repairs\": [\n"
-    #         "      {\n"
-    #         "        \"affected_theme_ids\": [<integer>],\n"
-    #         "        \"repair_narrative\": <string>\n"
-    #         "      }\n"
-    #         "    ]\n"
-    #         "  },\n"
-    #         "  \"no_change\": <boolean>\n"
-    #         "}\n\n"
-
-    #         "Field definitions:\n"
-    #         "- repair_plan: contains all repair operations needed for the second-stage schema rewrite.\n"
-    #         "- theme_repairs: theme-level repair operations for failed non-Conflict themes.\n"
-    #         "- source_theme_id: the input theme_id of the failed theme being repaired.\n"
-    #         "- source_theme_label: the input label of the failed theme being repaired.\n"
-    #         "- repair_action: use \"retain_and_shrink\" if the failed theme remains in narrower form; use \"remove_and_redistribute\" if no substantially equivalent successor remains.\n"
-    #         "- receiving_theme_ids: existing theme_ids that must receive reallocated content. Use [] if all reallocated content goes to new themes.\n"
-    #         "- new_theme_needed: true if any removed content should become a new theme.\n"
-    #         "- new_theme_label: proposed label for the new theme, or null if no new theme is needed.\n"
-    #         "- label_change: the revised label for the source theme, or null if unchanged or removed.\n"
-    #         "- description_change: how the source theme description should change.\n"
-    #         "- include_change: how the source theme INCLUDE rule should change.\n"
-    #         "- exclude_change: how the source theme EXCLUDE rule should change, including where excluded content should be routed.\n"
-    #         "- trigger_change: only for Conflict themes; otherwise null.\n"
-    #         "- reallocated_concepts: specific conceptual territories removed from failed themes and assigned elsewhere.\n"
-    #         "- repair_narrative: one concise sentence explaining the substantive repair.\n"
-    #         "- schema_repairs: schema-level repair operations that affect relationships or boundaries across multiple themes.\n"
-    #         "- affected_theme_ids: theme_ids affected by the schema-level repair.\n"
-    #         "- no_change: whether no repair is needed for the current schema.\n\n"
-
-    #         "Important:\n"
-    #         "- If no_change=true, repair_plan.theme_repairs and repair_plan.schema_repairs must both be empty arrays.\n"
-    #         "- If no_change=false, every failed non-Conflict theme must appear exactly once in repair_plan.theme_repairs.\n"
-
-    #         "- Every newly proposed conceptual territory must either:\n"
-    #         "   - identify an existing receiving theme_id, or\n"
-    #         "   - specify new_theme_needed=true with a concrete new_theme_label.\n"
-
-    #         "- If repair_action='retain_and_shrink', at least one of:\n"
-    #         "   - label_change\n"
-    #         "   - include_change\n"
-    #         "   - exclude_change\n"
-    #         "must materially alter the conceptual partition of the theme.\n"
-
-    #         "- Do NOT claim a new theme is needed unless at least one reallocated_concepts item uses to_new_theme_label with that exact label.\n"
-
-    #         "- Do NOT output a rewritten schema.\n"
-    #         "- Do NOT output polished final theme prose.\n"
-    #         "- Output only repair operations and conceptual reallocations.\n"
-    #         "- The repair plan must be operationally executable by a second-stage schema rewrite system.\n"
-    #         "- Every failed non-Conflict theme must appear exactly once in repair_plan.\n"
-    #         "- Cosmetic edits do NOT count as repairs.\n"
-    #         "- If a theme is retained_and_shrunk, the repair plan must explicitly identify conceptual territory removed from the theme.\n"
-    #         "- If content is reassigned to an existing theme, identify the receiving theme_id.\n"
-    #         "- If content requires a new theme, set new_theme_needed=true and provide new_theme_label.\n"
-
-    #         "## CONSTRAINTS\n"
-    #         "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"            "- The Conflict theme must preserve conceptual polarity\n"
-    #         "- The Other theme must remain a residual category\n"
-    #         "- The final codebook after repair must support full assignment of the conceptual content\n"
-    #     )
-
-
     def implement_schema_repairs(self):
         """
+        Construct the prompt for implementing a schema-repair plan.
+
+        Creates a prompt instructing a language model to apply a previously
+        generated repair plan to an existing theme schema and return a rewritten
+        schema.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to mechanically implement the supplied
+            repair plan and return the revised theme schema as strict JSON.
+
+        Notes
+        -----
+        This prompt is used after schema-repair planning. The repair plan remains
+        authoritative: the model is instructed not to perform new diagnosis,
+        optimization, reinterpretation, or additional restructuring.
+
+        The expected response is a JSON object containing:
+
+        - `themes`
+
+        Each returned theme must contain:
+
+        - `theme_label`
+        - `theme_description`
+        - `instructions`
+
+        The implementation stage converts repair-plan scope logic into final theme
+        descriptions and operational assignment instructions.
+
+        This separation between repair planning and repair implementation helps
+        ensure that schema changes are inspectable and reduces the risk of
+        performative repair.
         """
         return(
             "## ROLE\n"
@@ -1711,6 +1717,51 @@ class Prompts:
     
     def gen_theme_schema_optimize(self):
         """
+        Construct the prompt for schema optimization.
+
+        Creates a prompt instructing a language model to review the current
+        theme schema and identify non-speculative improvements that enhance
+        conceptual coherence, boundary clarity, and overall schema quality
+        without reintroducing representational overload or completeness failures.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to either return an optimized schema
+            or indicate that no further changes are warranted.
+
+        Notes
+        -----
+        This prompt is used after schema repair and stabilization. Unlike the
+        repair-planning prompt, its purpose is not to decompose overloaded
+        themes but to improve the quality of an already functioning schema.
+
+        The prompt explicitly constrains optimization by bounded synthesis
+        requirements. Proposed changes must preserve the ability of themes to
+        synthesize their assigned content without triggering completeness
+        failures.
+
+        The expected response is a JSON object containing:
+
+        - `no_change`
+        - `themes`
+
+        If:
+
+            no_change = true
+
+        then the schema is considered converged and no further optimization is
+        required.
+
+        If:
+
+            no_change = false
+
+        then the prompt requires the full revised schema to be returned.
+
+        This prompt is part of the schema-stabilization workflow and represents
+        the final schema-refinement stage before synthesis outputs are treated
+        as stable.
         """
         return(
             "## ROLE\n"
@@ -1850,49 +1901,51 @@ class Prompts:
 
     def theme_map_to_schema(self, allowed_ids: list, other_theme_id: int, conflicts_theme_id: int = None):
         """
-        Generate the system prompt for mapping insights to themes.
+        Construct the prompt for mapping insights to a theme schema.
 
-        This prompt instructs the model to classify a batch of insights
-        according to the previously generated thematic schema.
-
-        The schema includes:
-
-            • theme identifiers
-            • theme descriptions
-            • inclusion and exclusion rules
-
-        The model must evaluate each insight against all themes and
-        assign one or more theme identifiers when appropriate.
-
-        Key constraints enforced in the prompt include:
-
-            • multi-label classification is permitted
-            • exclusion rules must be strictly respected
-            • only provided theme_ids may be returned
-            • identifiers must be returned as arrays of strings
-
-        Optional overrides may include:
-
-            - an "Other" theme for residual insights
-            - a "Conflicts" theme for incompatible positions
+        Creates a prompt instructing a language model to classify a batch of
+        insights into one or more themes from the active thematic codebook.
 
         Parameters
         ----------
         allowed_ids : list
-            List of valid theme identifiers that may be assigned.
+            Theme identifiers that may be returned by the model.
 
         other_theme_id : int
-            Identifier for the "Other" category used when no substantive
-            theme applies.
+            Theme identifier for the residual `"Other"` category. If supplied,
+            unmapped or weakly fitting insights are assigned to this theme.
 
         conflicts_theme_id : int, optional
-            Identifier used to flag discursive conflicts when present.
+            Theme identifier for the `"Conflict"` overlay category. If supplied,
+            insights matching conflict-detection triggers may be assigned to this
+            theme alongside substantive themes.
 
         Returns
         -------
         str
-            System prompt instructing the model to map insights to themes
-            using strict JSON output.
+            Prompt instructing the model to map insights to valid theme IDs and
+            return assignments as strict JSON.
+
+        Notes
+        -----
+        The prompt supports multi-label assignment: a single insight may be mapped
+        to multiple themes when multiple schema instructions apply.
+
+        The expected response is a JSON object containing:
+
+        - `mapped_data`
+
+        where each item contains:
+
+        - `insight_id`
+        - `theme_id`
+
+        `theme_id` values must be returned as arrays and must be drawn only from
+        `allowed_ids`.
+
+        This prompt is used during the insight-to-theme mapping stage, where the
+        generated schema becomes an operational classification system for the
+        insight corpus.
         """
 
         allowed_ids_str = ", ".join(str(id) for id in allowed_ids)
@@ -1971,53 +2024,61 @@ class Prompts:
     def populate_themes(self, theme_len: int, theme_type: str):
 
         """
-         Generate the system prompt for theme population.
+        Construct the prompt for theme-level synthesis.
 
-        This prompt instructs the model to synthesize the insights assigned
-        to a single theme into a cohesive thematic narrative.
-
-        The synthesis must:
-
-            • adhere strictly to the theme description ("North Star logic")
-            • preserve all substantive insights and citations
-            • maintain the relative salience of claims
-            • remain within the allocated word limit
-            • produce the most concise synthesis possible without losing meaning
-
-        The prompt also adapts its structural instructions depending on
-        the type of theme being synthesized.
-
-        Supported theme types
-        ---------------------
-
-        general
-            Standard thematic synthesis of conceptually related insights.
-
-        other
-            Residual category capturing lower-frequency insights that do
-            not justify a standalone theme.
-
-        conflicts
-            Theme describing structured disagreement or discursive fault
-            lines present in the literature.
+        Creates a prompt instructing a language model to synthesize the insights
+        assigned to a single theme into a concise, citation-preserving thematic
+        narrative.
 
         Parameters
         ----------
         theme_len : int
-            Maximum word count allocated to the theme synthesis.
+            Maximum word count for the generated thematic summary.
 
         theme_type : str
-            Type of theme being synthesized. Must be one of:
+            Type of theme being synthesized.
 
-                "general"
-                "other"
-                "conflicts"
+            Must be one of:
+
+            - `"general"`
+            - `"other"`
+            - `"conflicts"`
 
         Returns
         -------
         str
-            System prompt instructing the model to synthesize insights into
-            a thematic section and return the result as strict JSON.
+            Prompt instructing the model to generate a theme summary and return it
+            as strict JSON.
+
+        Raises
+        ------
+        ValueError
+            If `theme_type` is not one of `"general"`, `"other"`, or
+            `"conflicts"`.
+
+        Notes
+        -----
+        Theme population is the main synthesis operation in ReadingMachine. The
+        prompt asks the model to represent all substantively distinct assigned
+        insights while consolidating duplicate or semantically similar claims.
+
+        The prompt adapts its structural guidance by theme type:
+
+        - general themes are rendered as coherent thematic narratives
+        - Other themes preserve lower-frequency residual claims without inflating
+        their salience
+        - conflict themes preserve disagreement, polarity, and discursive fault
+        lines without harmonizing positions
+
+        The expected response is a JSON object of the form:
+
+            {
+            "thematic_summary": "<summary>"
+            }
+
+        The prompt prioritizes bounded synthesis: full conceptual coverage,
+        citation fidelity, salience preservation, and compression under the
+        allocated word limit.
         """
                
         # -----------------------------------------------------
@@ -2151,34 +2212,39 @@ class Prompts:
             "}\n"
         )
 
-    
-
     def identify_orphans(self):
         """
-        Generate the system prompt for identifying orphan insights.
+        Construct the prompt for orphan-insight detection.
 
-        This prompt instructs the model to audit a thematic summary against
-        the insights originally mapped to that theme.
-
-        The model must determine which insights are substantively reflected
-        in the summary and return the identifiers of those insights.
-
-        An insight is considered reflected if:
-
-            • its core claim appears in the summary
-            • its contribution is preserved within a synthesized claim
-            • it is represented at an appropriate level of abstraction
-            • its citation/provenance is preserved in the summary
-
-        Insights that are not reflected are considered "orphans" and must
-        be reintroduced into the thematic synthesis.
+        Creates a prompt instructing a language model to audit a thematic summary
+        against the source insights mapped to that theme and identify which insight
+        IDs are substantively represented in the summary.
 
         Returns
         -------
         str
-            System prompt instructing the model to identify which insights
-            are reflected in the thematic summary and return the result
-            as strict JSON.
+            Prompt instructing the model to return the reflected insight IDs as
+            strict JSON.
+
+        Notes
+        -----
+        This prompt is used during the orphan-detection stage. Insights not
+        returned as reflected are treated as orphan insights and become candidates
+        for reintegration.
+
+        Reflection is defined substantively rather than verbatim. An insight may be
+        counted as reflected if its core mechanism, relationship, implication, or
+        claim is preserved within a broader synthesized statement.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "mentioned_insight_ids": ["<insight_id>"]
+            }
+
+        This prompt supports the ReadingMachine coverage-preservation workflow by
+        identifying mapped insights that may have been lost during theme
+        population.
         """
         return (
             '# ROLE\n'
@@ -2230,9 +2296,42 @@ class Prompts:
             '}\n\n'
         )
 
-
     def identify_citations(self):
         """
+        Construct the prompt for citation-presence auditing.
+
+        Creates a prompt instructing a language model to compare a thematic
+        summary against a supplied list of required citation strings and identify
+        which citations are explicitly present.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to return detected citations as strict
+            JSON.
+
+        Notes
+        -----
+        This prompt is used during citation-provenance auditing after orphan
+        integration. Its purpose is to determine whether citation identifiers
+        associated with mapped insights remain visible in the synthesized summary.
+
+        Citation matching is intentionally strict. The prompt requires exact
+        matching against the supplied citation strings and forbids normalization,
+        inference, abbreviation, or semantic matching.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "identified_citations": ["<citation>"]
+            }
+
+        Citations not returned by the audit become candidates for downstream
+        citation-provenance repair.
+
+        This prompt checks citation presence only. It does not evaluate whether
+        citations are attached to the correct claims or whether the cited content
+        is adequately represented.
         """
         return (
             "You are a citation auditor.\n\n"
@@ -2266,8 +2365,50 @@ class Prompts:
             "- Do not provide explanations or commentary."
         )
 
-    def repair_citation_provenance(self):
+    def repair_citation_provenance(self) -> str:
         """
+        Construct the prompt for citation-provenance repair.
+
+        Creates a prompt instructing a language model to generate minimal
+        sentence-level patches that add missing citation strings to a thematic
+        summary without rewriting the full summary.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to return citation-repair patches as
+            strict JSON.
+
+        Notes
+        -----
+        This prompt is used after citation auditing identifies required citations
+        that are missing from a synthesized theme summary.
+
+        The prompt asks the model to determine whether each missing citation
+        supports a point already represented in the summary. When possible, the
+        citation is added by minimally revising an existing sentence. A new
+        sentence is proposed only when the missing citation supports a distinct
+        point not already represented.
+
+        The expected response is a JSON object containing:
+
+        - `patches`
+
+        Each patch specifies:
+
+        - `missing_citations`
+        - `revise`
+        - `original_sentence`
+        - `revised_sentence`
+        - `anchor_sentence`
+        - `new_sentence`
+
+        The returned patches are intended to be applied deterministically by the
+        caller. This keeps citation repair bounded, auditable, and separate from
+        full-summary rewriting.
+
+        This prompt repairs citation presence and provenance. It does not perform
+        a full coverage audit or regenerate the thematic synthesis.
         """
         return (
             "You are a research editor repairing citation provenance in a thematic summary.\n\n"
@@ -2348,32 +2489,38 @@ class Prompts:
 
     def integrate_orphans(self):
         """
-        Generate the system prompt for reintegrating orphan insights.
+        Construct the prompt for orphan-insight reintegration.
 
-        This prompt instructs the model to revise a thematic summary so
-        that insights identified as missing ("orphans") are substantively
-        incorporated into the narrative.
-
-        The revised summary must:
-
-            • preserve the original findings
-            • preserve the original citations
-            • Include citations for orphan insights
-            • integrate orphan insights coherently
-            • maintain the original analytical tone
-            • avoid mechanical insertion of orphan sentences
-
-        The updated summary must remain faithful to:
-
-            • the research question
-            • the theme label
-            • the theme description
+        Creates a prompt instructing a language model to revise a thematic summary
+        so that previously omitted mapped insights are substantively incorporated
+        while preserving existing claims, structure, and citation provenance.
 
         Returns
         -------
         str
-            System prompt instructing the model to integrate orphan insights
-            into an updated thematic summary returned as strict JSON.
+            Prompt instructing the model to return a revised thematic summary as
+            strict JSON.
+
+        Notes
+        -----
+        This prompt is used during the orphan-reintegration stage after orphan
+        detection identifies mapped insights that are not reflected in the current
+        theme summary.
+
+        The prompt asks the model to integrate orphan insights through synthesis
+        rather than mechanical appending. Duplicate or overlapping claims should be
+        consolidated, while distinct mechanisms, implications, minority views, and
+        contradictions should remain represented.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "updated_summary": "<revised thematic summary>"
+            }
+
+        This prompt supports the ReadingMachine coverage-preservation workflow by
+        attempting to restore omitted insight content before schema repair or
+        further thematic refinement.
         """
         return (
             '# ROLE\n'
@@ -2433,44 +2580,41 @@ class Prompts:
     
     def summarize_failed_orphan_batch(self):
         """
-        Generate the system prompt for summarizing a failed orphan batch.
+        Construct the prompt for summarizing a failed orphan batch.
 
-        This prompt is used when orphan integration fails (typically due to
-        output truncation under token constraints). It instructs the model to
-        compress the failed batch of insights into a complete, structured
-        summary that preserves core claims while allowing controlled abstraction.
-
-        Unlike the integration prompt, this prompt prioritizes successful
-        completion over full fidelity. It permits merging, abstraction, and
-        omission of lower-importance detail in order to produce a usable
-        representation of the content that could not be integrated.
-
-        The resulting summary is intended for diagnostic use in downstream
-        schema regeneration. It exposes the conceptual structure of the failed
-        batch in a form that supports identification of:
-
-            • overloaded themes
-            • separable conceptual dimensions
-            • potential new themes
-            • misclassified insights
-
-        The prompt also enforces structural clarity and citation preservation
-        so that the output is both interpretable and grounded in the source
-        material.
+        Creates a prompt instructing a language model to summarize orphan insights
+        that could not be integrated into a thematic summary without failure or
+        truncation.
 
         Returns
         -------
         str
-            System prompt instructing the model to produce a structured,
-            citation-preserving summary of orphan insights as strict JSON.
+            Prompt instructing the model to return a structured summary of the
+            failed orphan batch as strict JSON.
 
         Notes
         -----
-        - This function is part of the failure-handling pathway and is expected
-        to always yield a complete output.
-        - Abstraction and controlled loss of detail are acceptable and expected.
-        - The output is not a final synthesis, but a diagnostic representation
-        of content that could not be integrated under current schema constraints.
+        This prompt is used in the orphan-integration failure pathway. When a batch
+        cannot be inserted into the current theme summary, the batch is compressed
+        into a diagnostic representation rather than discarded.
+
+        The prompt prioritizes:
+
+        - coverage of substantively distinct ideas
+        - preservation of conceptual granularity
+        - separation of distinct claim groupings
+        - citation fidelity
+        - complete, non-truncated output
+
+        The expected response is a JSON object of the form:
+
+            {
+            "summary": "<failed batch summary>"
+            }
+
+        The resulting summary is not a final synthesis. It is a diagnostic artifact
+        used to preserve failed content for downstream schema repair and theme
+        restructuring.
         """
         return(
             '# ROLE\n'
@@ -2498,12 +2642,12 @@ class Prompts:
             '4. ENSURE COMPLETENESS\n'
             '- The response must be complete and not cut off.\n\n'
 
-            '6. STRUCTURAL CLARITY\n'
+            '5. STRUCTURAL CLARITY\n'
             '- Present the synthesis as clearly separable components rather than a single blended narrative.\n'
             '- Each component should represent a distinct grouping of related ideas.\n'
             '- Maintain clear boundaries between substantively different idea groupings.\n\n'
 
-            '7. FIDELITY AND CITATIONS\n'
+            '6. FIDELITY AND CITATIONS\n'
             '- Preserve all factual details and citations exactly as they appear in the source insights.\n'
             '- Do not alter, merge, or remove citation markers.\n'
             '- If multiple insights support the same claim with different citations, retain all citations.\n\n'
@@ -2523,30 +2667,38 @@ class Prompts:
 
     def address_redundancy(self):
         """
-        Generate the system prompt for redundancy reduction across themes.
+        Construct the prompt for theme-level redundancy reduction.
 
-        This prompt instructs the model to reduce unnecessary repetition
-        across previously synthesized themes while preserving the full
-        informational content of each theme.
-
-        Redundancy arises when insights assigned to multiple themes produce
-        overlapping statements across different thematic sections.
-
-        The model must:
-
-            • eliminate surface-level repetition
-            • preserve all substantive claims
-            • preserve all citations exactly as written
-            • maintain the logical integrity of each theme
-
-        If a claim already appears in earlier themes, the model should
-        reference it concisely rather than restating it in full.
+        Creates a prompt instructing a language model to revise the current theme
+        summary against previously refined themes from the same research question,
+        reducing repeated articulation while preserving substantive content and
+        citation provenance.
 
         Returns
         -------
         str
-            System prompt instructing the model to perform redundancy
-            reduction and return the refined theme text as strict JSON.
+            Prompt instructing the model to return a redundancy-reduced theme
+            summary as strict JSON.
+
+        Notes
+        -----
+        This prompt is used during the final redundancy-reduction pass. Previously
+        refined themes are supplied as frozen context and must not be edited.
+
+        Redundancy is defined narrowly as repeated full articulation of claims that
+        have already appeared in earlier themes. The prompt asks the model to reduce
+        repetition through concise reference while maintaining the current theme's
+        logical integrity and assigned insight coverage.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "refined_theme": "<theme text>"
+            }
+
+        This prompt performs presentation-level refinement only. It should not
+        change theme scope, introduce new claims, remove substantive claims, or
+        alter citations.
         """
         return(
             "# ROLE\n"
@@ -2580,7 +2732,7 @@ class Prompts:
             "- Ensure that all assigned insights remain substantively represented.\n\n"
 
             "# WHAT YOU WILL RECEIVE\n"
-            "- You will receive the research qyestion the themes are answering, the previously cleaned themes in the order they are written, the current theme label, and the current theme text to refine.\n" \
+            "- You will receive the research question the themes are answering, the previously cleaned themes in the order they are written, the current theme label, and the current theme text to refine.\n" \
             "- The previously cleaned themes are frozen context. Do NOT edit or alter them. They are read-only and serve only to inform your redundancy reduction in the current theme.\n\n"
 
             "# INPUT FORMAT\n"
@@ -2611,8 +2763,54 @@ class Prompts:
     # PROMPTs FOR RENDER
     ####
 
-    def stylistic_rewrite(self, style:str , label: str, index: int):
+    def stylistic_rewrite(self, style: str , label: str, index: int):
+        """
+        Construct the prompt for stylistic refinement of a theme summary.
 
+        Creates a prompt instructing a language model to revise a thematic summary
+        into a specified writing style while preserving all substantive content,
+        citations, and approximate length.
+
+        Parameters
+        ----------
+        style : str
+            Target writing style for the refined summary.
+
+        label : str
+            Theme label used to select theme-type-specific opening guidance.
+
+        index : int
+            Theme position used to rotate opening-style guidance and reduce
+            repetitive phrasing across themes.
+
+        Returns
+        -------
+        str
+            Prompt instructing the model to return a stylistically refined summary
+            as strict JSON.
+
+        Notes
+        -----
+        The prompt selects one of three internal guidance categories based on the
+        theme label:
+
+        - dominant themes
+        - Other themes
+        - Conflict themes
+
+        The selected guidance affects opening structure and rhetorical approach,
+        but does not change the substantive preservation requirements.
+
+        The expected response is a JSON object of the form:
+
+            {
+            "refined_summary": "<refined thematic summary>"
+            }
+
+        This prompt is used during rendering, not analytical synthesis. It should
+        improve readability and narrative flow without changing theme scope,
+        omitting information, or altering citations.
+        """
         style_guidelines = {
             "dominant": [
                 "Emphasize the weight of evidence without using stock phrases.",
@@ -2702,22 +2900,11 @@ class Prompts:
 
     def exec_summary(self, word_count: int):
         """
-        Generate the system prompt for producing the executive summary.
+        Construct the prompt for executive-summary generation.
 
-        This prompt instructs the model to synthesize the full corpus review
-        into a concise executive summary and generate a descriptive title.
-
-        The executive summary must:
-
-            • synthesize insights across all research questions
-            • highlight cross-cutting patterns in the literature
-            • identify key divergences or variations
-            • summarize implications emerging from the corpus
-
-        The output must be structured as a strict JSON object containing:
-
-            - executive_summary
-            - title
+        Creates a prompt instructing a language model to synthesize the full
+        rendered review into a corpus-level executive summary and generate a
+        concise document title.
 
         Parameters
         ----------
@@ -2727,8 +2914,35 @@ class Prompts:
         Returns
         -------
         str
-            System prompt instructing the model to generate an executive
-            summary and title in strict JSON format.
+            Prompt instructing the model to generate an executive summary and
+            title and return them as strict JSON.
+
+        Notes
+        -----
+        This prompt operates over the highest-level representation in the
+        rendering workflow. Rather than summarizing individual themes or research
+        questions, it synthesizes patterns across the entire review.
+
+        The prompt emphasizes:
+
+        - cross-cutting themes
+        - major divergences
+        - emerging implications
+        - fidelity to the source synthesis
+
+        The expected response is a JSON object of the form:
+
+            {
+            "executive_summary": "<summary>",
+            "title": "<title>"
+            }
+
+        The executive summary is intended as a presentation-layer artifact. It
+        does not modify analytical state, theme structure, mappings, or synthesis
+        outputs.
+
+        The generated title serves as a descriptive label for the review and is
+        constrained to a short, standalone form.
         """
 
         return (
@@ -2766,27 +2980,42 @@ class Prompts:
     
     def question_summaries(self):
         """
-        Generate the system prompt for research-question summaries.
+        Construct the prompt for question-level summary generation.
 
-        This prompt instructs the model to produce a short overview
-        describing how the themes collectively answer a specific
-        research question.
-
-        The generated summary serves as a narrative bridge between the
-        research question and the detailed theme sections that follow.
-
-        The summary must:
-
-            • synthesize the themes conceptually
-            • remain faithful to the source text
-            • avoid introducing new claims or interpretations
-            • be written in formal academic prose
+        Creates a prompt instructing a language model to synthesize the theme
+        summaries associated with a research question into a concise narrative
+        overview.
 
         Returns
         -------
         str
-            System prompt instructing the model to produce a concise
-            question-level summary in strict JSON format.
+            Prompt instructing the model to generate a question-level summary and
+            return it as strict JSON.
+
+        Notes
+        -----
+        This prompt operates one level above theme summaries. Its purpose is to
+        provide a short orienting narrative that explains how the themes
+        collectively answer the research question.
+
+        The prompt emphasizes:
+
+        - synthesis rather than enumeration
+        - fidelity to the supplied theme summaries
+        - concise academic prose
+        - avoidance of unsupported interpretation
+
+        The expected response is a JSON object of the form:
+
+            {
+            "summary": "<question summary>"
+            }
+
+        The resulting summary functions as a narrative bridge between the research
+        question and the detailed theme sections that follow.
+
+        This prompt is part of the rendering workflow and does not modify
+        analytical state or thematic structure.
         """
         return (
             "## ROLE\n"
@@ -2821,4 +3050,3 @@ class Prompts:
     ####
     # /END PROMPTS FOR RENDER
     ####
-    
