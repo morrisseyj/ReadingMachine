@@ -2185,6 +2185,151 @@ class Ingestor:
         return summary
 
 class Insights:
+    """
+    Insight extraction stage of the ReadingMachine pipeline.
+
+    The Insights class converts a prepared corpus representation into
+    research-question-relevant insight records. It operates over the chunked
+    corpus produced by the Ingestor and generates the insight-level
+    representation that forms the foundation of all downstream analytical
+    stages.
+
+    The insight-generation workflow proceeds in two passes:
+
+        chunk-level reading
+            ↓
+        meta-insight generation
+            ↓
+        complete insight corpus
+
+    Chunk-level reading
+    -------------------
+    The first pass processes each chunk independently.
+
+    Every chunk is evaluated against the complete set of research questions,
+    and the language model extracts any claims, findings, arguments,
+    observations, or evidence relevant to those questions.
+
+    The resulting chunk-level insights:
+
+    - retain links to `paper_id`
+    - retain links to `chunk_id`
+    - retain links to `question_id`
+    - receive unique `insight_id` values
+
+    Chunks that contain no relevant insights are still recorded to preserve
+    traceability and support resumable execution.
+
+    Meta-insight generation
+    -----------------------
+    The second pass identifies insights that emerge only when larger portions
+    of a paper are considered together.
+
+    For each paper and research question, the model receives:
+
+    - document-level text
+    - previously generated chunk insights
+    - the focal research question
+    - contextual information about the remaining questions
+
+    This allows the system to identify arguments, findings, and conceptual
+    relationships that span multiple chunks and may not be visible during
+    isolated chunk-level reading.
+
+    Generated meta-insights are appended to the existing chunk-level
+    insights and receive `meta_insight_*` identifiers.
+
+    Resume and recovery
+    -------------------
+    Both chunk-level insight generation and meta-insight generation support
+    checkpoint-based recovery.
+
+    Intermediate outputs are written to pickle files throughout execution,
+    allowing long-running extraction jobs to resume after:
+
+    - API interruptions
+    - process termination
+    - user cancellation
+    - system failures
+
+    Recovery is performed using chunk-level and content-level identifiers so
+    that already processed units are not re-read unnecessarily.
+
+    Pipeline role
+    -------------
+    The Insights stage transforms:
+
+        chunks
+            ↓
+        chunk insights
+            ↓
+        meta insights
+            ↓
+        insight corpus
+
+    The resulting insight corpus becomes the primary analytical
+    representation used by subsequent ReadingMachine stages, including:
+
+    - embedding generation
+    - clustering
+    - theme construction
+    - orphan detection
+    - thematic synthesis
+
+    Design principles
+    -----------------
+    The class reflects several core ReadingMachine principles:
+
+    Question-guided reading
+        All extraction is performed relative to explicit research questions
+        rather than generic summarization.
+
+    Traceability
+        Every generated insight remains linked to its originating paper,
+        chunk, and research question.
+
+    Coverage preservation
+        Meta-insights provide a mechanism for identifying information that
+        may span multiple chunks and would otherwise be missed by strictly
+        local reading.
+
+    Recoverability
+        Long-running extraction workflows support checkpointing and resume
+        operations.
+
+    Inspectable intermediate representations
+        Chunk-level insights and meta-insights remain explicit analytical
+        objects rather than being immediately collapsed into higher-level
+        summaries.
+
+    Attributes
+    ----------
+    corpus_state : CorpusState
+        Working corpus state containing chunks, metadata, and generated
+        insights.
+
+    llm_client : Any
+        Language model client used for insight extraction.
+
+    ai_model : str
+        Model identifier used for insight-generation calls.
+
+    paper_context : str
+        Review-specific context supplied to insight-generation prompts.
+
+    pickle_path : str
+        Directory used to store checkpoint files for recovery.
+
+    chunk_insights_pickle_file : str
+        Checkpoint file for chunk-level insight generation.
+
+    meta_insights_pickle_file : str
+        Checkpoint file for meta-insight generation.
+
+    max_token_length : int
+        Maximum document length threshold used when preparing document-level
+        inputs for meta-insight generation.
+    """
     def __init__(
         self,
         corpus_state: "CorpusState",
@@ -2995,63 +3140,136 @@ class Insights:
     
 class Clustering:
     """
-    Embedding and clustering stage for extracted insights.
+    Embedding and clustering stage of the ReadingMachine pipeline.
 
-    This class performs three computational steps on the insight corpus:
+    The Clustering class converts extracted insights into a structured
+    semantic representation that can be used to organize the corpus for
+    downstream synthesis.
 
-        1. Insight embedding
-        2. Dimensionality reduction
-        3. Density-based clustering
+    The workflow consists of three stages:
 
-    These operations organize insights into provisional groups that
-    provide **computational scaffolding** for downstream synthesis.
+        insight embeddings
+            ↓
+        dimensionality reduction
+            ↓
+        density-based clustering
 
-    Importantly, clusters are **not treated as analytical conclusions**.
-    They serve only as an initial structural aid for theme generation,
-    which later operates directly on the underlying insights and is
-    refined iteratively through orphan detection and theme revision.
+    These operations transform the insight corpus into a set of provisional
+    semantic groups that serve as computational scaffolding for later
+    thematic synthesis.
+
+    Importantly, clusters are not treated as analytical conclusions.
+
+    ReadingMachine does not assume that embedding neighborhoods correspond
+    directly to themes, concepts, arguments, or findings. Instead, clusters
+    are used to:
+
+    - organize large insight sets
+    - provide manageable synthesis units
+    - improve computational efficiency
+    - supply an initial semantic structure for theme generation
+
+    The final thematic structure emerges later through iterative synthesis,
+    orphan detection, reinsertion, and theme revision rather than from the
+    clustering process itself.
 
     Pipeline role
     -------------
-    The clustering stage converts insights into a structured embedding
-    representation and assigns cluster labels that allow the pipeline to:
+    The clustering stage transforms:
 
-    - summarize related insights together
-    - generate initial theme schemas without scanning the full corpus
-    - provide ordering heuristics for cluster summaries
+        insights
+            ↓
+        embeddings
+            ↓
+        reduced embeddings
+            ↓
+        semantic clusters
 
-    The final thematic structure is **not determined by clustering**.
-    Clusters function only as a starting point for the iterative
-    synthesis process.
+    The resulting clusters provide the organizational layer used by
+    downstream summarization and theme-generation stages.
+
+    To support large-scale synthesis, the clustering workflow also includes
+    cluster-size management. Oversized clusters are partitioned into bounded
+    groups so that subsequent summarization steps remain compatible with LLM
+    context-window constraints.
+
+    Parameter tuning
+    ----------------
+    The class provides diagnostics for both dimensionality reduction and
+    clustering.
+
+    UMAP parameter tuning evaluates whether reduced embedding spaces retain
+    useful structure using research-question labels as a proxy signal.
+
+    HDBSCAN parameter tuning evaluates:
+
+    - cluster compactness
+    - outlier rates
+    - downstream summarization feasibility
+
+    These diagnostics are intended to support human parameter selection
+    rather than fully automated optimization.
+
+    Design principles
+    -----------------
+    The clustering stage is designed around several principles:
+
+    Semantic organization, not interpretation
+        Clusters organize insights but do not determine analytical meaning.
+
+    Coverage preservation
+        Outlier handling and bounded partitioning ensure that all insights
+        remain available for downstream synthesis.
+
+    Scalability
+        Embeddings, dimensionality reduction, and clustering provide a
+        computationally tractable representation of large insight corpora.
+
+    Traceability
+        Cluster assignments remain linked to the underlying insight records
+        and associated metadata.
+
+    Context-window awareness
+        Cluster-size constraints are explicitly incorporated to support
+        subsequent LLM-based summarization workflows.
 
     Attributes
     ----------
     corpus_state : CorpusState
-        Working corpus state containing the insights table.
+        Working corpus state containing insight records and clustering
+        outputs.
 
     llm_client : Any
-        Client used for generating embeddings.
+        Client used for embedding generation.
 
     embedding_model : str
-        Model name used for embedding generation.
+        Embedding model identifier.
 
     embedding_dims : int
-        Number of dimensions in the embedding vector.
+        Number of embedding dimensions requested from the embedding model.
 
     valid_embeddings_df : pd.DataFrame
-        Subset of insights that contain non-empty text suitable for
-        embedding generation.
+        Subset of insights eligible for embedding and clustering.
 
     insight_embeddings_array : np.ndarray
         Full embedding vectors for valid insights.
 
     reduced_insight_embeddings_array : np.ndarray
-        Dimensionally reduced embedding vectors produced by UMAP.
+        UMAP-reduced embedding vectors used for clustering.
+
+    rq_valid_embeddings_dfs : dict[str, pd.DataFrame]
+        Research-question-specific embedding subsets used during clustering
+        and parameter tuning.
 
     cum_prop_cluster : pd.DataFrame
-        Summary statistics describing cluster size distribution.
-    """
+        Cluster-distribution diagnostics generated during analysis.
 
+    umap_param_tuning_results : pd.DataFrame
+        Results of UMAP parameter tuning.
+
+    hdbscan_tuning_results : pd.DataFrame
+        Results of HDBSCAN parameter tuning.
+    """
     def __init__(
         self,
         corpus_state: CorpusState,
@@ -3061,40 +3279,57 @@ class Clustering:
         embeddings_pickle_path: str = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
     ):
         """
-        Initialize the clustering stage of the ReadingMachine pipeline.
+        Initialize the clustering stage.
 
-        This constructor prepares the insight corpus for embedding and
-        clustering operations. It validates the incoming `CorpusState`,
-        removes citation parentheticals from insights to reduce embedding
-        bias, and constructs the working DataFrame of valid insights that
-        will be embedded.
+        Validates and deep-copies the supplied CorpusState, stores embedding
+        configuration, and prepares the subset of insight rows that are eligible
+        for embedding and clustering.
 
         Parameters
         ----------
         corpus_state : CorpusState
-            The current corpus state containing extracted insights and
-            associated metadata.
+            CorpusState containing generated insights and associated paper,
+            question, citation, and chunk metadata.
 
         llm_client : Any
-            Client used to generate embeddings through the embedding API.
+            Client used to request embeddings.
 
         embedding_model : str
-            Name of the embedding model used to convert insights into
-            vector representations.
+            Embedding model identifier.
 
         embedding_dims : int, default=1024
-            Dimensionality of the embedding vectors returned by the
-            embedding model.
+            Number of embedding dimensions to request from the embedding model.
 
-        embeddings_pickle_path : str
-            Path where generated embeddings will be stored for recovery
-            and reuse across runs.
+        embeddings_pickle_path : str, default=os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
+            Path used to persist or recover generated insight embeddings.
+
+        Attributes
+        ----------
+        valid_embeddings_df : pd.DataFrame
+            Working DataFrame of valid insight rows prepared by
+            `_gen_valid_embeddings_df()`.
+
+        insight_embeddings_array : np.ndarray
+            Placeholder for full insight embedding vectors.
+
+        reduced_insight_embeddings_array : np.ndarray
+            Placeholder for reduced-dimensionality embeddings.
+
+        cum_prop_cluster : pd.DataFrame
+            Placeholder for clustering diagnostics or cumulative cluster
+            proportion outputs.
 
         Notes
         -----
-        The constructor also creates the internal working DataFrame
-        `valid_embeddings_df`, which contains only insights suitable
-        for embedding after citation stripping and empty-text filtering.
+        The supplied CorpusState is validated through `utils.validate_format()`
+        and deep-copied before use, so clustering operations work on this class's
+        internal state.
+
+        The initializer requires extracted insight text, chunk identifiers,
+        citation metadata, paper metadata, and question metadata to be present.
+
+        The actual filtering and preparation of embeddable insights is delegated
+        to `_gen_valid_embeddings_df()`.
         """
         self.corpus_state = deepcopy(
             utils.validate_format(
@@ -3119,65 +3354,31 @@ class Clustering:
         self.reduced_insight_embeddings_array: np.ndarray = np.array([])
         self.cum_prop_cluster: pd.DataFrame = pd.DataFrame()
 
-    
-    # @staticmethod
-    # def _strip_citation_parentheticals(text: str) -> str:
-    #     """
-    #     Remove citation-style parentheticals from insight text.
-
-    #     Academic writing frequently embeds author-year citations
-    #     (e.g., "(Smith 2018)" or "(Smith and Jones 2020)") that can bias
-    #     embedding models by introducing surface-level similarities
-    #     unrelated to semantic content.
-
-    #     This function removes common citation patterns before generating
-    #     embeddings so that clustering reflects the meaning of insights
-    #     rather than citation artifacts.
-
-    #     Parameters
-    #     ----------
-    #     text : str
-    #         Raw insight text.
-
-    #     Returns
-    #     -------
-    #     str
-    #         Cleaned insight string with citation parentheticals removed.
-    #     """
-
-    #     if not isinstance(text, str):
-    #         return ""
-
-    #     # 1. Remove parentheses containing a 4-digit year
-    #     text = re.sub(r"\([^)]*\d{4}[^)]*\)", "", text)
-
-    #     # 2. Remove parentheses that look like author lists (capitalized names)
-    #     text = re.sub(r"\(([A-Z][a-zA-Z]+(?:\s+(?:and|et al\.|,)?\s*[A-Z][a-zA-Z]+)+)\)", "", text)
-
-    #     # Collapse whitespace
-    #     text = re.sub(r"\s+", " ", text).strip()
-
-    #     return text
-
     def _gen_valid_embeddings_df(self):
         """
-        Prepare the subset of insights suitable for embedding.
+        Prepare the subset of insights eligible for embedding.
 
-        Insights that become empty after citation removal are excluded
-        from embedding generation to prevent noise in the embedding space.
-
-        The function also creates a normalized version of the insight text
-        (`no_author_insight_string`) that is used as the embedding input.
+        Filters the current insight table to retain only rows containing both
+        valid insight text and a non-empty in-text citation. The resulting
+        DataFrame is used as the input set for embedding generation.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame containing only valid insights that will be embedded.
+            DataFrame containing only embeddable insight records.
 
-        Side Effects
-        ------------
-        Adds the column `no_author_insight_string` to
-        `corpus_state.insights`.
+        Notes
+        -----
+        Rows are retained only when:
+
+        - `insight` is not missing
+        - `in_text_citation` is not empty after string conversion and trimming
+
+        The returned DataFrame has its index reset to provide a stable
+        positional alignment between DataFrame rows and embedding vectors
+        generated later in the clustering workflow.
+
+        This method does not mutate `self.corpus_state.insights`.
         """
 
         valid = self.corpus_state.insights[
@@ -3193,82 +3394,53 @@ class Clustering:
     
     def embed_insights(self) -> np.ndarray:
         """
-        Generate vector embeddings for insights with incremental persistence and resume support.
+        Generate or recover vector embeddings for valid insights.
 
-        This method iterates over all valid insight strings and generates vector
-        embeddings using the configured embedding model. It is designed for
-        long-running jobs and provides fault tolerance through periodic checkpointing
-        and resumable execution.
-
-        Key Features
-        ------------
-        1. Incremental Saving
-        - Embeddings are written to disk every 10 iterations using `utils.safe_pickle`.
-        - This ensures progress is preserved in case of interruption (e.g., API failure,
-        process termination).
-        - At most 10 embeddings are lost in the event of failure.
-
-        2. Resume Capability (Key-Based)
-        - If a pickle file exists, the user can choose to resume or restart.
-        - On resume, previously saved embeddings are loaded as a DataFrame keyed by
-        `insight_id`.
-        - The method identifies remaining work by excluding already processed
-        `insight_id`s, rather than relying on positional indexing.
-        - This makes the process robust to row reordering, reloads, and partial runs.
-
-        3. Idempotent Execution
-        - The embedding process is idempotent: re-running the method will not duplicate
-        work or corrupt results.
-        - Existing embeddings are preserved and reused automatically.
-
-        4. Data Integrity
-        - `safe_pickle` ensures atomic writes, preventing file corruption.
-        - Duplicate embeddings are removed using `insight_id` as the unique key.
-        - The embedding model is assumed to return consistent vector dimensions.
-
-        Workflow
-        --------
-        - Initialize storage and ensure output column exists.
-        - If a previous run exists:
-            - Load embeddings into a DataFrame (`insight_id`, `full_insight_embedding`).
-            - Identify insights that still require embeddings.
-        - Iterate over remaining insights:
-            - Generate embedding via API call.
-            - Append to in-memory buffer (`new_rows`).
-            - Every 10 embeddings:
-                - Merge buffer into the main DataFrame.
-                - Persist to disk.
-        - After completion:
-            - Flush any remaining buffered embeddings.
-            - Persist final DataFrame.
-            - Merge embeddings back into `valid_embeddings_df` using `insight_id`.
+        Creates embeddings for each row in `valid_embeddings_df` using the
+        configured embedding model. Embeddings are stored by `insight_id`, saved
+        incrementally for recovery, merged back into `valid_embeddings_df`, and
+        converted into a NumPy array for downstream clustering.
 
         Returns
         -------
         pd.DataFrame
             DataFrame containing:
-                - `insight_id`
-                - `full_insight_embedding`
+
+            - `insight_id`
+            - `full_insight_embedding`
 
         Side Effects
         ------------
-        - Updates `self.valid_embeddings_df` to include the embedding column.
-        - Creates self.insight_embeddings_array as a NumPy array of the full insight embeddings for downstream use.
-        - Writes intermediate and final embeddings to `self.embeddings_pickle_path`.
+        Creates the parent directory for `self.embeddings_pickle_path` if needed.
 
-        Assumptions
-        -----------
-        - `insight_id` is a stable, unique string identifier for each insight.
-        - The text used for embedding (`no_author_insight_string`) is deterministic.
-        - The embedding model returns consistent vector dimensions across calls.
+        Reads from or writes to:
+
+            self.embeddings_pickle_path
+
+        Mutates clustering attributes:
+
+        - adds `full_insight_embedding` to `self.valid_embeddings_df`
+        - populates `self.insight_embeddings_array`
 
         Notes
         -----
-        - This method no longer relies on positional alignment between rows and embeddings.
-        - Embeddings are stored and recovered using a key-based mapping (`insight_id`),
-        ensuring robustness across reloads and data transformations.
-        - This replaces earlier index-based approaches, which were fragile under
-        DataFrame reconstruction.
+        If an embeddings pickle already exists, the user is prompted to either
+        resume from the saved embeddings or regenerate embeddings from scratch.
+
+        Resume behavior is key-based. Previously processed rows are identified
+        by `insight_id`, so recovery is robust to row order changes.
+
+        Embeddings are checkpointed every 10 generated embeddings using
+        `utils.safe_pickle()`. A final save is performed after all remaining
+        embeddings are generated.
+
+        Duplicate embedding records are removed using `insight_id`.
+
+        Embedding text is taken from the `insight` column of
+        `valid_embeddings_df`.
+
+        The method assumes each valid insight has a stable, unique `insight_id`
+        and that the embedding model returns vectors with consistent dimensions.
         """
 
         # Ensure directory exists
@@ -3384,44 +3556,64 @@ class Clustering:
         random_state: int = config.seed,
         update_attributes: bool = True
     ) -> np.ndarray:
-        
         """
-        Reduce embedding dimensionality using UMAP.
+        Reduce insight embedding dimensionality with UMAP.
 
-        Dimensionality reduction improves the effectiveness of density-based
-        clustering algorithms by projecting high-dimensional embeddings
-        into a lower-dimensional space.
+        Projects high-dimensional insight embeddings into a lower-dimensional
+        space for clustering and diagnostic exploration. If no embedding matrix
+        is supplied, the method uses `self.insight_embeddings_array`.
 
         Parameters
         ----------
-        full_embeddings : np.ndarray
-            Embedding matrix to reduce. Defaults to stored insight embeddings.
+        full_embeddings : np.ndarray, optional
+            Embedding matrix to reduce. If omitted, uses
+            `self.insight_embeddings_array`.
 
-        n_neighbors : int
-            Size of the local neighborhood used for manifold estimation.
+        n_neighbors : int, default=15
+            Size of the local neighborhood used by UMAP for manifold estimation.
 
-        min_dist : float
-            Minimum distance between points in the reduced space.
+        min_dist : float, default=0.25
+            Minimum distance between points in the reduced embedding space.
 
-        n_components : int
-            Number of output dimensions.
+        n_components : int, default=10
+            Number of dimensions in the reduced embedding space.
 
-        metric : str
+        metric : str, default="cosine"
             Distance metric used by UMAP.
 
-        random_state : int
-            Random seed for reproducibility.
+        random_state : int, default=config.seed
+            Random seed used for reproducible dimensionality reduction.
 
-        update_attributes : bool
-            Whether to update internal attributes used by downstream
-            clustering methods.
+        update_attributes : bool, default=True
+            If True, store the reduced embeddings on the instance and prepare
+            downstream clustering data structures. If False, return the reduced
+            matrix without mutating class attributes.
 
         Returns
         -------
         np.ndarray
             Reduced embedding matrix.
+
+        Side Effects
+        ------------
+        When `update_attributes=True`, mutates:
+
+        - `self.reduced_insight_embeddings_array`
+        - `self.valid_embeddings_df["reduced_insight_embedding"]`
+        - `self.rq_valid_embeddings_dfs`
+
+        Notes
+        -----
+        `self.valid_embeddings_df["reduced_insight_embedding"]` stores each
+        reduced vector as a Python list.
+
+        `self.rq_valid_embeddings_dfs` is a dictionary mapping each
+        `question_id` to the subset of `valid_embeddings_df` for that research
+        question.
+
+        Set `update_attributes=False` when tuning UMAP parameters or running
+        diagnostic projections without changing downstream clustering state.
         """
-        
         # See if full_embeddings were provided, otherwise use the class's insight embeddings (this is done to make other methods in the class more explicit)
         if full_embeddings is None:
             full_embeddings = self.insight_embeddings_array
@@ -3448,16 +3640,39 @@ class Clustering:
 
     def calc_silhouette(self, reduced_embeddings: np.array = None, rq_exclude: list[str] = None) -> float:
         """
-        Calculate the silhouette score for the current reduced embeddings,
-        using research question IDs as cluster labels.
+        Calculate a silhouette diagnostic for a reduced embedding space.
 
-        Args:
-            rq_exclude (list[str], optional): 
-                List of question_id strings to exclude from the silhouette calculation.
-                If provided, any rows with question_id in this list will be excluded.
+        Computes a silhouette score on the reduced embeddings using
+        `question_id` values as proxy labels. This diagnostic is used to assess
+        whether the dimensionality-reduction parameters preserve enough
+        structure to support distinct clustering under reduced information.
 
-        Returns:
-            float: The silhouette score (higher is better cluster separation).
+        Parameters
+        ----------
+        reduced_embeddings : np.ndarray, optional
+            Reduced embedding matrix to evaluate. If omitted, uses
+            `self.reduced_insight_embeddings_array`.
+
+        rq_exclude : list[str], optional
+            Research question IDs to exclude from the calculation.
+
+        Returns
+        -------
+        float
+            Silhouette score computed using Euclidean distance. Higher values
+            indicate stronger separation under the proxy labeling scheme.
+
+        Notes
+        -----
+        This method does not evaluate the final clustering solution directly.
+        Instead, it uses research-question assignments as a practical proxy for
+        testing whether the reduced embedding space retains meaningful
+        separation after dimensionality reduction.
+
+        The diagnostic is primarily useful when tuning UMAP parameters before
+        density-based clustering.
+
+        The score is printed before being returned.
         """
 
         if reduced_embeddings is None:
@@ -3487,26 +3702,51 @@ class Clustering:
         rq_exclude: list[str] = None
     ) -> None:
         """
-        Grid search over UMAP dimensionality reduction parameters, evaluating each
-        combination using silhouette score (optionally excluding certain questions).
+        Tune UMAP dimensionality-reduction parameters using a silhouette proxy.
 
-        IMPORTANT: This tuning is being done to check how well the insights cluster according
-        to the research questions they were derived for. This is intended as a proxy for their
-        ability to identify meaningful semantic structure and therefore the likelihood they can
-        generalize to new, unseen data (the clusters within research questions). So this function
-        runs over all the research questions. It is not run per question.
+        Runs a grid search over UMAP parameter combinations and evaluates each
+        reduced embedding space with `calc_silhouette()`. Research-question IDs
+        are used as proxy labels to assess whether the reduced space preserves
+        enough separation to support downstream clustering.
 
-        Args:
-            n_neighbors_list (list[int]): List of UMAP n_neighbors values to try.
-            min_dist_list (list[float]): List of UMAP min_dist values to try.
-            n_components_list (list[int]): List of UMAP n_components (output dims) to try.
-            metric_list (list[str]): List of UMAP distance metrics to try.
-            rq_exclude (list[str], optional): 
-                List of question_id strings to exclude from silhouette scoring.
-                Useful for ignoring questions that drive overlap or noise.
+        Parameters
+        ----------
+        n_neighbors_list : list[int], default=[5, 15, 30, 50, 75, 100]
+            UMAP `n_neighbors` values to evaluate.
 
-        Returns:
-            None. Results are stored in self.umap_param_tuning_results as a DataFrame.
+        min_dist_list : list[float], default=[0.0, 0.1, 0.2, 0.5]
+            UMAP `min_dist` values to evaluate.
+
+        n_components_list : list[int], default=[5, 10, 20]
+            UMAP output dimensionalities to evaluate.
+
+        metric_list : list[str], default=["cosine", "euclidean"]
+            UMAP distance metrics to evaluate.
+
+        rq_exclude : list[str], optional
+            Research question IDs to exclude from silhouette scoring.
+
+        Returns
+        -------
+        None
+
+        Side Effects
+        ------------
+        Populates `self.umap_param_tuning_results` with a DataFrame sorted by
+        descending silhouette score.
+
+        Notes
+        -----
+        This method does not tune clusters directly. It evaluates whether UMAP
+        parameter settings preserve useful structure in the reduced embedding
+        space, using research-question labels as a practical proxy.
+
+        Each parameter combination is reduced with `update_attributes=False`, so
+        temporary projections do not overwrite the class's stored reduced
+        embeddings.
+
+        The search is run across the full insight set, not separately within
+        each research question.
         """
         results = []
         param_grid = list(itertools.product(n_neighbors_list, min_dist_list, n_components_list, metric_list))
@@ -3540,46 +3780,52 @@ class Clustering:
     @staticmethod
     def cluster(embedding_matrix, min_cluster_size: int = 5, metric: str = "euclidean", cluster_selection_method: str = "eom", min_samples = None):
         """
-        Perform density-based clustering using HDBSCAN.
+        Cluster embeddings using HDBSCAN.
 
-        This method applies HDBSCAN to a matrix of embedding vectors to identify
-        clusters of similar points based on local density. Clustering is performed
-        independently for each input matrix and does not assume any global structure.
+        Applies HDBSCAN to an embedding matrix and returns both hard cluster
+        assignments and soft membership probabilities.
 
         Parameters
         ----------
         embedding_matrix : np.ndarray
-            Matrix of embedding vectors to be clustered. Each row represents an observation.
+            Matrix of embeddings to cluster. Each row represents a single
+            observation.
 
         min_cluster_size : int, default=5
-            Minimum number of points required to form a cluster. Controls the smallest
-            allowable cluster size.
+            Minimum number of observations required to form a cluster.
 
         metric : str, default="euclidean"
-            Distance metric used to compute pairwise distances between points.
+            Distance metric used by HDBSCAN.
 
         cluster_selection_method : str, default="eom"
-            Method used by HDBSCAN to extract flat clusters from the hierarchy.
-            "eom" (excess of mass) is required when using `max_cluster_size`.
+            Method used to extract flat clusters from the HDBSCAN hierarchy.
 
         min_samples : int or None, default=None
-            Controls how conservative the clustering is with respect to noise.
-            Higher values result in more points being labeled as outliers.
-            If None, defaults internally to `min_cluster_size`.
-
-        max_cluster_size : int or None, default=None
-            Upper bound on cluster size. Ensures that no cluster exceeds a specified size,
-            which is useful for downstream constraints (e.g., context window limits).
+            Controls how conservatively points are assigned to clusters. Higher
+            values generally produce more noise points (`-1`). If None, HDBSCAN
+            uses its default behavior.
 
         Returns
         -------
-        tuple
-            cluster_labels : np.ndarray
-                Cluster assignment for each observation. Outliers are labeled as -1.
+        tuple[np.ndarray, np.ndarray]
+            A tuple containing:
 
-            cluster_probs : np.ndarray
-                Soft clustering probabilities indicating the strength of membership
-                for each point in its assigned cluster.
+            - `cluster_labels`: cluster assignment for each observation.
+            Noise points are labeled `-1`.
+            - `cluster_probs`: membership probabilities returned by HDBSCAN.
+
+        Notes
+        -----
+        This method performs clustering only. It does not update class
+        attributes or modify the CorpusState.
+
+        Cluster labels are generated independently for the supplied embedding
+        matrix and are not guaranteed to be stable across different clustering
+        runs or parameter settings.
+
+        Membership probabilities indicate the strength of assignment of each
+        point to its cluster and can be useful when evaluating cluster quality
+        or identifying ambiguous assignments.
         """
         clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
@@ -3596,38 +3842,45 @@ class Clustering:
     @staticmethod
     def calc_davies_bouldain_score(embeddings_matrix, cluster_labels):
         """
-        Compute the Davies–Bouldin score for a clustering configuration.
+        Compute the Davies–Bouldin score for a clustering result.
 
-        The Davies-Bouldin index measures cluster compactness and separation.
-        Lower values indicate better-defined clusters.
-
-        Outliers (points labeled -1) are excluded from the calculation, as they
-        do not belong to any cluster.
+        Evaluates cluster compactness and separation using the Davies–Bouldin
+        index. Lower scores indicate tighter, better-separated clusters.
 
         Parameters
         ----------
         embeddings_matrix : np.ndarray
-            Matrix of embedding vectors used for clustering.
+            Embedding matrix used for clustering. Each row represents a single
+            observation.
 
         cluster_labels : np.ndarray
-            Cluster assignments produced by the clustering algorithm.
+            Cluster assignments for each observation. Noise points should be
+            labeled `-1`.
 
         Returns
         -------
-        tuple
-            db_score : float or pd.NA
-                Davies-Bouldin score computed on clustered points only.
-                Returns NA if fewer than two clusters are present.
+        tuple[float, int]
+            A tuple containing:
 
-            num_outliers : int
-                Number of points labeled as outliers (-1).
+            - `db_score`: Davies–Bouldin score computed on clustered points
+            only. Returns `np.nan` when fewer than two clusters remain after
+            removing noise points.
+            - `num_outliers`: Number of observations labeled as noise (`-1`).
 
         Notes
         -----
-        This metric is used as a diagnostic signal during parameter tuning.
-        Because HDBSCAN can produce non-convex clusters, the Davies–Bouldin
-        score should be interpreted as a heuristic rather than a definitive
-        measure of clustering quality.
+        Noise points are excluded before calculating the score because they do
+        not belong to any cluster.
+
+        If fewer than two clusters remain after removing noise points, the score
+        is undefined and `np.nan` is returned.
+
+        This metric is primarily used as a clustering diagnostic and parameter
+        tuning signal.
+
+        Because HDBSCAN can generate non-convex and variable-density clusters,
+        the Davies–Bouldin score should be interpreted as a heuristic rather
+        than a definitive measure of clustering quality.
         """
         mask = cluster_labels != -1
         num_outliers = np.sum(~mask)
@@ -3642,27 +3895,47 @@ class Clustering:
 
     def _estimate_max_cluster_sizes(self, context_window_constraint, hdbscan_cluster_size_cap):
         """
-        Estimate maximum allowable cluster sizes for each research question.
+        Estimate per-question cluster size limits for downstream processing.
 
-        This method computes a per-question upper bound on cluster size based on
-        a context window constraint. The goal is to ensure that the total text
-        associated with a cluster can fit within a downstream processing limit
-        (e.g., LLM context window).
-
-        The estimate is derived by:
-        1. Computing the average length of insights (in words) for each question.
-        2. Estimating how many such insights can fit within the context window.
-        3. Applying a conservative scaling factor to avoid overflow.
+        Calculates a maximum cluster size for each research question based on
+        the average length of its insights and a downstream context-window
+        constraint. The resulting limits are intended to keep clusters small
+        enough to fit within later LLM-based synthesis stages.
 
         Parameters
         ----------
-        context_window_constraint : int, default=90000
-            Maximum number of tokens (or words) that can be processed downstream.
+        context_window_constraint : int
+            Approximate maximum context size available for downstream processing.
+
+        hdbscan_cluster_size_cap : int
+            Hard upper bound on cluster size. Estimated limits will never exceed
+            this value.
 
         Returns
         -------
-        dict
-            Mapping from `question_id` to estimated maximum cluster size (int).
+        dict[str, int]
+            Mapping from `question_id` to estimated maximum cluster size.
+
+        Notes
+        -----
+        The estimate is based on the average insight length for each research
+        question.
+
+        For each question:
+
+        1. Average insight length is calculated in words.
+        2. The number of insights that could fit within the context window is
+        estimated.
+        3. A conservative scaling factor of 1.5 is applied to reduce the risk of
+        exceeding the downstream context limit.
+        4. The estimate is capped by `hdbscan_cluster_size_cap`.
+
+        The resulting values are heuristics rather than strict guarantees
+        because downstream token counts depend on prompt structure, formatting,
+        citation metadata, and model tokenization behavior.
+
+        Only insights with non-missing `insight` text are included in the
+        calculation.
         """
         # Get a clean set of insights
         valid_insights = self.valid_embeddings_df[self.valid_embeddings_df["insight"].notna()]
@@ -3696,33 +3969,37 @@ class Clustering:
         ) -> None:
 
         """
-        Perform grid search over HDBSCAN clustering parameters.
+        Tune HDBSCAN parameters separately for each research question.
 
-        This method evaluates combinations of clustering parameters independently
-        for each research question. For each configuration, clustering is performed
-        and evaluated using:
-
-        - Davies–Bouldin score (cluster quality)
-        - Number and fraction of outliers (coverage)
-
-        Parameter combinations are generated using a grid over:
-        - `min_cluster_size`
-        - distance metric
-        - `min_samples`, derived as a proportion of `min_cluster_size`
-
-        Invalid configurations are filtered out, and results are ranked for
-        human inspection.
+        Runs a grid search over HDBSCAN parameter combinations for each
+        research-question-specific embedding subset. Each configuration is
+        evaluated using clustering diagnostics and downstream summarization-size
+        constraints.
 
         Parameters
         ----------
         min_cluster_sizes : list[int], default=[5, 10, 15, 20]
-            Candidate values for the HDBSCAN `min_cluster_size` parameter.
+            Candidate HDBSCAN `min_cluster_size` values.
 
         metrics : list[str], default=["euclidean", "manhattan"]
             Distance metrics to evaluate.
 
         min_sample_ratios : list[float], default=[0.5, 0.25, 0.1, 0.05]
-            Ratios used to derive `min_samples` as a proportion of `min_cluster_size`.
+            Ratios used to derive `min_samples` from `min_cluster_size`.
+
+        cluster_selection_method : list[str], default=["eom", "leaf"]
+            HDBSCAN cluster selection methods to evaluate.
+
+        context_window_constraint : int, default=90000
+            Approximate downstream context limit used to estimate maximum
+            feasible cluster sizes per research question.
+
+        hdbscan_cluster_size_cap : int, default=1000
+            Hard cap applied when estimating maximum HDBSCAN cluster sizes.
+
+        outlier_cluster_size_cap : int, default=300
+            Maximum number of outlier insights to include in a single downstream
+            outlier-summary group.
 
         Returns
         -------
@@ -3730,21 +4007,38 @@ class Clustering:
 
         Side Effects
         ------------
-        Results are stored in `self.hdbscan_tuning_results` as a DataFrame containing:
-        - parameter combinations
-        - clustering metrics
-        - outlier statistics
+        Populates `self.hdbscan_tuning_results` with a DataFrame of valid tuning
+        results sorted by:
+
+        1. `question_id`
+        2. lower `outlier_fraction`
+        3. lower `db_score`
 
         Notes
         -----
-        - Clustering is performed independently per research question.
-        - Configurations where the number of outliers exceeds the allowed
-        maximum cluster size are discarded.
-        - Results are sorted to prioritize:
-            1. Lower outlier fraction
-            2. Lower Davies–Bouldin score
-        - This method is intended for human-in-the-loop parameter selection,
-        not automated optimization.    
+        Clustering is performed independently within each research question using
+        the reduced embeddings stored in `self.rq_valid_embeddings_dfs`.
+
+        For each parameter combination, the method records:
+
+        - Davies–Bouldin score
+        - number of outliers
+        - outlier fraction
+        - estimated maximum HDBSCAN cluster size
+        - estimated number of HDBSCAN clusters
+        - estimated number of outlier groups
+        - total number of downstream clusters to summarize
+
+        `min_samples` is derived from `min_cluster_size * min_sample_ratio`,
+        rounded to an integer, and only configurations with
+        `2 <= min_samples <= min_cluster_size` are retained.
+
+        Rows with undefined Davies–Bouldin scores are dropped before results are
+        stored.
+
+        This method is intended for human-in-the-loop parameter selection rather
+        than automatic optimization. The diagnostics balance cluster compactness,
+        outlier coverage, and downstream summarization feasibility.
         """
         
         #Calculate the max cluster sizes
@@ -3814,89 +4108,86 @@ class Clustering:
     @staticmethod
     def density_seeded_partition(X: np.ndarray, K: int):
         """
-        Partition embeddings into bounded groups using density-guided seed selection
-        and balanced assignment.
+        Partition embeddings into size-bounded, spatially coherent groups.
 
-        This function performs a two-phase constrained partitioning:
-
-        1. Seed selection (density-guided, destructive):
-        - Iteratively identifies high-density points using HDBSCAN.
-        - For each selected seed, removes its K nearest neighbors from consideration.
-        - Ensures seeds are distributed across dense regions of the embedding space.
-
-        2. Assignment (balanced, capacity-constrained):
-        - All points are restored.
-        - Points are assigned to seeds iteratively in a round-robin fashion.
-        - Each seed grows outward by repeatedly claiming its nearest unassigned point.
-        - Ensures no cluster exceeds size K and no point is assigned more than once.
+        Creates a constrained partition of an embedding matrix so that every
+        point is assigned to exactly one group and no group exceeds size `K`.
+        The method uses density-guided seed selection followed by balanced
+        nearest-neighbor assignment.
 
         Parameters
         ----------
         X : np.ndarray
-            Embedding matrix of shape (n_points, n_features).
+            Embedding matrix of shape `(n_points, n_features)`.
 
         K : int
-            Maximum cluster size. All output clusters will have size ≤ K.
+            Maximum number of points allowed in each output group.
 
         Returns
         -------
-        labels : np.ndarray
-            Array of shape (n_points,) assigning each point to a cluster index.
+        tuple[np.ndarray, list[int]]
+            A tuple containing:
 
-        seeds : list[int]
-            Indices of selected seed points in the original dataset.
+            - `labels`: array assigning each input point to a partition ID.
+            - `seeds`: original row indices selected as partition seeds.
 
         Notes
         -----
-        - This is not a standard clustering algorithm; it is a constrained partitioning method.
-        - Guarantees:
-            * Full coverage (all points assigned)
-            * No overlap (each point assigned exactly once)
-            * Hard size constraint (cluster size ≤ K)
-        - HDBSCAN is used only to guide seed placement, not for final clustering.
-        - Resulting clusters are approximately balanced and spatially coherent, but
-        do not optimize a global clustering objective.
+        This is a constrained partitioning method, not a standard clustering
+        algorithm.
+
+        HDBSCAN is used only during seed selection to identify dense regions
+        of the embedding space. Final assignments are produced by a
+        capacity-constrained nearest-neighbor procedure.
+
+        The method is designed for downstream summarization constraints where
+        large clusters or outlier groups must be broken into bounded groups
+        that can fit within LLM context limits.
+
+        The intended guarantees are:
+
+        - every point is assigned
+        - each point is assigned once
+        - no group exceeds size `K`
+
+        The resulting groups are approximately spatially coherent but do not
+        optimize a global clustering objective.
         """
 
         # ----- COMPONENT FUNCTIONS START -----
 
         def select_seeds_with_density(X: np.ndarray, n_seeds: int):
-
             """
-            Select seed points using iterative density-based extraction.
+            Select spatially distributed seed points using density estimates.
 
-            This function identifies seed points by repeatedly:
-            1. Running HDBSCAN on the remaining (unassigned) points.
-            2. Selecting the point with the highest density score (cluster membership probability).
-            3. Removing the K nearest points to that seed from further consideration.
-
-            This produces a set of seeds that are:
-            - Located in high-density regions
-            - Distributed across the embedding space
-            - Representative of underlying data structure
+            Repeatedly runs HDBSCAN on the remaining candidate points,
+            selects the point with the highest membership probability as a
+            seed, and removes that seed's `K` nearest neighbors from
+            subsequent seed selection.
 
             Parameters
             ----------
             X : np.ndarray
-                Embedding matrix of shape (n_points, n_features).
+                Embedding matrix of shape `(n_points, n_features)`.
 
             n_seeds : int
-                Number of seeds to select. Typically ceil(n_points / K).
+                Number of seed points to select.
 
             Returns
             -------
-            seeds : list[int]
-                Indices of selected seed points in the original dataset.
+            list[int]
+                Original row indices of selected seed points.
 
             Notes
             -----
-            - Removal of K nearest points after each seed enforces spatial separation
-            between seeds and prevents over-representation of dense regions.
-            - Density is estimated using HDBSCAN probabilities.
-            - This step modifies the effective data distribution to encourage coverage.
-            
-            """
+            Seed selection is density-guided and destructive. After each seed
+            is chosen, nearby points are removed from the candidate pool. This
+            reduces seed concentration in dense regions and encourages
+            coverage across the embedding space.
 
+            HDBSCAN probabilities are used only as density proxies for seed
+            placement. They are not used to assign the final partitions.
+            """
             remaining_idx = np.arange(len(X))
             seeds = []
 
@@ -3929,40 +4220,43 @@ class Clustering:
 
         def assign_points_balanced(X, seed_indices, K):
             """
-            Assign points to seeds using balanced, capacity-constrained growth.
+            Assign points to seeds with balanced, capacity-limited growth.
 
-            This function assigns each point to a seed cluster by:
-            - Precomputing distances from all points to all seeds
-            - Iteratively assigning points in a round-robin fashion:
-                * Each seed claims its nearest unassigned point
-                * Cluster growth alternates across seeds
-            - Enforcing a hard maximum cluster size (K)
+            Precomputes distances from every point to every seed, then grows
+            seed groups in round-robin order. Each seed repeatedly claims its
+            nearest unassigned point until all points are assigned or the seed
+            reaches capacity.
 
             Parameters
             ----------
             X : np.ndarray
-                Embedding matrix of shape (n_points, n_features).
+                Embedding matrix of shape `(n_points, n_features)`.
 
             seed_indices : list[int]
-                Indices of seed points selected during the seed selection phase.
+                Original row indices of the selected seed points.
 
             K : int
-                Maximum cluster size.
+                Maximum number of points allowed in each assigned group.
 
             Returns
             -------
-            assigned : np.ndarray
-                Array of shape (n_points,) containing cluster assignments.
+            np.ndarray
+                Array of shape `(n_points,)` containing the assigned group
+                label for each input point.
 
             Notes
             -----
-            - Ensures:
-                * Each point is assigned exactly once
-                * No cluster exceeds size K
-            - Unlike KMeans, assignment is not global; clusters grow incrementally.
-            - This avoids cluster imbalance and prevents dense regions from dominating.
-            - Resulting clusters are approximately equal in size (±1 point).
-            
+            Each point is assigned exactly once.
+
+            No assigned group exceeds size `K`.
+
+            Assignment is local and iterative rather than globally optimized.
+            Unlike KMeans, this method does not recompute centroids or
+            minimize a global within-cluster objective.
+
+            Because groups grow in round-robin order with a shared capacity
+            limit, the resulting partitions are approximately balanced while
+            remaining tied to local distance from seed points.
             """
             n = len(X)
             assigned = np.full(n, -1, dtype=int)
@@ -4014,84 +4308,81 @@ class Clustering:
                           hdbscan_cluster_size_cap: int = 1000, 
                           outlier_cluster_size_cap: int = 300) -> pd.DataFrame:
         """
-        Assign clusters to insights using HDBSCAN with post-processing size constraints.
+        Generate final cluster assignments for insights.
 
-        Clustering is performed independently for each research question using
-        HDBSCAN with the specified parameters. HDBSCAN is used purely for
-        structure discovery and is not constrained by cluster size during fitting.
-
-        After initial clustering, all resulting groups—both HDBSCAN clusters
-        (label ≥ 0) and outlier groups (label = -1)—are evaluated against size
-        constraints. Any group exceeding its allowable size is partitioned using
-        a custom density-seeded partitioning algorithm.
-
-        Partitioning algorithm
-        ----------------------
-        For any group exceeding its size cap:
-
-        1. Select seed points in dense regions using HDBSCAN.
-        2. Remove K-nearest neighborhoods around each seed to ensure coverage.
-        3. Restore all points and assign them to seeds using balanced,
-        round-robin nearest-neighbor growth.
-        4. Produce subclusters that satisfy strict size constraints.
-
-        Core clusters and outliers are treated uniformly during this step, but
-        with different size caps:
-            - Core clusters (label ≥ 0) use `max_cluster_size_by_rq`
-            - Outlier-derived clusters (label < 0) use `outlier_cluster_size_cap`
-
-        Labeling scheme
-        ---------------
-        - HDBSCAN clusters are assigned positive integer labels.
-        - Outlier-derived clusters are assigned negative integer labels.
-        - All newly created clusters are assigned globally unique labels using
-        running counters to avoid collisions across research questions.
+        Clusters reduced insight embeddings independently within each research
+        question, post-processes oversized groups into bounded partitions, merges
+        the resulting cluster labels back into `corpus_state.insights`, and saves
+        the clustered state.
 
         Parameters
         ----------
         clustering_param_dict : dict
-            Dictionary mapping `question_id` to HDBSCAN parameter dictionaries.
-            Each entry should include:
-                - min_cluster_size : int
-                - metric : str
-                - cluster_selection_method : str ("eom" or "leaf")
-                - min_samples : int
+            Mapping from `question_id` to HDBSCAN parameter dictionaries. Each
+            parameter dictionary should contain:
+
+            - `min_cluster_size`
+            - `metric`
+            - `cluster_selection_method`
+            - `min_samples`
 
         context_window_constraint : int, default=90000
-            Constraint used to estimate the maximum allowable cluster size for
-            core clusters, based on downstream LLM context limits.
+            Approximate downstream context limit used to estimate maximum
+            allowable core-cluster sizes.
 
         hdbscan_cluster_size_cap : int, default=1000
-            Upper bound used when deriving maximum cluster sizes for core clusters.
-            This does not constrain HDBSCAN directly, but influences post-processing.
+            Hard upper bound applied when estimating maximum core-cluster size.
 
         outlier_cluster_size_cap : int, default=300
-            Maximum allowed size for outlier-derived clusters during partitioning.
+            Maximum allowed size for outlier-derived groups.
 
         Returns
         -------
         pd.DataFrame
-            Updated insights table containing:
-                - cluster labels (globally unique)
-                - cluster probabilities
-                - embedding vectors
+            Updated `corpus_state.insights` DataFrame containing cluster labels,
+            cluster probabilities, full embeddings, and reduced embeddings.
+
+        Side Effects
+        ------------
+        Mutates `self.corpus_state.insights` by replacing any existing cluster
+        and embedding columns with newly generated clustering results.
+
+        Saves the updated CorpusState to:
+
+            {config.STATE_SAVE_LOCATION}/09_clusters
 
         Notes
         -----
-        - Clustering is performed independently per research question.
-        - HDBSCAN is used only for structure discovery and is not constrained
-        by cluster size during fitting.
-        - All clusters are post-processed to ensure:
-            * Full coverage (all points assigned)
-            * No overlap (each point assigned exactly once)
-            * Hard size constraint (cluster size ≤ cap)
-        - Cluster probabilities from HDBSCAN are preserved; partitioned clusters
-        are assigned a default probability of 1.0.
-        - Outlier reassignment relies on positional alignment: embeddings are
-        extracted in order, processed, and reassigned in the same order.
-        - Final cluster labels are globally unique across all research questions.
-        - The updated clustering replaces any previous clustering results in
-        `corpus_state.insights`.
+        HDBSCAN is run separately for each research question using the reduced
+        embeddings in `self.rq_valid_embeddings_dfs`.
+
+        If parameters are not supplied for every research question, the user is
+        prompted to either use default HDBSCAN parameters for missing questions
+        or abort.
+
+        Initial HDBSCAN labels are used for structure discovery. Oversized
+        clusters are then split using `density_seeded_partition()` so downstream
+        summarization groups remain within practical size limits.
+
+        Core HDBSCAN clusters use per-question size caps estimated from
+        `context_window_constraint` and `hdbscan_cluster_size_cap`.
+
+        Outlier groups use `outlier_cluster_size_cap`.
+
+        Cluster labels are globally unique across research questions:
+
+        - positive labels are used for core clusters
+        - negative labels are used for outlier-derived groups
+
+        Partitioned groups are assigned `cluster_prob = 1.0`. Unpartitioned
+        HDBSCAN groups retain their original HDBSCAN membership probabilities.
+
+        The final merge back into `corpus_state.insights` is performed on:
+
+        - `question_id`
+        - `paper_id`
+        - `chunk_id`
+        - `insight_id`
         """
         # Get research questions
         rqs = self.valid_embeddings_df["question_id"].unique()
