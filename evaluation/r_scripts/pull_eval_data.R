@@ -1,9 +1,11 @@
 # Load packages
-library(googlesheets4)
 library(dplyr)
 library(ggplot2)
+library(googlesheets4)
 library(gt)
+library(knitr)
 library(rlang)
+library(tibble)
 
 # Set sheet id
 sheet_id <- "1Qj9Rp-31E_ZPrXYSxIWbl8wF1NMRkbFlez2LP-suaJM"

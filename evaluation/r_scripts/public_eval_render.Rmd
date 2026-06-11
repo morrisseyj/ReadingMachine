@@ -14,8 +14,13 @@ knitr::opts_chunk$set(
   message = FALSE
 )
 
-library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(googlesheets4)
 library(gt)
+library(knitr)
+library(rlang)
+library(tibble)
 
 source("evaluation/r_scripts/pull_eval_data.R")
 source("evaluation/r_scripts/eval_helpers.R")
