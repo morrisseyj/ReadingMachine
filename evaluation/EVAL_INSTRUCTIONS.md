@@ -8,6 +8,9 @@ This evaluation assesses the epistemic fidelity of ReadingMachine’s structured
 
 **The form for completing the evaluation can be found [here](https://forms.gle/z3Mxpu8mFnj6xoRp8)**
 
+**The result of existing evaluations can be found [here](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/eval_output/public_eval.md)**
+
+
 Specifically, reviewers are asked to evaluate whether the ReadingMachine output provides a faithful, coherent, and usable mapping of the arguments, themes, and disagreements present in the corpus it was given.
 
 The evaluation is not intended to judge the output as:
