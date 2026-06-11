@@ -23,7 +23,13 @@ jobs:
 
       - name: Install R packages
         run: |
-          Rscript evaluation/r_scripts/package_installer.R
+          Rscript -e "install.packages(c('dplyr','ggplot2','googlesheets4','knitr','rmarkdown','rlang','tibble'), repos='https://cloud.r-project.org')"
+
+      - name: Verify packages
+        run: |
+          Rscript -e "library(rmarkdown)"
+          Rscript -e "library(dplyr)"
+          Rscript -e "library(googlesheets4)"
 
       - name: Write Google service account JSON
         shell: bash
