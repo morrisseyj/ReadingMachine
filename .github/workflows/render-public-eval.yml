@@ -61,6 +61,15 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
           git add evaluation/eval_output
-          git commit -m "Update public evaluation report" || echo "No changes to commit"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Update public evaluation report"
+
+          git pull --rebase origin main
           git push
