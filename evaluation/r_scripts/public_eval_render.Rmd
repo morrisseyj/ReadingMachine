@@ -1,0 +1,345 @@
+---
+title: "ReadingMachine Public Evaluation"
+author: "James Morrissey"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE,
+  message = FALSE
+)
+
+library(tidyverse)
+library(gt)
+
+source("pull_eval_data.R")
+source("eval_helpers.R")
+
+```
+
+# ReadingMachine Evaluation Archive
+
+## About this evaluation
+
+This archive contains public reviews of the ReadingMachine industrial policy corpus synthesis.
+
+The [purpose of the evaluation](https://github.com/morrisseyj/ReadingMachine/blob/main/evaluation/EVAL_INSTRUCTIONS.md) is to assess whether ReadingMachine achieves its stated design goals, including coverage of major themes, alignment with research questions, thematic coherence, preservation of disagreement, avoidance of hallucination, citation plausibility, downstream usefulness, and overall epistemic fidelity.
+
+Reviews are published openly. Personal contact information is never released. Reviewers may choose whether their comments are attributed by name, affiliation, or anonymously.
+
+This evaluation process is experimental and intended to contribute to the development of a more formal benchmark for structured corpus reading.
+
+# Evaluation Summary
+
+```{r total-reviews, results='asis'}
+cat(
+  paste0(
+    nrow(anonymized_responses),
+    " reviews have been submitted.\n"
+  )
+)
+```
+
+## Reviewer Familiarity
+
+```{r reviewer-familiarity}
+anonymized_responses %>%
+  count(`Familiarity with the literature`) %>%
+  gt()
+```
+
+## Reviewer Roles
+
+```{r reviewer-roles}
+anonymized_responses %>%
+  count(Role, sort = TRUE) %>%
+  gt()
+```
+
+## Reviewer Affiliations
+
+```{r reviewer-affiliations}
+anonymized_responses %>%
+  count(Affiliation, sort = TRUE) %>%
+  gt()
+```
+
+# Detailed Evaluation
+
+## 1. Presence of Major Themes
+
+```{r presence-major-themes}
+theme_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "1. 1. Presence of major themes",
+  comment_var = "Please identify which themes are missing and in the corpus",
+  possible_evals = c(
+    "Clearly covers major themes",
+    "Covers most major themes",
+    "Misses one or more major themes",
+    "Misses several major themes", 
+    "Not assessed"
+  ),
+  top_eval = "Clearly covers major themes"
+)
+
+theme_results$plot
+```
+
+### Reviewer Comments on Missing Themes (only populated if missing themes identified)
+
+```{r presence-major-themes-comments}
+theme_results$issues
+```
+
+---
+
+## 2. Alignment with Research Questions
+
+```{r alignment-research-questions}
+alignment_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "Alignment with the stated research questions",
+  comment_var = "Please describe where you saw the lack of alignment",
+  possible_evals = c(
+    "Very relevant",
+    "Mostly relevant",
+    "Partially relevant",
+    "Weakly relevant", 
+    "Not assessed"
+  ),
+  top_eval = "Very relevant"
+)
+
+alignment_results$plot
+```
+
+### Reviewer Comments on Alignment Issues (only populated if alignment issues identified)
+
+```{r alignment-research-questions-comments}
+alignment_results$issues
+```
+
+---
+
+## 3. Internal Coherence of Themes
+
+```{r internal-coherence}
+coherence_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "2.1. Internal coherence of themes",
+  comment_var = "Please describe where themes were incoherent and why",
+  possible_evals = c(
+    "Consistently coherent",
+    "Mostly coherent, some strain",
+    "Several themes unstable or mixed",
+    "Conceptual coherence is weak", 
+    "Not assessed"
+  ),
+  top_eval = "Consistently coherent"
+)
+
+coherence_results$plot
+```
+
+### Reviewer Comments on Theme Coherence (only populated if issues with theme coherence identified)
+
+```{r internal-coherence-comments}
+coherence_results$issues
+```
+
+---
+
+## 4. Distortion or Flattening of Debates
+
+```{r debate-distortion}
+distortion_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "2.2. Distortion or flattening of debates",
+  comment_var = "Which debates were flattened or distorted and how?",
+  possible_evals = c(
+    "No obvious distortions",
+    "Minor distortions",
+    "One or two significant distortions",
+    "Widespread distortion",
+    "Not assessed"
+  ),
+  top_eval = "No obvious distortions"
+)
+
+distortion_results$plot
+```
+
+### Reviewer Comments on Distorted Debates (only populated if distortions were identified)
+
+```{r debate-distortion-comments}
+distortion_results$issues
+```
+
+---
+
+## 5. Hallucinations
+
+```{r hallucinations}
+hallucination_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "3.1. Obvious hallucinations",
+  comment_var = "Please describe the hallucinations (non-exhaustive if many)",
+  possible_evals = c(
+    "No",
+    "Possibly (uncertain)",
+    "Yes — minor",
+    "Yes — serious",
+    "Not assessed"
+  ),
+  top_eval = "No"
+)
+
+hallucination_results$plot
+```
+
+### Reviewer Reports of Hallucinations (only populated if hallucinations were identified)
+
+```{r hallucinations-comments}
+hallucination_results$issues
+```
+
+---
+
+## 6. Citation / Attribution Plausibility
+
+```{r citation-plausibility}
+citation_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "3.2. Citation / attribution plausibility",
+  comment_var = "Please describe which citations have been misattributed (non exhaustive if many).",
+  possible_evals = c(
+    "Plausible throughout",
+    "Mostly plausible",
+    "Multiple questionable attributions",
+    "Systematic citation problems",
+    "Not assessed"
+  ),
+  top_eval = "Plausible throughout"
+)
+
+citation_results$plot
+```
+
+### Reviewer Comments on Citation Issues (only populated if citation issues were identified)
+
+```{r citation-plausibility-comments}
+citation_results$issues
+```
+
+---
+
+## 7. Representation of Disagreement
+
+```{r disagreement}
+disagreement_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "4.1. Representation of disagreement",
+  comment_var = "Please describe where disagreement/conflict in the corpus has been smoothed over.",
+  possible_evals = c(
+    "Disagreement clearly surfaced",
+    "Some disagreement surfaced",
+    "Disagreement mostly flattened",
+    "Disagreement misrepresented",
+    "Not assessed"
+  ),
+  top_eval = "Disagreement clearly surfaced"
+)
+
+disagreement_results$plot
+```
+
+### Reviewer Comments on Disagreement Preservation (only populated if failure to presrve disagreement was identified)
+
+```{r disagreement-comments}
+disagreement_results$issues
+```
+
+---
+
+## 8. Suitability for Downstream Reasoning
+
+```{r downstream-reasoning}
+reasoning_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "5.1. Suitability as a basis for downstream reasoning",
+  comment_var = "Please describe the specific failings or limitations of the document as a usable output for downstream reasoning.",
+  possible_evals = c(
+    "Clearly usable",
+    "Usable with caveats",
+    "Limited usefulness",
+    "Not suitable",
+    "Not assessed"
+  ),
+  top_eval = "Clearly usable"
+)
+
+reasoning_results$plot
+```
+
+### Reviewer Comments on Downstream Use (only populated if limitations on downstream usefulness was identified)
+
+```{r downstream-reasoning-comments}
+reasoning_results$issues
+```
+
+---
+
+## 9. Overall Epistemic Fidelity
+
+```{r epistemic-fidelity}
+fidelity_results <- plot_eval(
+  data = anonymized_responses,
+  eval_var = "6.1. Overall epistemic fidelity",
+  comment_var = "Please elaborate on your choice",
+  possible_evals = c(
+    "High fidelity",
+    "Generally strong",
+    "Mixed",
+    "Weak",
+    "Not assessed"
+  ),
+  top_eval = "High fidelity"
+)
+
+fidelity_results$plot
+```
+
+### Reviewer Comments on Epistemic Fidelity (only populated if issues with epistemic fidelity were identified)
+
+```{r epistemic-fidelity-comments}
+fidelity_results$issues
+```
+
+---
+
+# Additional Comments
+
+```{r additional-comments}
+anonymized_responses %>%
+  select(
+    Reviewer = author_id,
+    Comment = `7.1. Additional comments`
+  ) %>%
+  filter(
+    !is.na(Comment),
+    trimws(Comment) != ""
+  ) %>%
+  gt()
+```
+
+# Data Access
+
+The anonymized evaluation dataset used to generate this report is available in this repository.
+
+All quantitative ratings and qualitative comments are preserved to support transparency, independent inspection, and future benchmark development.

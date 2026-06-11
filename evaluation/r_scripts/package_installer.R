@@ -1,0 +1,1 @@
+install.packages(c("googlesheets4", "dplyr", "readr", "rmarkdown"))
