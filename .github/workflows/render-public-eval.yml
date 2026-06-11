@@ -33,6 +33,7 @@ jobs:
             any::rmarkdown
             any::rlang
             any::tibble
+            any::gt
 
       - name: Verify packages
         run: |
