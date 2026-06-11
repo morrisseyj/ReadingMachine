@@ -22,9 +22,8 @@ library(knitr)
 library(rlang)
 library(tibble)
 
-source("evaluation/r_scripts/pull_eval_data.R")
-source("evaluation/r_scripts/eval_helpers.R")
-
+source("pull_eval_data.R")
+source("eval_helpers.R")
 ```
 
 # ReadingMachine Evaluation Archive
