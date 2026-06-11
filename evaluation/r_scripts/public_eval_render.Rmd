@@ -14,7 +14,6 @@ knitr::opts_chunk$set(
   echo = FALSE,
   warning = FALSE,
   message = FALSE,
-  fig.path = "figures/"
 )
 
 library(dplyr)
