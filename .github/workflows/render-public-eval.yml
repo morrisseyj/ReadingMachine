@@ -27,10 +27,16 @@ jobs:
         run: |
           printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > evaluation/r_scripts/google_sheets_service_account.json
 
-      - name: Render public evaluation report
-        working-directory: evaluation/r_scripts
+      - name: Debug files
         run: |
-          Rscript render_report.R
+          pwd
+          ls -la
+          ls -la evaluation
+          ls -la evaluation/r_scripts
+
+      - name: Render public evaluation report
+        run: |
+          Rscript evaluation/r_scripts/render_report.R
 
       - name: Commit updated evaluation outputs
         run: |
