@@ -52,7 +52,7 @@ reading.
 
 ## 1. Presence of Major Themes
 
-![](figures/presence-major-themes-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/presence-major-themes-1.png)<!-- -->
 
 ### Reviewer Comments on Missing Themes (only populated if missing themes identified)
 
@@ -63,7 +63,7 @@ reading.
 
 ## 2. Alignment with Research Questions
 
-![](figures/alignment-research-questions-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/alignment-research-questions-1.png)<!-- -->
 
 ### Reviewer Comments on Alignment Issues (only populated if alignment issues identified)
 
@@ -75,7 +75,7 @@ reading.
 
 ## 3. Internal Coherence of Themes
 
-![](figures/internal-coherence-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/internal-coherence-1.png)<!-- -->
 
 ### Reviewer Comments on Theme Coherence (only populated if issues with theme coherence identified)
 
@@ -86,7 +86,7 @@ reading.
 
 ## 4. Distortion or Flattening of Debates
 
-![](figures/debate-distortion-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/debate-distortion-1.png)<!-- -->
 
 ### Reviewer Comments on Distorted Debates (only populated if distortions were identified)
 
@@ -98,7 +98,7 @@ reading.
 
 ## 5. Hallucinations
 
-![](figures/hallucinations-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/hallucinations-1.png)<!-- -->
 
 ### Reviewer Reports of Hallucinations (only populated if hallucinations were identified)
 
@@ -109,7 +109,7 @@ reading.
 
 ## 6. Citation / Attribution Plausibility
 
-![](figures/citation-plausibility-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/citation-plausibility-1.png)<!-- -->
 
 ### Reviewer Comments on Citation Issues (only populated if citation issues were identified)
 
@@ -120,7 +120,7 @@ reading.
 
 ## 7. Representation of Disagreement
 
-![](figures/disagreement-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/disagreement-1.png)<!-- -->
 
 ### Reviewer Comments on Disagreement Preservation (only populated if failure to presrve disagreement was identified)
 
@@ -131,7 +131,7 @@ reading.
 
 ## 8. Suitability for Downstream Reasoning
 
-![](figures/downstream-reasoning-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/downstream-reasoning-1.png)<!-- -->
 
 ### Reviewer Comments on Downstream Use (only populated if limitations on downstream usefulness was identified)
 
@@ -142,7 +142,7 @@ reading.
 
 ## 9. Overall Epistemic Fidelity
 
-![](figures/epistemic-fidelity-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/epistemic-fidelity-1.png)<!-- -->
 
 ### Reviewer Comments on Epistemic Fidelity (only populated if issues with epistemic fidelity were identified)
 
