@@ -56,7 +56,7 @@ This is an open, non‑anonymous review process.
 When submitting a review, you will be asked to provide:
 
 - your name
-- your email address - This will not be public but may be used to verify your review, prevent duplicate reviews and allow clarrification if needed.-
+- your email address - This will not be public but may be used to verify your review, prevent duplicate reviews and allow clarification if needed.-
 - your affiliation or role
 - your primary domain(s) of expertise
 - your self‑assessed familiarity with the relevant literature
@@ -158,8 +158,9 @@ For each evaluation question, we report:
 - how many reviewers assessed that dimension
 - the distribution of responses
 - the number of reviewers who marked “Not assessed”
+- qualitative comments associated with non-top ratings
 
-Selected attributed comments may be quoted to illustrate recurring strengths or concerns.
+An anonymized version of the review dataset, including quantitative ratings and qualitative comments, will be published in the public evaluation archive. Personal contact information will not be released. Reviewer identity will be displayed according to the attribution option selected by the reviewer.
 
 Evaluation results are used to:
 
