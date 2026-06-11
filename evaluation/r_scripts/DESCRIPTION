@@ -1,0 +1,12 @@
+Package: readingmachineeval
+Type: Project
+Title: ReadingMachine Evaluation Report
+Version: 0.0.1
+Imports:
+    dplyr,
+    ggplot2,
+    googlesheets4,
+    knitr,
+    rmarkdown,
+    rlang,
+    tibble
