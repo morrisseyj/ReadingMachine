@@ -28,25 +28,22 @@ reading.
 
 # Evaluation Summary
 
-1 reviews have been submitted.
+0 reviews have been submitted.
 
 ## Reviewer Familiarity
 
 | Familiarity with the literature |   n |
 |:--------------------------------|----:|
-| Moderate familiarity            |   1 |
 
 ## Reviewer Roles
 
-| Role       |   n |
-|:-----------|----:|
-| Researcher |   1 |
+| Role |   n |
+|:-----|----:|
 
 ## Reviewer Affiliations
 
 | Affiliation |   n |
 |:------------|----:|
-| Oxfam       |   1 |
 
 # Detailed Evaluation
 
@@ -57,8 +54,7 @@ reading.
 ### Reviewer Comments on Missing Themes (only populated if missing themes identified)
 
 | Reviewer | Familiarity | Rating | Comment |
-|:---|:---|:---|:---|
-| James Morrissey, Oxfam, Researcher | Moderate familiarity | Covers most major themes | ipso facto |
+|:---------|:------------|:-------|:--------|
 
 ------------------------------------------------------------------------
 
@@ -91,8 +87,7 @@ reading.
 ### Reviewer Comments on Distorted Debates (only populated if distortions were identified)
 
 | Reviewer | Familiarity | Rating | Comment |
-|:---|:---|:---|:---|
-| James Morrissey, Oxfam, Researcher | Moderate familiarity | Distortions were uneven | ipso facto debates |
+|:---------|:------------|:-------|:--------|
 
 ------------------------------------------------------------------------
 
@@ -153,9 +148,8 @@ reading.
 
 # Additional Comments
 
-| Reviewer                           | Comment       |
-|:-----------------------------------|:--------------|
-| James Morrissey, Oxfam, Researcher | This is great |
+| Reviewer | Comment |
+|:---------|:--------|
 
 # Data Access
 
