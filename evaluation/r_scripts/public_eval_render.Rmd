@@ -3,15 +3,18 @@ title: "ReadingMachine Public Evaluation"
 author: "James Morrissey"
 date: "`r Sys.Date()`"
 output:
-  pdf_document: default
   html_document: default
+  github_document:
+    fig_width: 8
+    fig_height: 6
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = FALSE, 
+  echo = FALSE,
   warning = FALSE,
-  message = FALSE
+  message = FALSE,
+  fig.path = "figures/"
 )
 
 library(dplyr)
