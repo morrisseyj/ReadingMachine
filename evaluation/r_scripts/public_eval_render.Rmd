@@ -50,7 +50,7 @@ cat(
 ```{r reviewer-familiarity}
 anonymized_responses %>%
   count(`Familiarity with the literature`) %>%
-  gt()
+  knitr::kable()
 ```
 
 ## Reviewer Roles
@@ -58,7 +58,7 @@ anonymized_responses %>%
 ```{r reviewer-roles}
 anonymized_responses %>%
   count(Role, sort = TRUE) %>%
-  gt()
+  knitr::kable()
 ```
 
 ## Reviewer Affiliations
@@ -66,7 +66,7 @@ anonymized_responses %>%
 ```{r reviewer-affiliations}
 anonymized_responses %>%
   count(Affiliation, sort = TRUE) %>%
-  gt()
+  knitr::kable()
 ```
 
 # Detailed Evaluation
@@ -335,7 +335,7 @@ anonymized_responses %>%
     !is.na(Comment),
     trimws(Comment) != ""
   ) %>%
-  gt()
+  knitr::kable()
 ```
 
 # Data Access

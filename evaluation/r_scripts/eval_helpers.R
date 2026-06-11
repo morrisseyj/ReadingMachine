@@ -25,9 +25,37 @@ plot_eval <- function(data,
   comment_sym <- rlang::sym(comment_var)
   familiarity_sym <- rlang::sym(familiarity_var)
   
+  if (nrow(data) == 0) {
+    
+    empty_plot <- ggplot2::ggplot() +
+      ggplot2::annotate(
+        "text",
+        x = 0,
+        y = 0,
+        label = "No reviews submitted yet."
+      ) +
+      ggplot2::theme_void() +
+      ggplot2::labs(title = eval_var)
+    
+    empty_table <- tibble::tibble(
+      Reviewer = character(),
+      Familiarity = character(),
+      Rating = character(),
+      Comment = character()
+    ) %>%
+      knitr::kable()
+    
+    return(
+      list(
+        plot = empty_plot,
+        issues = empty_table
+      )
+    )
+  }
+  
   plot_data <- data %>%
-    select(author_id, !!familiarity_sym, !!eval_sym) %>%
-    mutate(
+    dplyr::select(author_id, !!familiarity_sym, !!eval_sym) %>%
+    dplyr::mutate(
       familiarity_clean = dplyr::case_when(
         is.na(!!familiarity_sym) |
           trimws(as.character(!!familiarity_sym)) == "" ~ "No response",
@@ -51,21 +79,23 @@ plot_eval <- function(data,
         levels = c(possible_evals, "Other", "No response")
       )
     ) %>%
-    count(familiarity_clean, eval_clean, name = "n")
+    dplyr::count(familiarity_clean, eval_clean, name = "n")
   
-  plot <- ggplot(plot_data, aes(x = eval_clean, y = n)) +
-    geom_col() +
-    facet_wrap(~ familiarity_clean) +
-    labs(
+  plot <- ggplot2::ggplot(plot_data, ggplot2::aes(x = eval_clean, y = n)) +
+    ggplot2::geom_col() +
+    ggplot2::facet_wrap(~ familiarity_clean) +
+    ggplot2::labs(
       x = NULL,
       y = "Number of reviews",
       title = eval_var
     ) +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
+    )
   
   issue_table <- data %>%
-    transmute(
+    dplyr::transmute(
       Reviewer = author_id,
       Familiarity = dplyr::case_when(
         is.na(!!familiarity_sym) |
@@ -79,14 +109,14 @@ plot_eval <- function(data,
       ),
       Comment = as.character(!!comment_sym)
     ) %>%
-    filter(
+    dplyr::filter(
       Rating != top_eval,
       Rating != "No response",
       !is.na(Comment),
       trimws(Comment) != ""
     ) %>%
-    arrange(Familiarity, Rating, Reviewer) %>%
-    gt::gt()
+    dplyr::arrange(Familiarity, Rating, Reviewer) %>%
+    knitr::kable()
   
   list(
     plot = plot,

@@ -31,3 +31,7 @@ hdbscan*
 # Ignore build files for tex
 *.aux
 *.log
+.Rproj.user
+
+# Ignore API key for Google Sheets
+/evaluation/r_scripts/google_sheets_service_account.json

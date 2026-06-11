@@ -1,0 +1,41 @@
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render-public-eval:
+    runs-on: ubuntu-latest
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: Install R packages
+        run: |
+          Rscript evaluation/r_scripts/package_installer.R
+
+      - name: Write Google service account JSON
+        shell: bash
+        run: |
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > evaluation/r_scripts/google_sheets_service_account.json
+
+      - name: Render public evaluation report
+        working-directory: evaluation/r_scripts
+        run: |
+          Rscript render_report.R
+
+      - name: Commit updated evaluation outputs
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add evaluation/eval_output
+          git commit -m "Update public evaluation report" || echo "No changes to commit"
+          git push
