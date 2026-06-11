@@ -28,28 +28,31 @@ reading.
 
 # Evaluation Summary
 
-0 reviews have been submitted.
+1 reviews have been submitted.
 
 ## Reviewer Familiarity
 
 | Familiarity with the literature |   n |
 |:--------------------------------|----:|
+| Deep expertise                  |   1 |
 
 ## Reviewer Roles
 
-| Role |   n |
-|:-----|----:|
+| Role       |   n |
+|:-----------|----:|
+| Researcher |   1 |
 
 ## Reviewer Affiliations
 
 | Affiliation |   n |
 |:------------|----:|
+| Oxfam       |   1 |
 
 # Detailed Evaluation
 
 ## 1. Presence of Major Themes
 
-![](../eval_output/public_eval_files/figure-gfm/presence-major-themes-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/presence-major-themes-1.png)<!-- -->
 
 ### Reviewer Comments on Missing Themes (only populated if missing themes identified)
 
@@ -60,18 +63,19 @@ reading.
 
 ## 2. Alignment with Research Questions
 
-![](../eval_output/public_eval_files/figure-gfm/alignment-research-questions-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/alignment-research-questions-1.png)<!-- -->
 
 ### Reviewer Comments on Alignment Issues (only populated if alignment issues identified)
 
-| Reviewer | Familiarity | Rating | Comment |
-|:---------|:------------|:-------|:--------|
+| Reviewer                           | Familiarity    | Rating          | Comment   |
+|:-----------------------------------|:---------------|:----------------|:----------|
+| James Morrissey, Oxfam, Researcher | Deep expertise | Mostly relevant | ipso test |
 
 ------------------------------------------------------------------------
 
 ## 3. Internal Coherence of Themes
 
-![](../eval_output/public_eval_files/figure-gfm/internal-coherence-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/internal-coherence-1.png)<!-- -->
 
 ### Reviewer Comments on Theme Coherence (only populated if issues with theme coherence identified)
 
@@ -82,18 +86,19 @@ reading.
 
 ## 4. Distortion or Flattening of Debates
 
-![](../eval_output/public_eval_files/figure-gfm/debate-distortion-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/debate-distortion-1.png)<!-- -->
 
 ### Reviewer Comments on Distorted Debates (only populated if distortions were identified)
 
 | Reviewer | Familiarity | Rating | Comment |
-|:---------|:------------|:-------|:--------|
+|:---|:---|:---|:---|
+| James Morrissey, Oxfam, Researcher | Deep expertise | Widespread distortion | complete mess |
 
 ------------------------------------------------------------------------
 
 ## 5. Hallucinations
 
-![](../eval_output/public_eval_files/figure-gfm/hallucinations-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/hallucinations-1.png)<!-- -->
 
 ### Reviewer Reports of Hallucinations (only populated if hallucinations were identified)
 
@@ -104,7 +109,7 @@ reading.
 
 ## 6. Citation / Attribution Plausibility
 
-![](../eval_output/public_eval_files/figure-gfm/citation-plausibility-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/citation-plausibility-1.png)<!-- -->
 
 ### Reviewer Comments on Citation Issues (only populated if citation issues were identified)
 
@@ -115,7 +120,7 @@ reading.
 
 ## 7. Representation of Disagreement
 
-![](../eval_output/public_eval_files/figure-gfm/disagreement-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/disagreement-1.png)<!-- -->
 
 ### Reviewer Comments on Disagreement Preservation (only populated if failure to presrve disagreement was identified)
 
@@ -126,7 +131,7 @@ reading.
 
 ## 8. Suitability for Downstream Reasoning
 
-![](../eval_output/public_eval_files/figure-gfm/downstream-reasoning-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/downstream-reasoning-1.png)<!-- -->
 
 ### Reviewer Comments on Downstream Use (only populated if limitations on downstream usefulness was identified)
 
@@ -137,7 +142,7 @@ reading.
 
 ## 9. Overall Epistemic Fidelity
 
-![](../eval_output/public_eval_files/figure-gfm/epistemic-fidelity-1.png)<!-- -->
+![](/home/runner/work/ReadingMachine/ReadingMachine/evaluation/eval_output/public_eval_files/figure-gfm/epistemic-fidelity-1.png)<!-- -->
 
 ### Reviewer Comments on Epistemic Fidelity (only populated if issues with epistemic fidelity were identified)
 
@@ -148,8 +153,9 @@ reading.
 
 # Additional Comments
 
-| Reviewer | Comment |
-|:---------|:--------|
+| Reviewer                           | Comment    |
+|:-----------------------------------|:-----------|
+| James Morrissey, Oxfam, Researcher | Great work |
 
 # Data Access
 
