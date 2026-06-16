@@ -3,7 +3,6 @@ install.packages(
     "dplyr",
     "ggplot2",
     "googlesheets4",
-    "gt",
     "knitr",
     "rmarkdown",
     "rlang",
