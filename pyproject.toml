@@ -33,6 +33,7 @@ dependencies = [
     "tiktoken",
     "habanero",
     "reportlab",
+    "openpyxl==3.1.5",
 ]
 
 [tool.setuptools.packages.find]
