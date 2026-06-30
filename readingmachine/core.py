@@ -6178,7 +6178,8 @@ class Summarize:
                     # 2. if the question does not need repairs it goes to optimization
 
                     # First check is the schema is stable for this question, if so move to next question
-                    if unstable_schema_rq["needs_repair"].iloc[0]:
+                    needs_repair = unstable_schema_rq["needs_repair"].fillna(False).astype(bool).any()
+                    if needs_repair:
                         print("Schema for this question has been marked as needing repairs based on the completeness check and word count signals. Running repair process...")
 
                         # Generate the content for the repair plan prompt
