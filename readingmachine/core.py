@@ -8539,14 +8539,11 @@ class Summarize:
         )
 
         missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
-        print(f"Missing citations and associated insights:\n{missing_citations_json}")
 
         user_prompt = (
             f"THEMATIC SUMMARY:\n{summary}\n\n"
             f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
         )
-
-        print(f"User prompt for repairing missing citations:\n\n{user_prompt}")
 
         sys_prompt = Prompts().repair_citation_provenance()
 
