@@ -8612,8 +8612,6 @@ class Summarize:
             max_tokens=4096
         )
 
-        print(f"Patches proposed for repairing missing citations:\n{json.dumps(response, indent=2, ensure_ascii=False)}")
-
         for patch in response["patches"]:
             # Check whether the sentences got returned correctly
             if patch["revise"]:
