@@ -4864,7 +4864,8 @@ class Summarize:
         self.ai_model: str = ai_model
         self.paper_output_length: int = paper_output_length
         self.summary_save_location = summary_save_location
-        pickle_save_location = pickle_save_location
+        self.pickle_save_location = pickle_save_location
+        self.use_organizing_proposition = use_organizing_proposition
 
     def _calculate_centroid(self, col="full_insight_embedding"):
         """
