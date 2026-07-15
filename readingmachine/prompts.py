@@ -3097,7 +3097,7 @@ class Prompts:
         )
 
 
-    def integrate_orphans(self):
+    def integrate_orphans(self, provide_organizing_proposition=False):
         """
         Construct the prompt for orphan-insight reintegration.
 
@@ -3132,6 +3132,42 @@ class Prompts:
         attempting to restore omitted insight content before schema repair or
         further thematic refinement.
         """
+
+        if provide_organizing_proposition:
+            organizing_proposition_input = (
+                "   Where supplied, THEMATIC CONTEXT also includes an ORGANIZING PROPOSITION "
+                "for a substantive theme.\n"
+            )
+
+            organizing_proposition_rules = (
+                "# ORGANIZING PROPOSITION\n"
+                "- Where an organizing proposition is supplied, preserve it as the conceptual "
+                "organizing logic of the revised summary.\n"
+                "- Integrate orphan insights where they express, develop, qualify, complicate, "
+                "or place limits on that proposition.\n"
+                "- Do not append orphan insights as disconnected observations merely to achieve "
+                "coverage.\n"
+                "- Do not force an orphan insight to support the proposition. Preserve evidence "
+                "that qualifies, complicates, or does not fit its simplest formulation.\n"
+                "- The organizing proposition is a schema-level guide, not a source claim. "
+                "Do not cite it or present it as evidence.\n"
+                "- Do not merely repeat the organizing proposition and leave the structure of "
+                "the summary unchanged.\n\n"
+            )
+
+            thematic_coherence_rule = (
+                "- Maintain coherence with the research question, theme label, theme "
+                "description, and organizing proposition.\n"
+            )
+
+        else:
+            organizing_proposition_input = ""
+            organizing_proposition_rules = ""
+            thematic_coherence_rule = (
+                "- Maintain coherence with the research question, theme label, and theme "
+                "description.\n"
+            )
+
         return (
             '# ROLE\n'
             'You are a Research Synthesizer. Rewrite a thematic summary so that orphan insights are integrated into a coherent synthesis without creating duplicate claims.\n\n'
@@ -3139,12 +3175,15 @@ class Prompts:
             '# TASK\n'
             'You will receive:\n'
             '1. THEMATIC CONTEXT: research question, theme label, and theme description.\n'
+            f'{organizing_proposition_input}'
             '2. ORIGINAL SUMMARY: the current thematic summary.\n'
             '3. REQUIRED ORPHAN CITATIONS/AUTHORS: citations/authors that must remain visibly represented.\n'
             '4. ORPHAN INSIGHTS: insights that must be substantively integrated.\n\n'
 
             '# OBJECTIVE\n'
             'Produce a complete revised summary that preserves the original substantive findings, integrates all substantively distinct orphan contributions, and preserves citation provenance.\n\n'
+
+            f'{organizing_proposition_rules}'
 
             '# CLAIM INTEGRATION AND DEDUPLICATION\n'
             '- First, mentally group the original summary and orphan insights into substantively distinct claim groups.\n'
@@ -3172,7 +3211,7 @@ class Prompts:
         
             '# STYLE AND STRUCTURE\n'
             '- Rewrite the full summary; do not append orphan material mechanically.\n'
-            '- Maintain coherence with the research question, theme label, and theme description.\n'
+            f'{thematic_coherence_rule}'
             '- Prefer synthesis, restructuring, and compression over adding standalone orphan sentences.\n'
             '- Make minimal changes where the existing summary is already coherent.\n'
             '- The response must be complete and not truncated.\n\n'

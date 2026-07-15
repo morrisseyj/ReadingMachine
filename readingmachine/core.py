@@ -9344,6 +9344,13 @@ class Summarize:
             theme_description = row["theme_description"]
             thematic_summary = row["thematic_summary"]
             
+            # Conditionally include organizing proposition if the flag is set
+            organizing_proposition = (
+            row.get("organizing_proposition")
+            if self.use_organizing_proposition
+            else None
+        )
+            
             # Get orphan insight IDs for this theme + question
             theme_orphans = orphans_df[
                 (orphans_df["theme_id"] == theme_id) &
@@ -9405,12 +9412,23 @@ class Summarize:
                     batch_insights_str = "\n".join([f"- {i}" for i in batch["insight"].tolist()])
 
                     # Build LLM prompt
-                    sys_prompt = Prompts().integrate_orphans()
+                    sys_prompt = Prompts().integrate_orphans(provide_organizing_proposition=self.use_organizing_proposition)
+
+                    # Conditionally include organizing proposition in the user prompt if the flag is set and the proposition is not null
+                    organizing_proposition_input = ""
+
+                    if (self.use_organizing_proposition and pd.notna(organizing_proposition)):
+                        organizing_proposition_input = (
+                            "ORGANIZING PROPOSITION:\n"
+                            f"{organizing_proposition}\n\n"
+                        )
+
                     user_prompt = (
                         f"RESEARCH QUESTION: {question_text}\n"
                         f"THEME LABEL: {theme_label}\n\n"
                         "THEME DESCRIPTION:\n"
                         f"{theme_description}\n\n"
+                        f"{organizing_proposition_input}"
                         "ORIGINAL SUMMARY:\n"
                         f"{updated_summary}\n\n"
                         "REQUIRED ORPHAN CITATIONS/AUTHORS:\n"
@@ -9493,13 +9511,18 @@ class Summarize:
                         (self.summary_state.theme_schema_list[-1]["question_id"] == question_id)
                     ]["instructions"].iloc[0]
                     
-                    failed_themes[question_id].append(
-                        {"theme_id": theme_id, 
-                         "theme_label": theme_label,
-                         "theme_description": theme_description,
-                         "instructions": instructions, 
-                         "iteration": len(self.summary_state.orphan_list) + 1} # Keep this 1 ahead of orphan list as this iteration of orphan list has not yet been saved
-                    )
+                    failed_theme_record = {
+                        "theme_id": theme_id,
+                        "theme_label": theme_label,
+                        "theme_description": theme_description,
+                        "instructions": instructions,
+                        "iteration": len(self.summary_state.orphan_list) + 1,
+                    }
+
+                    if self.use_organizing_proposition:
+                        failed_theme_record["organizing_proposition"] = organizing_proposition
+
+                    failed_themes[question_id].append(failed_theme_record)
 
                 else: 
                     # If there were no failed batches we proceed with citation provenance repair
@@ -9557,7 +9580,7 @@ class Summarize:
                         updated_summary = self._address_missing_citations(updated_summary, theme_missing_citations_df)
 
                 # Store final fully integrated summary for this theme
-                updated_row = pd.DataFrame([{
+                updated_row_data = {
                     "thematic_summary": updated_summary,
                     "question_id": question_id,
                     "theme_id": int(theme_id),
@@ -9566,23 +9589,33 @@ class Summarize:
                     "question_text": question_text,
                     "stable": stable,
                     "needs_repair": True if failed_batch_summaries else False,
-                    "optimized": optimized
-                }])
+                    "optimized": optimized,
+                }
+
+                if self.use_organizing_proposition:
+                    updated_row_data["organizing_proposition"] = organizing_proposition
+
+                updated_row = pd.DataFrame([updated_row_data])
 
             else:
                 # No orphans → summary already complete
                 print(f"No orphans found for theme {count} of {total_themes}. Skipping integration.")
-                updated_row = pd.DataFrame([{
+                updated_row_data = {
                     "thematic_summary": thematic_summary,
                     "question_id": question_id,
                     "theme_id": int(theme_id),
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
-                    "stable": stable, 
+                    "stable": stable,
                     "needs_repair": False,
-                    "optimized": optimized
-                }])
+                    "optimized": optimized,
+                }
+
+                if self.use_organizing_proposition:
+                    updated_row_data["organizing_proposition"] = organizing_proposition
+
+                updated_row = pd.DataFrame([updated_row_data])
 
             updated_summary_df_lst.append(updated_row)
             count += 1
@@ -9592,16 +9625,27 @@ class Summarize:
 
         # Add back the stable themes
         if not stable_populated_themes.empty:
-            stable_populated_themes = stable_populated_themes[[
+            stable_columns = [
                 "thematic_summary",
                 "question_id",
                 "theme_id",
                 "theme_label",
                 "theme_description",
-                "question_text",
-                "stable",
-                "needs_repair",
-                "optimized"]].copy()
+            ]
+
+            if self.use_organizing_proposition:
+                stable_columns.append("organizing_proposition")
+
+            stable_columns.extend(
+                [
+                    "question_text",
+                    "stable",
+                    "needs_repair",
+                    "optimized",
+                ]
+            )
+
+            stable_populated_themes = stable_populated_themes[stable_columns].copy()
             theme_no_orphans = pd.concat([theme_no_orphans, stable_populated_themes], ignore_index=True)
 
         # Sort for outputing in the correct order - before this make sure the theme_id is int to prevent sorting issues
