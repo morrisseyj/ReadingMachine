@@ -1213,6 +1213,11 @@ class Prompts:
                 "exactly \"Conflict\" or \"Other\", organizing_proposition must be null.\n"
             )
 
+            codebook_property = (
+                "- Partitions the conceptual landscape into themes that admit organizing propositions "
+                "of maximal explanatory power for answering the motivating research question\n"
+            )
+
         else:
             organizing_proposition = ""
             output_format = (
@@ -1230,6 +1235,7 @@ class Prompts:
 
             conceptual_description = "(theme_label, theme_description, instructions)"
             organizing_proposition_architecture = ""
+            codebook_property = ""
 
         return(
             "## ROLE\n"
@@ -1279,6 +1285,7 @@ class Prompts:
 
             "## IDEAL CODEBOOK PROPERTIES\n"
             "An effective thematic codebook will:\n\n"
+            f"{codebook_property}"
             "- Define themes that are internally conceptually coherent\n"
             "- Ensure clear conceptual boundaries between themes\n"
             "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
@@ -2317,6 +2324,11 @@ class Prompts:
                 "}\n"
             )
 
+            codebook_property = (
+                "- Partitions the conceptual landscape into themes that admit organizing propositions "
+                "of maximal explanatory power for answering the motivating research question\n"
+            )
+
 
         else:
             codebook_structure = (
@@ -2331,6 +2343,8 @@ class Prompts:
                 "If making improvements, you should update theme descriptions, instructions and labels as needed to maintain clear conceptual boundaries. \n"
                 "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
             )
+
+            codebook_property = ""
 
             output_format = (
                 "{\n"
@@ -2441,6 +2455,7 @@ class Prompts:
             "## OPTIMIZATION OBJECTIVES\n"
             "The ideal codebook/schema will:\n\n"
             "- Allow for the successful expression of all assigned conceptual content, without loss of granularity, under the constraints on output length (i.e. no failing themes).\n"
+            f"{codebook_property}"
             "- Define themes that are internally conceptually coherent\n"
             "- Ensure clear conceptual boundaries between themes\n"
             "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
