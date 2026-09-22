@@ -1120,7 +1120,7 @@ class Prompts:
         )
     
     
-    def gen_theme_schema_cluster_source(self):
+    def gen_theme_schema_cluster_source(self, provide_organizing_proposition=False):
         """
         Construct the prompt for initial theme-schema generation.
 
@@ -1164,6 +1164,72 @@ class Prompts:
         to be tested through mapping, population, orphan handling, and later
         schema repair rather than treated as final.
         """
+
+        if provide_organizing_proposition:
+            organizing_proposition = (
+                "5. **Provide Organizing Proposition**\n"
+                "For each substantive theme, provide a brief organizing proposition that makes "
+                "explicit the central conceptual insight expressed by the theme. "
+                "The proposition should articulate the underlying idea, relationship, mechanism, "
+                "process, pattern, distinction, trajectory, argument, or dynamic that unifies "
+                "the cluster summaries represented by the theme. "
+                "It should state what those cluster summaries collectively indicate when considered "
+                "as a thematic whole, rather than merely identifying their shared topic or describing "
+                "the material the theme contains. "
+                "The proposition will be provided to later stages of the pipeline so that thematic "
+                "synthesis can explicitly develop and demonstrate this conceptual logic through the "
+                "evidence subsequently mapped to the theme. "
+                "The proposition must remain faithful to the source material and must not introduce "
+                "an interpretation stronger than the cluster summaries support. "
+                "Do not explain your reasoning process, justify why the theme was created, describe "
+                "the theme's inclusion boundaries, or summarize its expected contents. "
+                "For a theme whose theme_label is exactly \"Conflict\" or \"Other\", set "
+                "organizing_proposition to null.\n\n"
+            )
+
+            output_format = (
+                "{\n"
+                '  "themes": [\n'
+                "    {\n"
+                '      "theme_label": <string>,\n'
+                '      "theme_description": <string>,\n'
+                '      "instructions": <string>,\n'
+                '      "organizing_proposition": <string | null>\n'
+                "    }\n"
+                "  ],\n"
+                '  "no_change": false\n'
+                "}\n\n"
+            )
+
+            conceptual_description = "(theme_label, theme_description, organizing_proposition, instructions)"
+            organizing_proposition_architecture = (
+                 "- **Organizing Propositions:** Each theme must include an "
+                "'organizing_proposition' field. For substantive themes, the proposition "
+                "states the central conceptual insight expressed by the theme and makes "
+                "explicit the thematic logic that subsequent synthesis should develop "
+                "through the evidence mapped to that theme. It must not merely restate the "
+                "label, describe the theme's contents, reproduce its assignment rules, or "
+                "justify the decision to create the theme. For themes whose theme_label is "
+                "exactly \"Conflict\" or \"Other\", organizing_proposition must be null.\n"
+            )
+
+        else:
+            organizing_proposition = ""
+            output_format = (
+                "{\n"
+                '  "themes": [\n'
+                "    {\n"
+                '      "theme_label": <string>,\n'
+                '      "theme_description": <string>,\n'
+                '      "instructions": <string>\n'
+                "    }\n"
+                "  ],\n"
+                '  "no_change": false\n'
+                "}\n\n"
+            )
+
+            conceptual_description = "(theme_label, theme_description, instructions)"
+            organizing_proposition_architecture = ""
 
         return(
             "## ROLE\n"
@@ -1209,6 +1275,8 @@ class Prompts:
             "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
             "A strong EXCLUDE rule identifies conceptually distinct material that should instead be routed to neighboring themes.\n\n"
 
+            f"{organizing_proposition}"
+
             "## IDEAL CODEBOOK PROPERTIES\n"
             "An effective thematic codebook will:\n\n"
             "- Define themes that are internally conceptually coherent\n"
@@ -1217,7 +1285,8 @@ class Prompts:
             "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
             "- Minimize reliance on the 'Other' category\n\n"
 
-            "Themes should represent stable conceptual categories that can accommodate their assigned content without requiring excessive compression or loss of conceptual granularity.\n\n"
+            "Themes should represent stable conceptual categories that can accommodate their assigned content without requiring excessive "
+            "compression or loss of conceptual granularity.\n\n"
             "Themes should be articulated at a suitable level of abstraction to provide clear insight into the research question.\n\n"
             "A theme may encompass multiple related concepts, provided they can be expressed coherently without collapsing meaningful distinctions.\n\n"
             "Themes should not be so broad that they require excessively long or diffuse descriptions to explain their scope.\n\n"
@@ -1228,27 +1297,20 @@ class Prompts:
 
             "## OUTPUT FORMAT (STRICT JSON)\n"
             "Return a JSON object with a single key 'themes' containing an array of objects. "
-            "All identified categories must follow this structure exactly:\n"
-            "{\n"
-            "  \"themes\": [\n"
-            "    {\n"
-            "      \"theme_label\": <string>,\n"
-            "      \"theme_description\": <string>,\n"
-            "      \"instructions\": <string>\n"
-            "    }\n"
-            "  ],\n"
-            "   \"no_change\": false\n"
-            "}\n\n"
+            "All identified categories must follow this structure exactly:\n\n"
+            
+            f"{output_format}\n"
 
             "## ARCHITECTURAL CONSTRAINTS\n"
             "The \"no_change\" field must always be present and must always be set to false.\n"
             "Do not omit this field and do not set it to true.\n"
             "- **Structural Identity:** Do NOT generate numeric identifiers. "
             "theme_id values will be assigned programmatically outside this step. "
-            "Focus only on conceptual design (theme_label, theme_description, instructions).\n"
+            f"Focus only on conceptual design {conceptual_description}.\n"
             "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
-            "This provides the conceptual narrative for the theme and serves as the North Star logic "
-            "for downstream tagging and summary population.\n"
+            "The description defines the conceptual territory and scope of the theme for downstream "
+            "mapping and schema interpretation.\n"
+            f"{organizing_proposition_architecture}"
             "- **Conceptual Mutuality (Themes):** Themes must operate as a mutually constraining partition. "
             "Each theme should define both:\n"
             "   - what conceptual territory belongs inside the theme, and\n"
@@ -1273,7 +1335,7 @@ class Prompts:
             "You are not tethered to the original structure of the provided text."
         )
 
-    def gen_theme_schema_repair_instructions(self):
+    def gen_theme_schema_repair_instructions(self, provide_organizing_proposition=False):
         """
         Construct the prompt for schema-repair planning.
 
@@ -1327,140 +1389,179 @@ class Prompts:
         subsequently consumed by the schema-repair implementation stage.
         """
 
-        return(
-            "## ROLE\n"
-            "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
+        if provide_organizing_proposition:
+            # RETURN THE PROMPT WITH THE REQUIRMENT FOR AN ORGANIZING PROPOSITION
+            return(
+                "## ROLE\n"
+                "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
 
-            "## THE TASK\n"
-            "You are working as part of an iterative loop to refine a thematic codebook.\n"
-            "That iterative loop works as follows: " \
-            "1. Generate a thematic codebook.\n" 
-            "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n" 
-            "3. Attempt to synthesize the content assigned to each theme under bounded output constraints.\n"
-            "4. Check whether synthesis included all the assigned content\n"
-            "5. Forcibly reinsert any content that was lost\n"
-            "   - Insertion is done in batches to ensure full insertion considering stress on the LLM context window\n"
-            "   - If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
-            "6. Update the codebook to partition failing themes into smaller independently synthesizable claim-families so that synthesis and reinsertion can pass.\n\n"
+                "## THE TASK\n"
+                "You are working as part of an iterative loop to refine a thematic codebook.\n"
+                "That iterative loop works as follows: " \
+                "1. Generate a thematic codebook.\n" 
+                "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n" 
+                "3. Attempt to synthesize the content assigned to each theme under bounded output constraints.\n"
+                "4. Check whether synthesis included all the assigned content\n"
+                "5. Forcibly reinsert any content that was lost\n"
+                "   - Insertion is done in batches to ensure full insertion considering stress on the LLM context window\n"
+                "   - If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
+                "6. Update the codebook to partition failing themes into smaller independently synthesizable claim-families so that synthesis and reinsertion can pass.\n\n"
 
-            "You are currently at step 6 of this process."
-            "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n\n"
+                "You are currently at step 6 of this process."
+                "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n\n"
 
-            "## UNDERSTANDING THE CODEBOOK STRUCTURE\n"
-            "### STRUCTURE\n"
-            "Each theme defines an operational synthesis region using:\n"
-            "- theme_label\n"
-            "- theme_description (the North Star logic)\n"
-            "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+                "## UNDERSTANDING THE CODEBOOK STRUCTURE\n"
+                "### STRUCTURE\n"
+                "Each theme defines an operational synthesis region using:\n"
+                "- theme_label\n"
+                "- theme_description\n"
+                "- organizing_proposition\n"
+                "- instructions\n\n"
 
-            "### INCLUDE/EXCLUDE LOGIC\n"
-            "All themes define precise operational assignment rules:\n"
-            "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
-            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+                "These fields perform different functions within the schema.\n"
+                "The theme_description defines the conceptual territory represented by the theme.\n"
+                "For substantive themes, the organizing_proposition states the central conceptual "
+                "insight expressed by that thematic region. It articulates the underlying idea, "
+                "relationship, process, pattern, distinction, trajectory, mechanism, argument, "
+                "or other conceptual structure that unifies its thematic logic.\n"
+                "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
+                "organizing_proposition must be null because these are architectural categories "
+                "rather than substantive thematic regions.\n"
+                "The instructions operationalize assignment into that conceptual territory through "
+                "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
 
-            "INCLUDE rules define the conceptual material assigned to the synthesis region.\n"
-            "EXCLUDE rules define conceptual material that must be routed to neighboring synthesis regions.\n"
-            "EXCLUDE rules should not be the simple inverses of the INCLUDE rule.\n"
-            "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining assignment partition.\n"
-            "When generating the scope logic in the repair plan, provide sufficient specificity to allow for subsequent EXCLUDE rules to be written that can:\n"
-            "- identify the neighboring themes most likely to overlap with the current theme\n"
-            "- explicitly exclude those conceptual territories\n"
-            "- route ambiguous material toward the appropriate neighboring themes\n\n"
+                "### INCLUDE/EXCLUDE LOGIC\n"
+                "All themes define precise operational assignment rules:\n"
+                "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
+                "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
 
-            "### SPECIAL THEMES\n"
-            "**Conflict Theme (Conditional)**\n"
-            "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains "
-            "substantively incompatible interpretations, claims, or prescriptions that cannot be "
-            "maintained within a single coherent conceptual frame.\n\n"
+                "INCLUDE rules define the conceptual material assigned to the synthesis region.\n"
+                "EXCLUDE rules define conceptual material that must be routed to neighboring synthesis regions.\n"
+                "EXCLUDE rules should not be the simple inverses of the INCLUDE rule.\n"
+                "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining assignment partition.\n"
+                "When generating the scope logic in the repair plan, provide sufficient specificity to allow for subsequent EXCLUDE rules to be written that can:\n"
+                "- identify the neighboring themes most likely to overlap with the current theme\n"
+                "- explicitly exclude those conceptual territories\n"
+                "- route ambiguous material toward the appropriate neighboring themes\n\n"
 
-            "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
+                "### SPECIAL THEMES\n"
+                "**Conflict Theme (Conditional)**\n"
+                "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains "
+                "substantively incompatible interpretations, claims, or prescriptions that cannot be "
+                "maintained within a single coherent conceptual frame.\n\n"
+                "Note: This 'Conflict' theme should not receive an organizing_proposition. Its organizing_proposition should be set to null.\n"
 
-            "Do NOT create a Conflict theme if the material merely:\n"
-            "- Presents reinforcing critiques\n"
-            "- Describes layered constraints or interacting factors\n"
-            "- Articulates trade-offs within a shared conceptual frame\n"
-            "- Expresses variation in emphasis without incompatible positions\n\n"
+                "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
 
-            "A Conflict theme requires identifiable polarity between positions.\n\n"
+                "Do NOT create a Conflict theme if the material merely:\n"
+                "- Presents reinforcing critiques\n"
+                "- Describes layered constraints or interacting factors\n"
+                "- Articulates trade-offs within a shared conceptual frame\n"
+                "- Expresses variation in emphasis without incompatible positions\n\n"
 
-            "Instructions for conflict will invoke DETECTION TRIGGERS (not INCLUDE/EXCLUDE). If scope logic amends conflict it must be sufficiently specific to allow subsequent rules to:\n"
-            "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
-            "- Preserve opposing positions as distinct\n"
-            "- Avoid harmonizing or resolving disagreement\n\n"
+                "A Conflict theme requires identifiable polarity between positions.\n\n"
 
-            "**'Other' Theme (Conditional)**\n"
-            "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
-            "without fragmenting the schema into excessively fine-grained themes.\n\n"
+                "Instructions for conflict will invoke DETECTION TRIGGERS (not INCLUDE/EXCLUDE). If scope logic amends conflict it must be sufficiently specific to allow subsequent rules to:\n"
+                "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
+                "- Preserve opposing positions as distinct\n"
+                "- Avoid harmonizing or resolving disagreement\n\n"
 
-            "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+                "**'Other' Theme (Conditional)**\n"
+                "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
+                "without fragmenting the schema into excessively fine-grained themes.\n"
+                "Note: This 'Other' theme should not receive an organizing_proposition. Its organizing_proposition should be set to null.\n"
 
-            "The 'Other' theme should:\n"
-            "- Capture valid but low-frequency or residual concepts\n"
-            "- Not contain a coherent or dominant conceptual grouping\n"
-            "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+                "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
 
-            "If no residual concepts exist, omit this theme entirely.\n\n"
+                "The 'Other' theme should:\n"
+                "- Capture valid but low-frequency or residual concepts\n"
+                "- Not contain a coherent or dominant conceptual grouping\n"
+                "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
 
-            "## INPUT\n"
-            "You will receive:\n"
-            "1. The research question\n"
-            "2. Efforts at previous schema development to date, which will include:\n"
-            "   - Prior schema\n"
-            "   - The theme summaries those schema generated\n"
-            "       - For failing themes, these summaries will include the 'FAILED BATCH SUMMARIES' that identify the content from any batch (numbered by batch) that exceeded the bounded input constraint when being forcibly reinserted.\n"
-            "   - The pass/fail status of each theme reflecting the result of complete reinsertion.\n"
-            "   - The word count of all currently passing themes.\n"
-            "   - Themes with `word_count = null` failed during reinsertion. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
-            "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. \n"
-            "The most recent codebook is flagged as such. This should be the focus of your revision.\n"
-            "Each codebook is flagged as to whether **all** the themes passed completion checks.\n\n"
+                "If no residual concepts exist, omit this theme entirely.\n\n"
 
-            "## UNDERSTANDING FAILURES\n"
-            "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
-            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
-            "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
-            "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
-            "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
-            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
-            "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
+                "## INPUT\n"
+                "You will receive:\n"
+                "1. The research question\n"
+                "2. Efforts at previous schema development to date, which will include:\n"
+                "   - Prior schema\n"
+                "       - theme_label\n"
+                "       - theme_description\n"
+                "       - organizing_proposition\n"
+                "       - instructions\n"
+                "   - The theme summaries those schema generated\n"
+                "       - For failing themes, these summaries will include the 'FAILED BATCH SUMMARIES' that identify the content from any batch (numbered by batch) that exceeded the bounded input constraint when being forcibly reinserted.\n"
+                "   - The pass/fail status of each theme reflecting the result of complete reinsertion.\n"
+                "   - The word count of all currently passing themes.\n"
+                "   - Themes with `word_count = null` failed during reinsertion. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
+                "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. \n"
+                "The most recent codebook is flagged as such. This should be the focus of your revision.\n"
+                "Each codebook is flagged as to whether **all** the themes passed completion checks.\n\n"
 
-            "## REQUIRED STRUCTURAL REPAIR\n"
-            "If 'schema_has_failures' = True for the most recent iteration, every failing non-Conflict theme must be decomposed.\n"
-            "For each failing theme, identify the largest independently synthesizable claim-family by representational load currently assigned to that theme.\n"
-            "An independently synthesizable claim-family is a recurring group of claims with its own mechanism, actor system, policy instrument, causal structure, constraint type, or argumentative logic that can be synthesized as a bounded unit.\n\n"
+                "## UNDERSTANDING FAILURES\n"
+                "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
+                "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+                "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
+                "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+                "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
+                "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
+                "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
 
-            "By 'largest', prioritize the claim-family that:\n"
-            "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
-            "2. recurs across multiple sources or batches;\n"
-            "3. can plausibly function as an independent bounded synthesis region;\n"
-            "4. can plausibly be synthesized within bounded output constraints (4096 tokens/~2500 words).\n\n"
+                "## REQUIRED STRUCTURAL REPAIR\n"
+                "If 'schema_has_failures' = True for the most recent iteration, every failing non-Conflict theme must be decomposed.\n"
+                "For each failing theme, identify the largest independently synthesizable claim-family by representational load currently assigned to that theme.\n"
+                "An independently synthesizable claim-family is a recurring group of claims with its own mechanism, actor system, policy instrument, causal structure, constraint type, or argumentative logic that can be synthesized as a bounded unit.\n\n"
 
-            "Extract that claim-family from the failed source theme by assigning it to a new theme, unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
-            "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
-            "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
+                "By 'largest', prioritize the claim-family that:\n"
+                "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
+                "2. recurs across multiple sources or batches;\n"
+                "3. can plausibly function as an independent bounded synthesis region;\n"
+                "4. can plausibly be synthesized within bounded output constraints (4096 tokens/~2500 words).\n\n"
 
-            "Do not write final theme descriptions or final INCLUDE/EXCLUDE prose. Provide scope logic that a second-stage schema rewriter can use to generate labels, descriptions, and operational INCLUDE/EXCLUDE rules.\n"
-            "The scope logic must be specific enough to support future INCLUDE rules for retained/new/receiving themes and future EXCLUDE rules that prevent extracted content from drifting back into the narrowed source theme.\n"
-            "Scope logic should identify neighboring themes most likely to overlap, the conceptual territory to route away from the source theme, and the destination for that territory.\n\n"
+                "Extract that claim-family from the failed source theme by assigning it to a new theme, unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
+                "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
+                "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
 
-            "## USING FAILED BATCH SUMMARIES and CURRENT SUMMARY LENGTHS in repair decisions.\n"
-            "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
-            "- Treat content in failed batch summaries as conceptual content correctly assigned to this theme under its existing instructions.\n"
-            "- Use the synthesized theme content **and** FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
+                "Do not write final theme descriptions or final INCLUDE/EXCLUDE prose. Provide scope logic that a second-stage schema rewriter can use to generate labels, descriptions, and operational INCLUDE/EXCLUDE rules.\n"
+                "The scope logic must be specific enough to support future INCLUDE rules for retained/new/receiving themes and future EXCLUDE rules that prevent extracted content from drifting back into the narrowed source theme.\n"
+                "Scope logic should identify neighboring themes most likely to overlap, the conceptual territory to route away from the source theme, and the destination for that territory.\n\n"
 
-            "## USING PRIOR ITERATIONS\n"
-            "- Use prior iterations only to identify recurring instability patterns, repeated failures, and ineffective prior repairs. Do not optimize older iterations independently from the current schema state.\n"
-            "- Do not repeat failed conceptual aggregations from prior iterations, defined by their inclusion/exclusion instructions.\n\n"
-   
-            "## UPDATE PRINCIPLES\n"
-            "Do not generate repair plans that repeat failed conceptual aggregations from prior iterations, including semantically similar rearticulations.\n"
-            "A repair plan may preserve a similar broad topic only if the resulting assignment behavior will materially change through extraction and narrowed scope logic.\n"
-            "Do not overload passing themes merely to avoid creating additional themes.\n"
-            "Do not return repair plans that merely polish boundaries, rename themes, or clarify wording without materially reducing representational load.\n"
-            "A repair is insufficient if it removes only minor examples, edge cases, citation-specific details, or already-covered neighboring concepts.\n"
-            "When narrowing a failed theme, the scope logic must reduce included territory and identify excluded territory so extracted material is not reassigned back in later iterations.\n\n"
-           
-           "## OUTPUT FORMAT (STRICT JSON)\n"
+                "For each substantive new theme, substantive narrowed residual theme, or substantive "
+                "existing receiving theme whose scope is revised, describe the organizing proposition "
+                "that articulates the central conceptual insight expressed by the theme. "
+                "For any resulting theme whose theme_label is exactly \"Conflict\" or \"Other\", "
+                "set the relevant organizing-proposition field to null.\n"
+                "This proposition for substantive themes should explain the underlying idea, relationship, mechanism, process, pattern, argument, or dynamic that unifies the claims expected to be synthesized under that theme. "
+                "This should not be a description of the theme's contents, nor an explanation of why the theme was created. "
+                "Rather, it states the higher-level conceptual proposition that the eventual thematic synthesis should demonstrate through the evidence assigned to that theme.\n\n"
+
+                "## USING FAILED BATCH SUMMARIES and CURRENT SUMMARY LENGTHS in repair decisions.\n"
+                "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+                "- Treat content in failed batch summaries as conceptual content correctly assigned to this theme under its existing instructions.\n"
+                "- Use the synthesized theme content **and** FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
+
+                "## USING PRIOR ITERATIONS\n"
+                "- Use prior iterations only to identify recurring instability patterns, repeated failures, and ineffective prior repairs. Do not optimize older iterations independently from the current schema state.\n"
+                "- Do not repeat failed conceptual aggregations from prior iterations, defined by their inclusion/exclusion instructions.\n\n"
+    
+                "## UPDATE PRINCIPLES\n"
+                "Do not generate repair plans that repeat failed conceptual aggregations from prior iterations, including semantically similar rearticulations.\n"
+                "A repair plan may preserve a similar broad topic only if the resulting assignment behavior will materially change through extraction and narrowed scope logic.\n"
+                "Do not overload passing themes merely to avoid creating additional themes.\n"
+                "Do not return repair plans that merely polish boundaries, rename themes, or clarify wording without materially reducing representational load.\n"
+                "A repair is insufficient if it removes only minor examples, edge cases, citation-specific details, or already-covered neighboring concepts.\n"
+                "When narrowing a failed theme, the scope logic must reduce included territory and identify excluded territory so extracted material is not reassigned back in later iterations.\n"
+                "For every substantive theme requiring an organizing proposition, it should make "
+                "explicit the conceptual logic that already underlies the repaired theme.\n"
+                "For Conflict and Other themes, do not invent substantive thematic coherence; set "
+                "the corresponding organizing-proposition field to null.\n"
+                "Do not generate organizing propositions that merely restate the theme label, describe the theme's contents, or justify the repair decisions.\n"
+                "The organizing proposition should express the central conceptual insight that unifies the thematic region created by the repair and that the eventual "
+                "thematic synthesis should demonstrate through the evidence mapped to that theme.\n"
+                "When a repaired theme is substantially narrowed, revise its organizing proposition so that it reflects only the conceptual logic of the remaining "
+                "thematic region. Do not preserve a broader proposition that depends upon conceptual territory extracted elsewhere.\n"
+            
+            "## OUTPUT FORMAT (STRICT JSON)\n"
             "{\n"
             "  \"repair_plan\": {\n"
             "    \"theme_repairs\": [\n"
@@ -1483,9 +1584,11 @@ class Prompts:
             "            \"target_theme_id\": <integer | null>,\n"
             "            \"new_theme_label\": <string | null>,\n"
             "            \"new_theme_core_scope\": <string | null>,\n"
+            "            \"new_theme_organizing_proposition\": <string | null>,\n"
             "            \"new_theme_inclusions\": [<string>],\n"
             "            \"new_theme_exclusions\": [<string>],\n"
             "            \"receiving_theme_scope_update\": <string | null>,\n"
+            "            \"receiving_theme_organizing_proposition_update\": <string | null>,\n"
             "            \"reason\": <string>\n"
             "          }\n"
             "        ],\n"
@@ -1493,6 +1596,7 @@ class Prompts:
             "          \"outcome\": \"rename_and_narrow\" | \"dissolve_and_reallocate\",\n"
             "          \"residual_label\": <string | null>,\n"
             "          \"residual_core_scope\": <string | null>,\n"
+            "          \"residual_organizing_proposition\": <string | null>,\n"
             "          \"residual_inclusions\": [<string>],\n"
             "          \"residual_exclusions\": [<string>],\n"
             "          \"residual_expected_to_pass\": <boolean>,\n"
@@ -1525,14 +1629,34 @@ class Prompts:
             "- target_theme_id: existing receiving theme_id, or null if action is \"new_theme\".\n"
             "- new_theme_label: proposed label when action is \"new_theme\", otherwise null.\n"
             "- new_theme_core_scope: proposed conceptual scope when action is \"new_theme\", otherwise null.\n"
+            "- new_theme_organizing_proposition: when action is \"new_theme\" and the proposed "
+            "new_theme_label is substantive, state the central conceptual insight expressed by "
+            "the proposed theme. Explain the underlying idea, relationship, mechanism, process, "
+            "pattern, argument, or dynamic that unifies the claims expected to be synthesized "
+            "under that theme. This must not merely describe the theme's contents or explain why "
+            "the theme was created. Set this field to null when action is not \"new_theme\" or "
+            "when new_theme_label is exactly \"Conflict\" or \"Other\".\n"
             "- new_theme_inclusions: concepts that should be included in the new theme.\n"
             "- new_theme_exclusions: neighboring concepts that should be excluded from the new theme.\n"
             "- receiving_theme_scope_update: scope update required for an existing receiving theme, or null if action is \"new_theme\".\n"
+            "- receiving_theme_organizing_proposition_update: when action is "
+            "\"move_to_existing_theme\" and the receiving theme is substantive, state the "
+            "organizing proposition that should govern the receiving theme after the proposed "
+            "scope update. If its existing proposition remains fully suitable, restate it without "
+            "substantive revision. Otherwise revise it to express the central conceptual insight "
+            "of the expanded thematic region. Set this field to null when action is \"new_theme\" "
+            "or when the receiving theme is exactly \"Conflict\" or \"Other\".\n"
             "- reason: concise explanation for why this extraction reduces representational load.\n"
             "- source_theme_resolution: describes what happens to the original failed theme after extractions.\n"
             "- outcome: use \"rename_and_narrow\" when a bounded successor to the source theme remains; use \"dissolve_and_reallocate\" when no coherent bounded residual remains.\n"
             "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
             "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
+            "- residual_organizing_proposition: when outcome is \"rename_and_narrow\" and the "
+            "residual_label is substantive, state the central conceptual insight expressed by "
+            "the narrowed residual theme. It must reflect only the remaining thematic region and "
+            "must not depend on claims or conceptual territory extracted elsewhere. Set this field "
+            "to null when the source theme is dissolved or when residual_label is exactly "
+            "\"Conflict\" or \"Other\".\n"
             "- residual_inclusions: concepts that remain assigned to the narrowed residual theme.\n"
             "- residual_exclusions: extracted or neighboring concepts that must be excluded from the residual theme.\n"
             "- residual_expected_to_pass: whether the residual is expected to synthesize within bounded output constraints.\n"
@@ -1549,6 +1673,27 @@ class Prompts:
             "- If the residual is still likely to fail, extract additional claim-families until the residual is expected to pass or dissolve the source theme.\n"
             "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"
             "- Do NOT use move_to_existing_theme unless the receiving theme has both clear conceptual fit and spare representational capacity.\n"
+            "- Every extraction with action='new_theme' and a substantive new_theme_label must "
+            "include a non-null new_theme_organizing_proposition.\n"
+            "- Every extraction with action='new_theme' and new_theme_label exactly equal to "
+            "'Conflict' or 'Other' must set new_theme_organizing_proposition to null.\n"
+            "- Every extraction with action='new_theme' must set receiving_theme_organizing_proposition_update to null.\n"
+            "- Every extraction with action='move_to_existing_theme' must set new_theme_organizing_proposition to null.\n"
+            "- Every extraction with action='move_to_existing_theme' targeting a substantive "
+            "theme must include a non-null receiving_theme_organizing_proposition_update.\n"
+            "- Every extraction with action='move_to_existing_theme' targeting a theme whose "
+            "theme_label is exactly 'Conflict' or 'Other' must set "
+            "receiving_theme_organizing_proposition_update to null.\n"
+            "- Every source theme with outcome='rename_and_narrow' and a substantive "
+            "residual_label must include a non-null residual_organizing_proposition.\n"
+            "- Every source theme with outcome='rename_and_narrow' and residual_label exactly "
+            "equal to 'Conflict' or 'Other' must set residual_organizing_proposition to null.\n"
+            "- Every source theme with outcome='dissolve_and_reallocate' must set residual_organizing_proposition to null.\n"
+            "- An organizing proposition for a substantive theme must articulate the central "
+            "conceptual insight expressed by the theme, not merely list likely contents, "
+            "paraphrase the theme label, restate the scope, or justify the repair decision.\n"
+            "- A residual organizing proposition must reflect only the remaining thematic region and must not depend on conceptual territory extracted elsewhere.\n"
+            "- A receiving theme's organizing proposition must remain coherent after the proposed scope update; do not broaden it in a way that collapses conceptually distinct thematic regions.\n"
             "- Do NOT output final INCLUDE/EXCLUDE prose; provide scope logic only.\n"
             "- Do NOT claim a new theme is needed unless at least one extraction uses action='new_theme' with that exact new_theme_label.\n"
             "- Do NOT output a rewritten schema.\n"
@@ -1558,10 +1703,246 @@ class Prompts:
             "- The Conflict theme must preserve conceptual polarity.\n"
             "- The Other theme must remain a residual category.\n"
             "- The repaired codebook must support full assignment of the conceptual content.\n"
-        )
+            )
+        
+        else:
+            # RETURN THE PROMPT WITHOUT THE REQUIRMENT FOR AN ORGANIZING PROPOSITION
+            return(
+                "## ROLE\n"
+                "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
+
+                "## THE TASK\n"
+                "You are working as part of an iterative loop to refine a thematic codebook.\n"
+                "That iterative loop works as follows: " \
+                "1. Generate a thematic codebook.\n" 
+                "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n" 
+                "3. Attempt to synthesize the content assigned to each theme under bounded output constraints.\n"
+                "4. Check whether synthesis included all the assigned content\n"
+                "5. Forcibly reinsert any content that was lost\n"
+                "   - Insertion is done in batches to ensure full insertion considering stress on the LLM context window\n"
+                "   - If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
+                "6. Update the codebook to partition failing themes into smaller independently synthesizable claim-families so that synthesis and reinsertion can pass.\n\n"
+
+                "You are currently at step 6 of this process."
+                "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n\n"
+
+                "## UNDERSTANDING THE CODEBOOK STRUCTURE\n"
+                "### STRUCTURE\n"
+                "Each theme defines an operational synthesis region using:\n"
+                "- theme_label\n"
+                "- theme_description (the North Star logic)\n"
+                "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+
+                "### INCLUDE/EXCLUDE LOGIC\n"
+                "All themes define precise operational assignment rules:\n"
+                "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
+                "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+
+                "INCLUDE rules define the conceptual material assigned to the synthesis region.\n"
+                "EXCLUDE rules define conceptual material that must be routed to neighboring synthesis regions.\n"
+                "EXCLUDE rules should not be the simple inverses of the INCLUDE rule.\n"
+                "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining assignment partition.\n"
+                "When generating the scope logic in the repair plan, provide sufficient specificity to allow for subsequent EXCLUDE rules to be written that can:\n"
+                "- identify the neighboring themes most likely to overlap with the current theme\n"
+                "- explicitly exclude those conceptual territories\n"
+                "- route ambiguous material toward the appropriate neighboring themes\n\n"
+
+                "### SPECIAL THEMES\n"
+                "**Conflict Theme (Conditional)**\n"
+                "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains "
+                "substantively incompatible interpretations, claims, or prescriptions that cannot be "
+                "maintained within a single coherent conceptual frame.\n\n"
+
+                "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
+
+                "Do NOT create a Conflict theme if the material merely:\n"
+                "- Presents reinforcing critiques\n"
+                "- Describes layered constraints or interacting factors\n"
+                "- Articulates trade-offs within a shared conceptual frame\n"
+                "- Expresses variation in emphasis without incompatible positions\n\n"
+
+                "A Conflict theme requires identifiable polarity between positions.\n\n"
+
+                "Instructions for conflict will invoke DETECTION TRIGGERS (not INCLUDE/EXCLUDE). If scope logic amends conflict it must be sufficiently specific to allow subsequent rules to:\n"
+                "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
+                "- Preserve opposing positions as distinct\n"
+                "- Avoid harmonizing or resolving disagreement\n\n"
+
+                "**'Other' Theme (Conditional)**\n"
+                "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
+                "without fragmenting the schema into excessively fine-grained themes.\n\n"
+
+                "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+
+                "The 'Other' theme should:\n"
+                "- Capture valid but low-frequency or residual concepts\n"
+                "- Not contain a coherent or dominant conceptual grouping\n"
+                "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+
+                "If no residual concepts exist, omit this theme entirely.\n\n"
+
+                "## INPUT\n"
+                "You will receive:\n"
+                "1. The research question\n"
+                "2. Efforts at previous schema development to date, which will include:\n"
+                "   - Prior schema\n"
+                "   - The theme summaries those schema generated\n"
+                "       - For failing themes, these summaries will include the 'FAILED BATCH SUMMARIES' that identify the content from any batch (numbered by batch) that exceeded the bounded input constraint when being forcibly reinserted.\n"
+                "   - The pass/fail status of each theme reflecting the result of complete reinsertion.\n"
+                "   - The word count of all currently passing themes.\n"
+                "   - Themes with `word_count = null` failed during reinsertion. Their true representational load is therefore unknown and should be assumed to exceed operational capacity.\n"
+                "Prior codebooks are arranged by iteration with higher iterations representing more recent versions. \n"
+                "The most recent codebook is flagged as such. This should be the focus of your revision.\n"
+                "Each codebook is flagged as to whether **all** the themes passed completion checks.\n\n"
+
+                "## UNDERSTANDING FAILURES\n"
+                "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
+                "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+                "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
+                "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+                "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
+                "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
+                "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
+
+                "## REQUIRED STRUCTURAL REPAIR\n"
+                "If 'schema_has_failures' = True for the most recent iteration, every failing non-Conflict theme must be decomposed.\n"
+                "For each failing theme, identify the largest independently synthesizable claim-family by representational load currently assigned to that theme.\n"
+                "An independently synthesizable claim-family is a recurring group of claims with its own mechanism, actor system, policy instrument, causal structure, constraint type, or argumentative logic that can be synthesized as a bounded unit.\n\n"
+
+                "By 'largest', prioritize the claim-family that:\n"
+                "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
+                "2. recurs across multiple sources or batches;\n"
+                "3. can plausibly function as an independent bounded synthesis region;\n"
+                "4. can plausibly be synthesized within bounded output constraints (4096 tokens/~2500 words).\n\n"
+
+                "Extract that claim-family from the failed source theme by assigning it to a new theme, unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
+                "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
+                "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
+
+                "Do not write final theme descriptions or final INCLUDE/EXCLUDE prose. Provide scope logic that a second-stage schema rewriter can use to generate labels, descriptions, and operational INCLUDE/EXCLUDE rules.\n"
+                "The scope logic must be specific enough to support future INCLUDE rules for retained/new/receiving themes and future EXCLUDE rules that prevent extracted content from drifting back into the narrowed source theme.\n"
+                "Scope logic should identify neighboring themes most likely to overlap, the conceptual territory to route away from the source theme, and the destination for that territory.\n\n"
+
+                "## USING FAILED BATCH SUMMARIES and CURRENT SUMMARY LENGTHS in repair decisions.\n"
+                "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+                "- Treat content in failed batch summaries as conceptual content correctly assigned to this theme under its existing instructions.\n"
+                "- Use the synthesized theme content **and** FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
+
+                "## USING PRIOR ITERATIONS\n"
+                "- Use prior iterations only to identify recurring instability patterns, repeated failures, and ineffective prior repairs. Do not optimize older iterations independently from the current schema state.\n"
+                "- Do not repeat failed conceptual aggregations from prior iterations, defined by their inclusion/exclusion instructions.\n\n"
+    
+                "## UPDATE PRINCIPLES\n"
+                "Do not generate repair plans that repeat failed conceptual aggregations from prior iterations, including semantically similar rearticulations.\n"
+                "A repair plan may preserve a similar broad topic only if the resulting assignment behavior will materially change through extraction and narrowed scope logic.\n"
+                "Do not overload passing themes merely to avoid creating additional themes.\n"
+                "Do not return repair plans that merely polish boundaries, rename themes, or clarify wording without materially reducing representational load.\n"
+                "A repair is insufficient if it removes only minor examples, edge cases, citation-specific details, or already-covered neighboring concepts.\n"
+                "When narrowing a failed theme, the scope logic must reduce included territory and identify excluded territory so extracted material is not reassigned back in later iterations.\n\n"
+            
+            "## OUTPUT FORMAT (STRICT JSON)\n"
+                "{\n"
+                "  \"repair_plan\": {\n"
+                "    \"theme_repairs\": [\n"
+                "      {\n"
+                "        \"source_theme_id\": <integer>,\n"
+                "        \"source_theme_label\": <string>,\n"
+                "        \"completeness_check\": \"fail\",\n"
+                "        \"concepts_ranked_by_representational_load\": [\n"
+                "          {\n"
+                "            \"concept\": <string>,\n"
+                "            \"estimated_load\": \"high\" | \"medium\" | \"low\",\n"
+                "            \"evidence_from_summary_or_failed_batches\": <string>,\n"
+                "            \"independently_synthesizable\": <boolean>\n"
+                "          }\n"
+                "        ],\n"
+                "        \"extractions\": [\n"
+                "          {\n"
+                "            \"concept\": <string>,\n"
+                "            \"action\": \"new_theme\" | \"move_to_existing_theme\",\n"
+                "            \"target_theme_id\": <integer | null>,\n"
+                "            \"new_theme_label\": <string | null>,\n"
+                "            \"new_theme_core_scope\": <string | null>,\n"
+                "            \"new_theme_inclusions\": [<string>],\n"
+                "            \"new_theme_exclusions\": [<string>],\n"
+                "            \"receiving_theme_scope_update\": <string | null>,\n"
+                "            \"reason\": <string>\n"
+                "          }\n"
+                "        ],\n"
+                "        \"source_theme_resolution\": {\n"
+                "          \"outcome\": \"rename_and_narrow\" | \"dissolve_and_reallocate\",\n"
+                "          \"residual_label\": <string | null>,\n"
+                "          \"residual_core_scope\": <string | null>,\n"
+                "          \"residual_inclusions\": [<string>],\n"
+                "          \"residual_exclusions\": [<string>],\n"
+                "          \"residual_expected_to_pass\": <boolean>,\n"
+                "          \"dissolution_reason\": <string | null>\n"
+                "        },\n"
+                "        \"repair_narrative\": <string>\n"
+                "      }\n"
+                "    ],\n"
+                "    \"schema_repairs\": [\n"
+                "      {\n"
+                "        \"affected_theme_ids\": [<integer>],\n"
+                "        \"repair_narrative\": <string>\n"
+                "      }\n"
+                "    ]\n"
+                "  }\n"
+                "}\n\n"
+
+                "Field definitions:\n"
+                "- repair_plan: contains decomposition operations needed for the second-stage schema rewrite.\n"
+                "- theme_repairs: one decomposition plan for each failed non-Conflict theme.\n"
+                "- source_theme_id: the input theme_id of the failed theme being decomposed.\n"
+                "- source_theme_label: the input label of the failed theme being decomposed.\n"
+                "- concepts_ranked_by_representational_load: major claim-families inside the failed theme, ordered from largest to smallest expected synthesis burden.\n"
+                "- concept: a distinct claim-family, mechanism, actor system, policy instrument, causal structure, or constraint type.\n"
+                "- estimated_load: rough estimate of how much synthesis capacity this concept consumes.\n"
+                "- evidence_from_summary_or_failed_batches: concise evidence that this concept recurs in the current summary or failed batch summaries.\n"
+                "- independently_synthesizable: true if the concept can plausibly function as a bounded synthesis region.\n"
+                "- extractions: claim-families removed from the failed source theme.\n"
+                "- action: use \"new_theme\" when extracted material should become a new theme; use \"move_to_existing_theme\" only when an existing theme has clear conceptual fit and spare representational capacity.\n"
+                "- target_theme_id: existing receiving theme_id, or null if action is \"new_theme\".\n"
+                "- new_theme_label: proposed label when action is \"new_theme\", otherwise null.\n"
+                "- new_theme_core_scope: proposed conceptual scope when action is \"new_theme\", otherwise null.\n"
+                "- new_theme_inclusions: concepts that should be included in the new theme.\n"
+                "- new_theme_exclusions: neighboring concepts that should be excluded from the new theme.\n"
+                "- receiving_theme_scope_update: scope update required for an existing receiving theme, or null if action is \"new_theme\".\n"
+                "- reason: concise explanation for why this extraction reduces representational load.\n"
+                "- source_theme_resolution: describes what happens to the original failed theme after extractions.\n"
+                "- outcome: use \"rename_and_narrow\" when a bounded successor to the source theme remains; use \"dissolve_and_reallocate\" when no coherent bounded residual remains.\n"
+                "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
+                "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
+                "- residual_inclusions: concepts that remain assigned to the narrowed residual theme.\n"
+                "- residual_exclusions: extracted or neighboring concepts that must be excluded from the residual theme.\n"
+                "- residual_expected_to_pass: whether the residual is expected to synthesize within bounded output constraints.\n"
+                "- dissolution_reason: required if outcome is \"dissolve_and_reallocate\", otherwise null.\n"
+                "- repair_narrative: one concise sentence explaining the decomposition.\n"
+                "- schema_repairs: schema-level repairs affecting relationships across multiple themes.\n"
+                "- affected_theme_ids: input theme_ids affected by the schema-level repair.\n\n"
+
+                "Validation rules:\n"
+                "- Every theme repair must include at least one extraction.\n"
+                "- Every failed non-Conflict theme must appear exactly once in theme_repairs.\n"
+                "- Every theme repair must identify concepts_ranked_by_representational_load.\n"
+                "- Every theme repair must extract at least the largest independently synthesizable high-load claim-family.\n"
+                "- If the residual is still likely to fail, extract additional claim-families until the residual is expected to pass or dissolve the source theme.\n"
+                "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"
+                "- Do NOT use move_to_existing_theme unless the receiving theme has both clear conceptual fit and spare representational capacity.\n"
+                "- Do NOT output final INCLUDE/EXCLUDE prose; provide scope logic only.\n"
+                "- Do NOT claim a new theme is needed unless at least one extraction uses action='new_theme' with that exact new_theme_label.\n"
+                "- Do NOT output a rewritten schema.\n"
+                "- Do NOT output polished final theme prose.\n"
+                "- Output only decomposition operations and conceptual reallocations.\n"
+                "- Cosmetic edits do NOT count as repairs.\n"
+                "- The Conflict theme must preserve conceptual polarity.\n"
+                "- The Other theme must remain a residual category.\n"
+                "- The repaired codebook must support full assignment of the conceptual content.\n"
+            )
+            
 
 
-    def implement_schema_repairs(self):
+    def implement_schema_repairs(self, provide_organizing_proposition=False):
         """
         Construct the prompt for implementing a schema-repair plan.
 
@@ -1598,6 +1979,116 @@ class Prompts:
         ensure that schema changes are inspectable and reduces the risk of
         performative repair.
         """
+
+        if provide_organizing_proposition:
+            schema_architecture = (
+                "- new_theme_organizing_proposition: the conceptual proposition established "
+                "by the repair plan for a newly created substantive theme. Use it to write "
+                "the final organizing_proposition without changing its underlying conceptual "
+                "claim. It is null when the new theme is \"Conflict\" or \"Other\".\n"
+            )
+
+            new_theme_proposition_definition = (
+                "- new_theme_organizing_proposition: the conceptual proposition established "
+                "by the repair plan for a newly created theme. Use it to write the final "
+                "organizing_proposition for that theme without changing its underlying "
+                "conceptual claim.\n"
+            )
+
+            receiving_theme_proposition_definition = (
+                "- receiving_theme_organizing_proposition_update: the conceptual proposition "
+                "that should govern an existing receiving theme after its scope is updated. "
+                "Use it to write the receiving theme's final organizing_proposition without "
+                "introducing a different thematic logic.\n"
+            )
+
+            residual_theme_proposition_definition = (
+                "- residual_organizing_proposition: the conceptual proposition established "
+                "for the narrowed successor to the failed source theme. Use it to write the "
+                "residual theme's final organizing_proposition so that it reflects only the "
+                "remaining thematic region.\n"
+            )
+
+            organizing_proposition_tasks = (
+                "- convert residual_organizing_proposition into the final organizing_proposition "
+                "for each narrowed substantive residual theme\n"
+                "- convert new_theme_organizing_proposition into the final organizing_proposition "
+                "for each newly created substantive theme\n"
+                "- convert receiving_theme_organizing_proposition_update into the final "
+                "organizing_proposition for each updated substantive receiving theme\n"
+                "- for any resulting theme whose theme_label is exactly \"Conflict\" or "
+                "\"Other\", set organizing_proposition to null\n"
+            )
+
+            organizing_proposition_implementation_rules = (
+                "- Treat organizing-proposition fields in the repair_plan as authoritative "
+                "accounts of the conceptual insight the repaired themes should express.\n"
+                "- Convert those fields into concise, schema-ready organizing_proposition "
+                "text while preserving their conceptual meaning.\n"
+                "- For every new, narrowed residual, or updated receiving substantive theme, "
+                "produce the final organizing_proposition by faithfully implementing the "
+                "corresponding organizing-proposition field supplied in the repair_plan.\n"
+                "- For themes whose theme_label is exactly \"Conflict\" or \"Other\", set organizing_proposition to null.\n"
+                "- You may improve clarity, grammar, and consistency of expression, but do "
+                "NOT introduce a different proposition, strengthen or weaken the conceptual "
+                "claim, broaden or narrow its thematic logic, or add interpretations not "
+                "contained in the repair_plan.\n"
+                "- For newly created themes, derive the final organizing_proposition only "
+                "from new_theme_organizing_proposition.\n"
+                "- For narrowed residual themes, derive the final organizing_proposition "
+                "only from residual_organizing_proposition. Do NOT retain elements of the "
+                "source theme's previous proposition that depend on extracted conceptual "
+                "territory.\n"
+                "- For updated receiving themes, derive the final organizing_proposition "
+                "from receiving_theme_organizing_proposition_update. Do NOT preserve the "
+                "previous proposition where the repair_plan supplies a revised one.\n"
+                "- Preserve the organizing_proposition of unchanged themes exactly unless "
+                "the repair_plan explicitly requires that theme to be updated.\n"
+                "- The organizing_proposition must express the central conceptual insight of the theme. "
+                "It must not merely describe the theme's scope, enumerate its contents, restate its "
+                "assignment instructions, or explain why the theme exists.\n"
+            )
+
+            organizing_proposition_important_rule = (
+                "- Every new, narrowed residual, or updated receiving theme must visibly "
+                "implement the corresponding organizing-proposition field supplied by the "
+                "repair_plan.\n"
+            )
+
+            output_format = (
+                "{\n"
+                "  \"themes\": [\n"
+                "    {\n"
+                "      \"theme_label\": <string>,\n"
+                "      \"theme_description\": <string>,\n"
+                "      \"organizing_proposition\": <string | null>,\n"
+                "      \"instructions\": <string>\n"
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+            )
+
+        else:
+            schema_architecture = ""
+            new_theme_proposition_definition = ""
+            receiving_theme_proposition_definition = ""
+            residual_theme_proposition_definition = ""
+            organizing_proposition_tasks = ""
+            organizing_proposition_implementation_rules = ""
+            organizing_proposition_other_rules = ""
+            organizing_proposition_important_rule = ""
+            output_format = (
+            "{\n"
+            "  \"themes\": [\n"
+            "    {\n"
+            "      \"theme_label\": <string>,\n"
+            "      \"theme_description\": <string>,\n"
+            "      \"instructions\": <string>\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            )
+        
         return(
             "## ROLE\n"
             "You are a Schema Rewrite Engine.\n"
@@ -1608,10 +2099,19 @@ class Prompts:
             "## INPUTS\n"
             "You will receive:\n"
             "1. The current research question\n"
-            "2. The current schema\n"
+            "2. The current schema, containing:\n"
+            "   - theme_id: The numeric identifier for the theme\n"
+            "   - theme_label: A concise, descriptive label for the theme\n"
+            "   - theme_description: A detailed description of the theme's conceptual scope\n"
+            f"{schema_architecture}"
+            "   - instructions: Operational assignment rules defining what should be included "
+            "or excluded from the theme\n"
             "3. A validated repair_plan generated by a prior planning stage\n"
             "4. The most recent thematic summaries, including any FAILED BATCH SUMMARIES\n"
-            " - FAILED BATCH SUMMARIES describe content that could not be reinserted into a theme without exceeding bounded synthesis constraints. Treat them as evidence of representational load and as context for implementing the repair_plan, not as a reason to invent additional repairs.\n\n"
+            "   - FAILED BATCH SUMMARIES describe content that could not be reinserted into "
+            "a theme without exceeding bounded synthesis constraints. Treat them as evidence "
+            "of representational load and as context for implementing the repair_plan, not "
+            "as a reason to invent additional repairs.\n\n"
 
             "## REPAIR PLAN FIELD DEFINITIONS\n"
             "- repair_plan: contains decomposition operations that must be implemented in the rewritten schema.\n"
@@ -1625,13 +2125,16 @@ class Prompts:
             "- target_theme_id: existing theme_id that receives the extracted concept, or null if action is \"new_theme\".\n"
             "- new_theme_label: label to use for a newly created theme, or null if the concept moves to an existing theme.\n"
             "- new_theme_core_scope: conceptual scope of the new theme.\n"
+            f"{new_theme_proposition_definition}"
             "- new_theme_inclusions: concepts that must be included in the new theme's INCLUDE rule.\n"
             "- new_theme_exclusions: concepts that must be excluded from the new theme's EXCLUDE rule.\n"
             "- receiving_theme_scope_update: scope update that must be incorporated into an existing receiving theme.\n"
+            f"{receiving_theme_proposition_definition}"
             "- source_theme_resolution: specifies whether the original failed theme becomes a narrowed successor or is dissolved.\n"
             "- outcome: if \"rename_and_narrow\", keep a narrowed successor theme using the residual fields; if \"dissolve_and_reallocate\", remove the source theme entirely.\n"
             "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
             "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
+            f"{residual_theme_proposition_definition}"
             "- residual_inclusions: concepts that must remain included in the narrowed residual theme.\n"
             "- residual_exclusions: concepts that must be excluded from the narrowed residual theme, especially extracted concepts that should not drift back in.\n"
             "- dissolution_reason: explanation for dissolution; use it only to understand intent, not as output text.\n"
@@ -1648,7 +2151,8 @@ class Prompts:
             "- remove source themes when source_theme_resolution.outcome='dissolve_and_reallocate'\n"
             "- convert residual_core_scope, residual_inclusions, and residual_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
             "- convert new_theme_core_scope, new_theme_inclusions, and new_theme_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
-            "- convert receiving_theme_scope_update into updated descriptions and INCLUDE/EXCLUDE rules for receiving themes\n\n"
+            "- convert receiving_theme_scope_update into updated descriptions and INCLUDE/EXCLUDE rules for receiving themes\n"
+            f"{organizing_proposition_tasks}\n\n"
 
             "## IMPLEMENTATION RULES\n"
             "- Implement the repair plan exactly.\n"
@@ -1659,7 +2163,8 @@ class Prompts:
             "- Do NOT optimize for elegance, theoretical completeness, or conceptual compression beyond the repair plan.\n"
             "- Do NOT invent additional restructurings not implied by the repair plan.\n"
             "- Do NOT make speculative improvements.\n"
-            "- Preserve unchanged themes unless the repair plan requires modification.\n\n"
+            "- Preserve unchanged themes unless the repair plan requires modification.\n"
+            f"{organizing_proposition_implementation_rules}\n\n"
 
             "## INCLUDE/EXCLUDE REQUIREMENTS\n"
             "All substantive themes must use:\n"
@@ -1694,18 +2199,11 @@ class Prompts:
             "- This is an implementation task, not a planning task.\n"
             "- The repair plan is the authoritative source of structural change.\n"
             "- Your job is to produce a clean rewritten schema that faithfully realizes the repair plan.\n"
-            "- Every extraction in the repair plan must be visibly implemented in the resulting schema.\n\n"
+            "- Every extraction in the repair plan must be visibly implemented in the resulting schema.\n"
+            f"{organizing_proposition_important_rule}\n\n"
 
             "## OUTPUT FORMAT (STRICT JSON)\n"
-            "{\n"
-            "  \"themes\": [\n"
-            "    {\n"
-            "      \"theme_label\": <string>,\n"
-            "      \"theme_description\": <string>,\n"
-            "      \"instructions\": <string>\n"
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
+            f"{output_format}\n\n"
 
             "## CONSTRAINTS\n"
             "- Do NOT generate numeric identifiers\n"
@@ -1715,7 +2213,7 @@ class Prompts:
             "- Output only the rewritten schema JSON\n"
         )
     
-    def gen_theme_schema_optimize(self):
+    def gen_theme_schema_optimize(self, provide_organizing_proposition=False):
         """
         Construct the prompt for schema optimization.
 
@@ -1763,6 +2261,92 @@ class Prompts:
         the final schema-refinement stage before synthesis outputs are treated
         as stable.
         """
+
+        if provide_organizing_proposition:
+            codebook_structure = (
+                "Each theme defines a conceptual territory using:\n"
+                "- theme_label\n"
+                "- theme_description\n"
+                "- organizing_proposition\n"
+                "- instructions\n\n"
+                "These fields perform different functions within the schema.\n"
+                "The theme_description defines the conceptual territory represented by the theme.\n"
+                "For substantive themes, the organizing_proposition states the central conceptual insight expressed by the theme. "
+                "It articulates the underlying idea, relationship, process, pattern, distinction, trajectory, mechanism, argument, "
+                "or dynamic that unifies its thematic logic.\n"
+                "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
+                "organizing_proposition must be null.\n"
+                "The instructions operationalize assignment into the conceptual territory through "
+                "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
+            )
+
+            organizing_proposition_conflict = (
+                "Conflict is an architectural category rather than a substantive thematic region.\n"
+                "Therefore its organizing_proposition must be null.\n\n"
+            )
+
+            organizing_proposition_other = (
+                "Other is a residual category rather than a substantive thematic region.\n"
+                "Therefore its organizing_proposition must be null.\n\n"
+            )
+
+            organizing_proposition_optimization_constraints = (
+                "If making improvements, update theme labels, theme descriptions, "
+                "organizing propositions (for substantive themes only), and instructions as "
+                "necessary to faithfully reflect the optimized conceptual partition.\n"
+                "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to "
+                "both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
+                "- Changes to organizing_propositions should be applied to every substantive "
+                "theme whose conceptual territory changes as part of the optimization, including "
+                "both themes that relinquish conceptual territory and themes that receive it.\n"
+                "- For substantive themes whose conceptual territory is unchanged, preserve the "
+                "existing organizing_proposition.\n"
+            )
+
+            output_format = (
+                "{\n"
+                "  \"no_change\": <boolean>,\n"
+                "  \"themes\": [\n"
+                "    {\n"
+                "      \"theme_label\": <string>,\n"
+                "      \"theme_description\": <string>,\n"
+                "      \"organizing_proposition\": <string | null>,\n"
+                "      \"instructions\": <string>\n"
+                "    }\n"
+                "  ]\n"
+                "}\n"
+            )
+
+
+        else:
+            codebook_structure = (
+                "Each theme defines a conceptual territory using:\n"
+                "- theme_label\n"
+                "- theme_description (the North Star logic)\n"
+                "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+            )
+            organizing_proposition_conflict = ""
+            organizing_proposition_other = ""
+            organizing_proposition_optimization_constraints = (
+                "If making improvements, you should update theme descriptions, instructions and labels as needed to maintain clear conceptual boundaries. \n"
+                "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
+            )
+
+            output_format = (
+                "{\n"
+                "  \"no_change\": <boolean>,\n"
+                "  \"themes\": [\n"
+                "    {\n"
+                "      \"theme_label\": <string>,\n"
+                "      \"theme_description\": <string>,\n"
+                "      \"instructions\": <string>\n"
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+            )
+
+
+
         return(
             "## ROLE\n"
             "You are a Schema Optimization Engine.\n"
@@ -1780,10 +2364,7 @@ class Prompts:
             "   - The most recent iteration is flagged as such and should be the focus of your optimization efforts.\n"
 
             "## CODEBOOK STRUCTURE\n"
-             "Each theme defines a conceptual territory using:\n"
-            "- theme_label\n"
-            "- theme_description (the North Star logic)\n"
-            "- instructions (INCLUDE / EXCLUDE rules)\n\n"
+            f"{codebook_structure}"
 
             "## INCLUDE/EXCLUDE LOGIC\n"
             "All themes must define precise operational assignment rules:\n"
@@ -1808,6 +2389,8 @@ class Prompts:
 
             "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
 
+            f"{organizing_proposition_conflict}"
+
             "Do NOT create a Conflict theme if the material merely:\n"
             "- Presents reinforcing critiques\n"
             "- Describes layered constraints or interacting factors\n"
@@ -1826,6 +2409,8 @@ class Prompts:
             "without fragmenting the schema into excessively fine-grained themes.\n\n"
 
             "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+
+            f"{organizing_proposition_other}"
 
             "The 'Other' theme should:\n"
             "- Capture valid but low-frequency or residual concepts\n"
@@ -1869,8 +2454,7 @@ class Prompts:
             "- does NOT reintroduce previously resolved completeness failures\n"
             "- If proposing reallocation of content between themes and it is unclear whether bounded synthesis constraints can be maintained, you must avoid making such changes\n"
             "Only suggest changes to the schema if there are obvious and non-speculative improvements that can be made based on the input. Do NOT make speculative improvements.\n"
-            "If making improvements, you should update theme descriptions, instructions and labels as needed to maintain clear conceptual boundaries. \n"
-            "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
+            f"{organizing_proposition_optimization_constraints}\n"
             "Do not merge themes unless both conceptual coherence and bounded synthesis viability are clearly preserved without collapsing distinct claim-families into lossy generalizations.\n\n"
 
             "## CONVERGENCE CONDITION\n"
@@ -1883,16 +2467,7 @@ class Prompts:
             "Set \"no_change\": false only if there are obvious, non-speculative improvements that preserve bounded synthesis viability.\n\n"
 
             "## OUTPUT FORMAT (STRICT JSON)\n"
-            "{\n"
-            "  \"no_change\": <boolean>,\n"
-            "  \"themes\": [\n"
-            "    {\n"
-            "      \"theme_label\": <string>,\n"
-            "      \"theme_description\": <string>,\n"
-            "      \"instructions\": <string>\n"
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
+            f"{output_format}\n\n"
 
             "If you set \"no_change\": true, \"themes\" should be an empty array.\n"
             "If no_change=false, return the full revised schema, not only changed themes.\n"
@@ -2021,7 +2596,7 @@ class Prompts:
             f"- Valid theme_id values: [{allowed_ids_str}].\n\n"
         )
 
-    def populate_themes(self, theme_len: int, theme_type: str):
+    def populate_themes(self, theme_len: int, theme_type: str, provide_organizing_proposition=False):
 
         """
         Construct the prompt for theme-level synthesis.
@@ -2135,6 +2710,44 @@ class Prompts:
         
         specific_instructions = instructions_dict[theme_type]
 
+        if provide_organizing_proposition and theme_type == "general":
+            organizing_proposition_input = (
+                "THEME DESCRIPTION: <theme_description>\n"
+                "ORGANIZING PROPOSITION: <organizing_proposition>\n"
+            )
+
+            thematic_logic_instruction = (
+                "1. Use the Theme Description and Organizing Proposition for Distinct Purposes:\n"
+                "   The theme_description defines the conceptual territory and boundaries of "
+                "this section. Remain within that territory.\n\n"
+                "   The organizing_proposition states the central conceptual insight that the "
+                "thematic synthesis should develop through the assigned evidence. Use it as "
+                "the organizing logic and narrative spine of the section.\n\n"
+                "   Do not merely repeat the organizing_proposition at the beginning and then "
+                "summarize the insights sequentially. Explain how the insights collectively "
+                "express, instantiate, develop, qualify, complicate, or place limits on the "
+                "proposition. Connect major groups of evidence back to this conceptual logic "
+                "throughout the synthesis.\n\n"
+                "   The organizing_proposition is not an additional source claim and must not "
+                "be cited as evidence. It is a schema-level guide for structuring the synthesis.\n\n"
+                "   Do not force evidence to support the proposition. Preserve all substantively "
+                "distinct assigned insights, including claims that qualify, complicate, or do "
+                "not fit neatly within its simplest formulation. Where necessary, present the "
+                "proposition as internally varied, conditional, or bounded by the evidence.\n\n"
+            )
+
+        else:
+            organizing_proposition_input = (
+                "THEME DESCRIPTION: <theme_description (the North Star logic)>\n"
+            )
+
+            thematic_logic_instruction = (
+            "1. Adhere Strictly to the North Star:\n"
+            "   The 'theme_description' defines the conceptual territory of this section. "
+            "The synthesis must remain tightly bounded by this logic and read as a "
+            "self-contained thematic section aligned to the overarching research question.\n\n"
+        )
+
 
         return (
             "## ROLE\n"
@@ -2146,16 +2759,13 @@ class Prompts:
             "You will receive a user message in the following format:\n"
             "RESEARCH QUESTION: <question_text>\n"
             "THEME LABEL: <theme_label>\n"
-            "THEME DESCRIPTION: <theme_description (the North Star logic)>\n"
+            f"{organizing_proposition_input}"
             "INSIGHTS TO SYNTHESIZE:\n"
             "<list of specific insights identified as relevant to this theme>\n\n"
 
             "## SYNTHESIS LAWS\n\n"
 
-            "1. Adhere Strictly to the North Star:\n"
-            "   The 'theme_description' defines the conceptual territory of this section. "
-            "The synthesis must remain tightly bounded by this logic and read as a "
-            "self-contained thematic section aligned to the overarching research question.\n\n"
+            f"{thematic_logic_instruction}"
 
             "2. Coverage with Abstraction (Non-Negotiable):\n\n"
             "   All substantively distinct ideas present in the input insights must be represented in the synthesis.\n\n"
