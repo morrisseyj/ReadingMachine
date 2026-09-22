@@ -165,13 +165,15 @@ This design introduces some redundancy across the overall report, as similar ins
 
 ### 4.5 Theme Generation
 
-Clusters group insights by semantic similarity, providing a useful approximation of structure within the corpus. However, semantic proximity does not necessarily correspond to conceptual organization. This distinction is important methodologically. In Braun and Clarke’s (2006) account, themes are not simply discovered as pre-existing clusters in the data; they are actively constructed through analytic judgment. ReadingMachine preserves this distinction by using clustering only as scaffolding for thematic interpretation, rather than treating clusters themselves as themes.To move from semantic groupings to analytically meaningful categories, the system generates themes through a two-stage process.
+Clusters group insights by semantic similarity, providing a useful approximation of structure within the corpus. However, semantic proximity does not necessarily correspond to conceptual organization. This distinction is important methodologically. In Braun and Clarke’s (2006) account, themes are not simply discovered as pre-existing clusters in the data; they are actively constructed through analytic judgment. ReadingMachine preserves this distinction by using clustering only as scaffolding for thematic interpretation, rather than treating clusters themselves as themes. To move from semantic groupings to analytically meaningful categories, the system generates themes through a two-stage process.
 
 First, each cluster of insights is summarized. Clusters are processed in an order determined by the shortest path between cluster centroids in the embedding space. This ordering places semantically similar clusters adjacent to one another. As each cluster is summarized, the last five generated summaries are provided as frozen context for subsequent steps. This allows for local coherence without risking anchoring on initial clusters summaries (which could happen if global context was frozen). All clusters, including outliers, are included in this process.
 
-The result is a sequence of cluster summaries that forms a structured narrative of the corpus, organized by semantic proximity and with reduced repetition. This narrative serves as the input for theme generation, allowing the model to operate over an ordered representation of the corpus rather than a disorganized set of individual insights.
+Second, the cluster summary narrative is passed to a language model to generate a theme schema. This schema defines a set of thematic categories, including a theme label, theme description, and rules for assigning insights to each theme. The schema also includes an organizing principle for each theme. This organizing principle is intended to prevent themes from becoming loose collections of related claims, and instead encourages the model to construct themes around a central conceptual proposition.
 
-Second, the cluster summary narrative is passed to a language model to generate a theme schema. This schema defines a set of thematic categories (theme label and theme description), along with rules for assigning insights to each theme. The schema includes an *Other* category to capture minority insights that do not warrant a dedicated theme, preventing unnecessary proliferation of categories. This category is distinct from clustering outliers; outlier insights may be assigned to any theme based on their content.
+Invoking the idea of an "organizing principle" has implications for what counts as a good theme in ReadingMachine. An ideal theme is not simply the most efficient apportioning of insights into non-overlapping categories. It is the best apportioning that can be organized around a coherent central idea: a conceptual proposition to which the included insights can meaningfully refer back. The goal is therefore not only coverage or separation, but conceptual integrity. A theme should gather insights because they participate in a shared argument, mechanism, institutional form, governance logic, actor system, causal structure, constraint type, or argumentative pattern.
+
+The schema includes an *Other* category to capture minority insights that do not warrant a dedicated theme, preventing unnecessary proliferation of categories. This category is distinct from clustering outliers; outlier insights may be assigned to any theme based on their content.
 
 The schema also includes a *Conflicts* category when substantively incompatible claims are present. This is introduced explicitly to counter the tendency of language models to smooth disagreement during summarization and to preserve contested areas of the corpus. Conflict is defined in the prompt as:
 
@@ -594,6 +596,18 @@ It is worth noting that the above failures were not a result of context pressure
 
 More generally, the repeated success of decomposition, patch generation, auditing, and repair suggests that information-preserving workflows may benefit from separating representational fidelity tasks from synthesis tasks, rather than assuming that a single generative operation can optimize both simultaneously. 
 
+### 8.12 Iterative Reading and Re-Reading
+
+A further implication of ReadingMachine is that it makes iterative corpus reading practically feasible. In conventional qualitative synthesis, reading is expensive. Because the cost of re-reading a large corpus is high, researchers are often pushed toward the highest-level abstractions that can be generated from a single pass through the material. This can produce useful conceptual categories, but those categories may remain difficult to interpret if the mechanisms, examples, and lower-level variations that compose them are not subsequently examined in detail.
+
+ReadingMachine changes this constraint by making it possible to re-read the same corpus under a revised analytical frame. A first run may identify broad structures, mechanisms, or conceptual framings present in the literature. A subsequent run can then use those structures as part of the analytical frame, asking the system to identify concrete examples, variations, tensions, or mechanisms associated with them across the full corpus. The second run is not simply a refinement of the first output; it is a new structured reading of the corpus under a different lens.
+
+This was illustrated in the foreign assistance work (see `research_runs/`). An initial reading identified broad structural features of the US foreign assistance system. These structures were analytically useful, but they were also abstract enough that users struggled to interpret how they operated in practice. A second reading therefore defined those structures in the analytical frame and re-read the corpus to identify concrete examples of how they appeared, how they were operationalized, and how they related to system outcomes. Those examples could then themselves be clustered and synthesized.
+
+This kind of iterative reading is methodologically important. It allows researchers to move between abstraction and specification: from broad structures to concrete mechanisms, from conceptual categories to examples, and from initial thematic maps to more targeted follow-up readings. In this sense, ReadingMachine does not only scale a single reading process; it makes repeated, differently framed readings of the same corpus available as a practical research strategy.
+
+This also illustrates a broader implication of changing the economics of reading. When reading becomes less constrained by time, cost, and attention, researchers do not simply read more material or read the same material more quickly. They can use reading differently. Questions that would previously have been treated as final outputs of a synthesis can become inputs into a subsequent reading. Abstract categories can be operationalized as lenses for re-reading. Apparent conclusions can be decomposed into mechanisms, examples, exceptions, and tensions. As with other cases where a bottleneck shifts, the change is not only one of scale or speed, but of research design: the practice itself can be reorganized around possibilities that were previously too costly to pursue.
+
 ## 9. Limitations
 
 ReadingMachine is designed for a specific analytical task: high-fidelity thematic synthesis of large natural-language corpora. It is not intended to replace other approaches to working with language models, nor should it be considered universally superior. In many contexts—particularly exploratory analysis or question answering—other methods remain more appropriate (see below for complementarity with other approaches).
@@ -647,6 +661,16 @@ A central aim of ReadingMachine is to maximize coverage and minimize omission. W
 As volume increases, the system prioritizes local completeness within individual themes. Because themes are synthesized independently, this can lead to redundancy across the final output. This redundancy is an intentional trade-off: it preserves marginal or low-salience insights at the cost of repetition. As scale increases further, both omission risk and redundancy pressure tend to rise simultaneously.
 
 These limitations reflect trade-offs inherent to the system’s design. Prioritizing coverage, traceability, and inspectability shifts constraints toward scale, stability, and computational cost.
+
+### 9.5 Iterative Schema Revision
+
+ReadingMachine currently passes the full schema revision history, along with the history of resulting summaries, into subsequent schema optimization steps. This supports continuity across iterations, but it creates a scaling limit. In runs requiring many rounds of schema revision, the accumulated history can eventually exceed the model context window.
+
+This limitation became apparent during the foreign assistance v2 run (`research_runs/foreign_assistance_v2`). That run involved approximately 40,000 insights identifying examples of structures derived from an earlier reading. The size and complexity of the run required repeated schema refinement, and the accumulated schema and summary history placed excessive pressure on the context window.
+
+A likely resolution is to replace the full schema history with a compact account of schema evolution. Rather than passing every prior schema version and summary state, the system could pass a brief note describing the major schema changes, rejected alternatives, and reasons for those changes. This would preserve the information needed to avoid vacillation between earlier broken schema versions, while reducing context pressure during later iterations.
+
+This change is planned for a subsequent version and its effects on schema stability and output quality remain to be evaluated.
 
 ## 10. Complementarity with Other AI Approaches
 

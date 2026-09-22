@@ -285,19 +285,13 @@ cluster.generate_clusters({
 
 # The Summarize class performs the thematic synthesis pipeline.
 
-from readingmachine import utils
-utils.restart_pipeline()
-
-from readingmachine import state
-
-latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\readingmachine_add_doc_id_tree\ReadingMachine\data\runs\09_clusters')
-summarize = core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model="gpt-4o", paper_output_length=10000)
 
 summarize = core.Summarize(
     corpus_state=cluster.corpus_state,
     llm_client=llm_client,
     ai_model="gpt-4o",
-    paper_output_length=3000
+    paper_output_length=3000, 
+    use_organizing_proposition=True
 )
 
 # ----------------------------------------------------------
