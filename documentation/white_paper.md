@@ -79,49 +79,8 @@ reading a corpus → extracting insights → organizing them into themes → syn
 This process is implemented as a sequence of constrained, inspectable transformations. Each stage isolates a specific analytical function—such as insight extraction, clustering, or thematic synthesis—so that intermediate representations remain visible and omissions can be detected and corrected. Interpretive judgments are not removed, but they are externalized and structured, allowing them to be inspected and compared across runs.
 
 The resulting pipeline is shown below:
-```
-[Generate Research Questions]  
-		↓  
-[Ingest Papers]  
-		↓  
-[Chunk Papers]  
-		↓  
-[Generate Insights]  
-		↓  
-[Cluster Insights]  
-		↓  
-[Summarize Clusters]  
-		↓  
-[Generate Theme Schema]  
-		↓  
-[Map Insights to Themes]  
-		↓  
-[Summarize Themes]  
-		↓  
-[Identify Orphans]  
-		↓  
-[Reinsert Orphans]  
-		↓  
-┌───────────────────────────────┐  
-│ Iteration Loop 				│  
-│ (Re-theme if needed) 			│  
-│						 		│  
-│ Generate Theme Schema 		│  
-│ 		↓ 						│  
-│ Map Insights to Themes 		│  
-│ 		↓ 						│  
-│ Summarize Themes 				│  
-│ 		↓ 						│  
-│ Identify + Reinsert Orphans 	│  
-└───────↑───────────────────────┘  
-		│  
-		↓  
-[Address Redundancy (Optional)]  
-		↓  
-[Generate Title, Executive Summary, Question Summaries (Optional)]  
-		↓  
-[Render Output]  
-```
+
+![Architecture pipeline](readingmachine_pipeline.svg)
 
 The system is implemented, in Python, as a sequential pipeline in which each stage transforms a shared state object. Analytical choices—such as the definition of insights, extraction instructions, clustering parameters, and theme construction rules—are fixed, inspectable, and version-controlled, making the structure of the synthesis explicit rather than embedded in a single opaque step.
 
