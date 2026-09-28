@@ -1164,7 +1164,7 @@ class Prompts:
         to be tested through mapping, population, orphan handling, and later
         schema repair rather than treated as final.
         """
-        
+
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
@@ -1653,8 +1653,6 @@ class Prompts:
         "- The repaired codebook must support full assignment of the conceptual content.\n"
         )
             
-
-
     def implement_schema_repairs(self):
         """
         Construct the prompt for implementing a schema-repair plan.
@@ -1839,7 +1837,7 @@ class Prompts:
             "- Output only the rewritten schema JSON\n"
         )
     
-    def gen_theme_schema_optimize(self, provide_organizing_proposition=False):
+    def gen_theme_schema_optimize(self):
         """
         Construct the prompt for schema optimization.
 
@@ -1888,91 +1886,6 @@ class Prompts:
         as stable.
         """
 
-        if provide_organizing_proposition:
-            codebook_structure = (
-                "Each theme defines a conceptual territory using:\n"
-                "- theme_label\n"
-                "- theme_description\n"
-                "- organizing_proposition\n"
-                "- instructions\n\n"
-                "These fields perform different functions within the schema.\n"
-                "The theme_description defines the conceptual territory represented by the theme.\n"
-                "For substantive themes, the organizing_proposition states the central conceptual insight expressed by the theme. "
-                "It articulates the underlying idea, relationship, process, pattern, distinction, trajectory, mechanism, argument, "
-                "or dynamic that unifies its thematic logic.\n"
-                "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
-                "organizing_proposition must be null.\n"
-                "The instructions operationalize assignment into the conceptual territory through "
-                "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
-            )
-
-            organizing_proposition_conflict = (
-                "Conflict is an architectural category rather than a substantive thematic region.\n"
-                "Therefore its organizing_proposition must be null.\n\n"
-            )
-
-            organizing_proposition_other = (
-                "Other is a residual category rather than a substantive thematic region.\n"
-                "Therefore its organizing_proposition must be null.\n\n"
-            )
-
-            organizing_proposition_optimization_constraints = (
-                "If making improvements, update theme labels, theme descriptions, "
-                "organizing propositions (for substantive themes only), and instructions as "
-                "necessary to faithfully reflect the optimized conceptual partition.\n"
-                "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to "
-                "both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
-                "- Changes to organizing_propositions should be applied to every substantive "
-                "theme whose conceptual territory changes as part of the optimization, including "
-                "both themes that relinquish conceptual territory and themes that receive it.\n"
-                "- For substantive themes whose conceptual territory is unchanged, preserve the "
-                "existing organizing_proposition.\n"
-            )
-
-            output_format = (
-                "{\n"
-                "  \"no_change\": <boolean>,\n"
-                "  \"themes\": [\n"
-                "    {\n"
-                "      \"theme_label\": <string>,\n"
-                "      \"theme_description\": <string>,\n"
-                "      \"organizing_proposition\": <string | null>,\n"
-                "      \"instructions\": <string>\n"
-                "    }\n"
-                "  ]\n"
-                "}\n"
-            )
-
-
-        else:
-            codebook_structure = (
-                "Each theme defines a conceptual territory using:\n"
-                "- theme_label\n"
-                "- theme_description (the North Star logic)\n"
-                "- instructions (INCLUDE / EXCLUDE rules)\n\n"
-            )
-            organizing_proposition_conflict = ""
-            organizing_proposition_other = ""
-            organizing_proposition_optimization_constraints = (
-                "If making improvements, you should update theme descriptions, instructions and labels as needed to maintain clear conceptual boundaries. \n"
-                "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
-            )
-
-            output_format = (
-                "{\n"
-                "  \"no_change\": <boolean>,\n"
-                "  \"themes\": [\n"
-                "    {\n"
-                "      \"theme_label\": <string>,\n"
-                "      \"theme_description\": <string>,\n"
-                "      \"instructions\": <string>\n"
-                "    }\n"
-                "  ]\n"
-                "}\n\n"
-            )
-
-
-
         return(
             "## ROLE\n"
             "You are a Schema Optimization Engine.\n"
@@ -1990,7 +1903,20 @@ class Prompts:
             "   - The most recent iteration is flagged as such and should be the focus of your optimization efforts.\n"
 
             "## CODEBOOK STRUCTURE\n"
-            f"{codebook_structure}"
+            "Each theme defines a conceptual territory using:\n"
+            "- theme_label\n"
+            "- theme_description\n"
+            "- organizing_proposition\n"
+            "- instructions\n\n"
+            "These fields perform different functions within the schema.\n"
+            "The theme_description defines the conceptual territory represented by the theme.\n"
+            "For substantive themes, the organizing_proposition states the central conceptual insight expressed by the theme. "
+            "It articulates the underlying idea, relationship, process, pattern, distinction, trajectory, mechanism, argument, "
+            "or dynamic that unifies its thematic logic.\n"
+            "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
+            "organizing_proposition must be null.\n"
+            "The instructions operationalize assignment into the conceptual territory through "
+            "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
 
             "## INCLUDE/EXCLUDE LOGIC\n"
             "All themes must define precise operational assignment rules:\n"
@@ -2015,7 +1941,7 @@ class Prompts:
 
             "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
 
-            f"{organizing_proposition_conflict}"
+            "Conflict is an architectural category rather than a substantive thematic region. Therefore its organizing_proposition must be null.\n\n"
 
             "Do NOT create a Conflict theme if the material merely:\n"
             "- Presents reinforcing critiques\n"
@@ -2036,7 +1962,7 @@ class Prompts:
 
             "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
 
-            f"{organizing_proposition_other}"
+            "Other is a residual category rather than a substantive thematic region. Therefore its organizing_proposition must be null.\n\n"
 
             "The 'Other' theme should:\n"
             "- Capture valid but low-frequency or residual concepts\n"
@@ -2080,7 +2006,10 @@ class Prompts:
             "- does NOT reintroduce previously resolved completeness failures\n"
             "- If proposing reallocation of content between themes and it is unclear whether bounded synthesis constraints can be maintained, you must avoid making such changes\n"
             "Only suggest changes to the schema if there are obvious and non-speculative improvements that can be made based on the input. Do NOT make speculative improvements.\n"
-            f"{organizing_proposition_optimization_constraints}\n"
+            "If making improvements, update theme labels, theme descriptions, organizing propositions (for substantive themes only), and instructions as necessary to faithfully reflect the optimized conceptual partition.\n"
+            "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
+            "- Changes to organizing_propositions should be applied to every substantive theme whose conceptual territory changes as part of the optimization, including both themes that relinquish conceptual territory and themes that receive it.\n"
+            "- For substantive themes whose conceptual territory is unchanged, preserve the existing organizing_proposition.\n"
             "Do not merge themes unless both conceptual coherence and bounded synthesis viability are clearly preserved without collapsing distinct claim-families into lossy generalizations.\n\n"
 
             "## CONVERGENCE CONDITION\n"
@@ -2093,7 +2022,18 @@ class Prompts:
             "Set \"no_change\": false only if there are obvious, non-speculative improvements that preserve bounded synthesis viability.\n\n"
 
             "## OUTPUT FORMAT (STRICT JSON)\n"
-            f"{output_format}\n\n"
+            "{\n"
+            "  \"no_change\": <boolean>,\n"
+            "  \"themes\": [\n"
+            "    {\n"
+            "      \"theme_label\": <string>,\n"
+            "      \"theme_description\": <string>,\n"
+            "      \"organizing_proposition\": <string | null>,\n"
+            "      \"instructions\": <string>\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "\n\n"
 
             "If you set \"no_change\": true, \"themes\" should be an empty array.\n"
             "If no_change=false, return the full revised schema, not only changed themes.\n"
