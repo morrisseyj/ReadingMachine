@@ -1120,7 +1120,7 @@ class Prompts:
         )
     
     
-    def gen_theme_schema_cluster_source(self, provide_organizing_proposition=False):
+    def gen_theme_schema_cluster_source(self):
         """
         Construct the prompt for initial theme-schema generation.
 
@@ -1164,73 +1164,7 @@ class Prompts:
         to be tested through mapping, population, orphan handling, and later
         schema repair rather than treated as final.
         """
-
-        if provide_organizing_proposition:
-            organizing_proposition = (
-                "5. **Provide Organizing Proposition**\n"
-                "For each substantive theme, provide a brief organizing proposition that makes "
-                "explicit the central conceptual insight expressed by the theme. "
-                "The proposition should articulate the underlying idea, relationship, mechanism, "
-                "process, pattern, distinction, trajectory, argument, or dynamic that unifies "
-                "the cluster summaries represented by the theme. "
-                "It should state what those cluster summaries collectively indicate when considered "
-                "as a thematic whole, rather than merely identifying their shared topic or describing "
-                "the material the theme contains. "
-                "The proposition will be provided to later stages of the pipeline so that thematic "
-                "synthesis can explicitly develop and demonstrate this conceptual logic through the "
-                "evidence subsequently mapped to the theme. "
-                "The proposition must remain faithful to the source material and must not introduce "
-                "an interpretation stronger than the cluster summaries support. "
-                "Do not explain your reasoning process, justify why the theme was created, describe "
-                "the theme's inclusion boundaries, or summarize its expected contents. "
-                "For a theme whose theme_label is exactly \"Conflict\" or \"Other\", set "
-                "organizing_proposition to null.\n\n"
-            )
-
-            output_format = (
-                "{\n"
-                '  "themes": [\n'
-                "    {\n"
-                '      "theme_label": <string>,\n'
-                '      "theme_description": <string>,\n'
-                '      "instructions": <string>,\n'
-                '      "organizing_proposition": <string | null>\n'
-                "    }\n"
-                "  ],\n"
-                '  "no_change": false\n'
-                "}\n\n"
-            )
-
-            conceptual_description = "(theme_label, theme_description, organizing_proposition, instructions)"
-            organizing_proposition_architecture = (
-                 "- **Organizing Propositions:** Each theme must include an "
-                "'organizing_proposition' field. For substantive themes, the proposition "
-                "states the central conceptual insight expressed by the theme and makes "
-                "explicit the thematic logic that subsequent synthesis should develop "
-                "through the evidence mapped to that theme. It must not merely restate the "
-                "label, describe the theme's contents, reproduce its assignment rules, or "
-                "justify the decision to create the theme. For themes whose theme_label is "
-                "exactly \"Conflict\" or \"Other\", organizing_proposition must be null.\n"
-            )
-
-        else:
-            organizing_proposition = ""
-            output_format = (
-                "{\n"
-                '  "themes": [\n'
-                "    {\n"
-                '      "theme_label": <string>,\n'
-                '      "theme_description": <string>,\n'
-                '      "instructions": <string>\n'
-                "    }\n"
-                "  ],\n"
-                '  "no_change": false\n'
-                "}\n\n"
-            )
-
-            conceptual_description = "(theme_label, theme_description, instructions)"
-            organizing_proposition_architecture = ""
-
+        
         return(
             "## ROLE\n"
             "You are a Logic Architect specializing in High-Fidelity Qualitative Synthesis. "
@@ -1275,7 +1209,14 @@ class Prompts:
             "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
             "A strong EXCLUDE rule identifies conceptually distinct material that should instead be routed to neighboring themes.\n\n"
 
-            f"{organizing_proposition}"
+            "5. **Provide Organizing Proposition**\n"
+            "- For each substantive theme, provide a brief organizing proposition that makes explicit the central conceptual insight expressed by the theme.\n"
+            "- The proposition should articulate the underlying idea, relationship, mechanism, process, pattern, distinction, trajectory, argument, or dynamic that unifies the cluster summaries represented by the theme. It should state what those cluster summaries collectively indicate when considered "
+            "as a thematic whole, rather than merely identifying their shared topic or describing the material the theme contains.\n"
+            "- The proposition will be provided to later stages of the pipeline so that thematic synthesis can explicitly develop and demonstrate this conceptual logic through the evidence subsequently mapped to the theme.\n"
+            "- The proposition must remain faithful to the source material and must not introduce an interpretation stronger than the cluster summaries support.\n"
+            "- Do not explain your reasoning process, justify why the theme was created, describe thee theme's inclusion boundaries, or summarize its expected contents.\n"
+            "- For a theme whose theme_label is exactly \"Conflict\" or \"Other\", set organizing_proposition to null.\n\n"
 
             "## IDEAL CODEBOOK PROPERTIES\n"
             "An effective thematic codebook will:\n\n"
@@ -1299,18 +1240,27 @@ class Prompts:
             "Return a JSON object with a single key 'themes' containing an array of objects. "
             "All identified categories must follow this structure exactly:\n\n"
             
-            f"{output_format}\n"
+            "{\n"
+            '  "themes": [\n'
+            "    {\n"
+            '      "theme_label": <string>,\n'
+            '      "theme_description": <string>,\n'
+            '      "instructions": <string>,\n'
+            '      "organizing_proposition": <string | null>\n'
+            "    }\n"
+            "  ],\n"
+            '  "no_change": false\n'
+            "}\n\n"
 
             "## ARCHITECTURAL CONSTRAINTS\n"
             "The \"no_change\" field must always be present and must always be set to false.\n"
             "Do not omit this field and do not set it to true.\n"
-            "- **Structural Identity:** Do NOT generate numeric identifiers. "
-            "theme_id values will be assigned programmatically outside this step. "
-            f"Focus only on conceptual design {conceptual_description}.\n"
+            "- **Structural Identity:** Do NOT generate numeric identifiers. theme_id values will be assigned programmatically outside this step. Focus only on conceptual design (theme_label, theme_description, instructions).\n"
             "- **Thematic Descriptions:** Each theme must include a 'theme_description' field. "
             "The description defines the conceptual territory and scope of the theme for downstream "
             "mapping and schema interpretation.\n"
-            f"{organizing_proposition_architecture}"
+            "- **Organizing Propositions:** Each theme must include an 'organizing_proposition' field. For substantive themes, the proposition states the central conceptual insight expressed by the theme and makes explicit the thematic logic that subsequent synthesis should develop "
+            "through the evidence mapped to that theme. It must not merely restate the label, describe the theme's contents, reproduce its assignment rules, or justify the decision to create the theme. For themes whose theme_label is exactly \"Conflict\" or \"Other\", organizing_proposition must be null.\n"
             "- **Conceptual Mutuality (Themes):** Themes must operate as a mutually constraining partition. "
             "Each theme should define both:\n"
             "   - what conceptual territory belongs inside the theme, and\n"
@@ -1705,7 +1655,7 @@ class Prompts:
             
 
 
-    def implement_schema_repairs(self, provide_organizing_proposition=False):
+    def implement_schema_repairs(self):
         """
         Construct the prompt for implementing a schema-repair plan.
 
