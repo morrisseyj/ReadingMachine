@@ -2162,7 +2162,7 @@ class Prompts:
             f"- Valid theme_id values: [{allowed_ids_str}].\n\n"
         )
 
-    def populate_themes(self, theme_len: int, theme_type: str, provide_organizing_proposition=False):
+    def populate_themes(self, theme_len: int, theme_type: str):
 
         """
         Construct the prompt for theme-level synthesis.
@@ -2276,45 +2276,6 @@ class Prompts:
         
         specific_instructions = instructions_dict[theme_type]
 
-        if provide_organizing_proposition and theme_type == "general":
-            organizing_proposition_input = (
-                "THEME DESCRIPTION: <theme_description>\n"
-                "ORGANIZING PROPOSITION: <organizing_proposition>\n"
-            )
-
-            thematic_logic_instruction = (
-                "1. Use the Theme Description and Organizing Proposition for Distinct Purposes:\n"
-                "   The theme_description defines the conceptual territory and boundaries of "
-                "this section. Remain within that territory.\n\n"
-                "   The organizing_proposition states the central conceptual insight that the "
-                "thematic synthesis should develop through the assigned evidence. Use it as "
-                "the organizing logic and narrative spine of the section.\n\n"
-                "   Do not merely repeat the organizing_proposition at the beginning and then "
-                "summarize the insights sequentially. Explain how the insights collectively "
-                "express, instantiate, develop, qualify, complicate, or place limits on the "
-                "proposition. Connect major groups of evidence back to this conceptual logic "
-                "throughout the synthesis.\n\n"
-                "   The organizing_proposition is not an additional source claim and must not "
-                "be cited as evidence. It is a schema-level guide for structuring the synthesis.\n\n"
-                "   Do not force evidence to support the proposition. Preserve all substantively "
-                "distinct assigned insights, including claims that qualify, complicate, or do "
-                "not fit neatly within its simplest formulation. Where necessary, present the "
-                "proposition as internally varied, conditional, or bounded by the evidence.\n\n"
-            )
-
-        else:
-            organizing_proposition_input = (
-                "THEME DESCRIPTION: <theme_description (the North Star logic)>\n"
-            )
-
-            thematic_logic_instruction = (
-            "1. Adhere Strictly to the North Star:\n"
-            "   The 'theme_description' defines the conceptual territory of this section. "
-            "The synthesis must remain tightly bounded by this logic and read as a "
-            "self-contained thematic section aligned to the overarching research question.\n\n"
-        )
-
-
         return (
             "## ROLE\n"
             "You are a Qualitative Research Lead specializing in High-Fidelity Synthesis. "
@@ -2325,13 +2286,19 @@ class Prompts:
             "You will receive a user message in the following format:\n"
             "RESEARCH QUESTION: <question_text>\n"
             "THEME LABEL: <theme_label>\n"
-            f"{organizing_proposition_input}"
+            "THEME DESCRIPTION: <theme_description>\n"
+            "ORGANIZING PROPOSITION: <organizing_proposition>\n"
             "INSIGHTS TO SYNTHESIZE:\n"
             "<list of specific insights identified as relevant to this theme>\n\n"
 
             "## SYNTHESIS LAWS\n\n"
 
-            f"{thematic_logic_instruction}"
+            "1. Use the Theme Description and Organizing Proposition for Distinct Purposes:\n"
+            "-The theme_description defines the conceptual territory and boundaries of this section. Remain within that territory.\n"
+            "- The organizing_proposition states the central conceptual insight that the thematic synthesis should develop through the assigned evidence. Use it as the organizing logic and narrative spine of the section.\n"
+            "- Do not merely repeat the organizing_proposition at the beginning and then summarize the insights sequentially. Explain how the insights collectively express, instantiate, develop, qualify, complicate, or place limits on the proposition. Connect major groups of evidence back to this conceptual logic throughout the synthesis.\n"
+            "- The organizing_proposition is not an additional source claim and must not be cited as evidence. It is a schema-level guide for structuring the synthesis.\n"
+            "- Do not force evidence to support the proposition. Preserve all substantively distinct assigned insights, including claims that qualify, complicate, or do not fit neatly within its simplest formulation. Where necessary, present the proposition as internally varied, conditional, or bounded by the evidence.\n"
 
             "2. Coverage with Abstraction (Non-Negotiable):\n\n"
             "   All substantively distinct ideas present in the input insights must be represented in the synthesis.\n\n"
