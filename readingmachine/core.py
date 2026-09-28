@@ -7887,7 +7887,7 @@ class Summarize:
                 f"RESEARCH QUESTION: {rq_text}\n"
                 f"THEME LABEL: {theme_label}\n"
                 f"THEME DESCRIPTION: {theme_description}\n"
-                f"{organizing_proposition_input}"
+                f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
                 f"INSIGHTS TO SYNTHESIZE:\n"
                 f"{insights_str}\n\n"
                 )
@@ -7907,13 +7907,12 @@ class Summarize:
             thematic_summary["theme_id"] = int(theme_id)
             thematic_summary["theme_label"] = theme_label
             thematic_summary["theme_description"] = theme_description
-            thematic_summary["organizing_proposition"] = organizing_proposition          
+            thematic_summary["organizing_proposition"] = organizing_proposition
             thematic_summary["allocated_length"] = allocated_length
             thematic_summary["needs_repair"] = needs_repair
             thematic_summary["optimized"] = optimized
             thematic_summary["stable"] = stable
             
-
             # Get the length of the summary in words and calculate the percentage of the allocated length that this summary represents
             thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
             thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
