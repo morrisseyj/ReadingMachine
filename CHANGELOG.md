@@ -2,6 +2,14 @@
 
 All notable methodological and software changes to ReadingMachine are documented here.
 
+## [v0.3.0] - TBD
+
+### Added
+
+### Changed
+
+- Made the use of organizing principle for themes a default that can't be opted out of. Done because its performant and making it standard removed conditional complexity from prompts and execution code 
+
 ## [v0.2.0] - 2026-09-22
 
 ### Added
