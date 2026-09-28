@@ -4732,8 +4732,8 @@ class Summarize:
                  paper_output_length: int,  # Approximate total paper length in words
                  summary_save_location: str = config.SUMMARY_SAVE_LOCATION, 
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
-                 insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl"), 
-                 use_organizing_proposition = False):
+                 insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
+                 ):
         """
         Initialize the summarization stage.
 
@@ -4865,7 +4865,6 @@ class Summarize:
         self.paper_output_length: int = paper_output_length
         self.summary_save_location = summary_save_location
         self.pickle_save_location = pickle_save_location
-        self.use_organizing_proposition = use_organizing_proposition
 
     def _calculate_centroid(self, col="full_insight_embedding"):
         """
@@ -5351,93 +5350,50 @@ class Summarize:
             "no_change": False
         }
         
-        if self.use_organizing_proposition:
-            json_schema = {
-                "name": "theme_schema_generator",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "themes": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "theme_label": {
-                                        "type": "string"
-                                    },
-                                    "theme_description": {
-                                        "type": "string"
-                                    },
-                                    "organizing_proposition": {
-                                        "type": ["string", "null"]
-                                    },
-                                    "instructions": {
-                                        "type": "string"
-                                    }
+        json_schema = {
+            "name": "theme_schema_generator",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": {
+                                    "type": "string"
                                 },
-                                "required": [
-                                    "theme_label",
-                                    "theme_description",
-                                    "organizing_proposition",
-                                    "instructions"
-                                ],
-                                "additionalProperties": False
-                            }
-                        },
-                        "no_change": {
-                            "type": "boolean"
+                                "theme_description": {
+                                    "type": "string"
+                                },
+                                "organizing_proposition": {
+                                    "type": ["string", "null"]
+                                },
+                                "instructions": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "theme_label",
+                                "theme_description",
+                                "organizing_proposition",
+                                "instructions"
+                            ],
+                            "additionalProperties": False
                         }
                     },
-                    "required": [
-                        "themes",
-                        "no_change"
-                    ],
-                    "additionalProperties": False
-                }
+                    "no_change": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "themes",
+                    "no_change"
+                ],
+                "additionalProperties": False
             }
-
-        else:    
-            json_schema = {
-                "name": "theme_schema_generator",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "themes": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "theme_label": {
-                                        "type": "string"
-                                    },
-                                    "theme_description": {
-                                        "type": "string"
-                                    },
-                                    "instructions": {
-                                        "type": "string"
-                                    }
-                                },
-                                "required": [
-                                    "theme_label",
-                                    "theme_description",
-                                    "instructions"
-                                ],
-                                "additionalProperties": False
-                            }
-                        },
-                        "no_change": {
-                            "type": "boolean"
-                        }
-                    },
-                    "required": [
-                        "themes",
-                        "no_change"
-                    ],
-                    "additionalProperties": False
-                }
-            }
+        }
 
         response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
@@ -5526,432 +5482,262 @@ class Summarize:
             },
         } 
 
-        if self.use_organizing_proposition:
-            json_schema = {
-                "name": "theme_schema_repair_plan",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "repair_plan": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "theme_repairs": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "source_theme_id": {
-                                                "type": "integer"
-                                            },
-                                            "source_theme_label": {
-                                                "type": "string"
-                                            },
-                                            "completeness_check": {
-                                                "type": "string",
-                                                "enum": ["fail"]
-                                            },
-                                            "concepts_ranked_by_representational_load": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "concept": {
-                                                            "type": "string"
-                                                        },
-                                                        "estimated_load": {
-                                                            "type": "string",
-                                                            "enum": [
-                                                                "high",
-                                                                "medium",
-                                                                "low"
-                                                            ]
-                                                        },
-                                                        "evidence_from_summary_or_failed_batches": {
-                                                            "type": "string"
-                                                        },
-                                                        "independently_synthesizable": {
-                                                            "type": "boolean"
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "concept",
-                                                        "estimated_load",
-                                                        "evidence_from_summary_or_failed_batches",
-                                                        "independently_synthesizable"
-                                                    ]
-                                                }
-                                            },
-                                            "extractions": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "concept": {
-                                                            "type": "string"
-                                                        },
-                                                        "action": {
-                                                            "type": "string",
-                                                            "enum": [
-                                                                "new_theme",
-                                                                "move_to_existing_theme"
-                                                            ]
-                                                        },
-                                                        "target_theme_id": {
-                                                            "type": [
-                                                                "integer",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "new_theme_label": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "new_theme_core_scope": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "new_theme_organizing_proposition": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "new_theme_inclusions": {
-                                                            "type": "array",
-                                                            "items": {
-                                                                "type": "string"
-                                                            }
-                                                        },
-                                                        "new_theme_exclusions": {
-                                                            "type": "array",
-                                                            "items": {
-                                                                "type": "string"
-                                                            }
-                                                        },
-                                                        "receiving_theme_scope_update": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "receiving_theme_organizing_proposition_update": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "reason": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "concept",
-                                                        "action",
-                                                        "target_theme_id",
-                                                        "new_theme_label",
-                                                        "new_theme_core_scope",
-                                                        "new_theme_organizing_proposition",
-                                                        "new_theme_inclusions",
-                                                        "new_theme_exclusions",
-                                                        "receiving_theme_scope_update",
-                                                        "receiving_theme_organizing_proposition_update",
-                                                        "reason"
-                                                    ]
-                                                }
-                                            },
-                                            "source_theme_resolution": {
+        
+        json_schema = {
+            "name": "theme_schema_repair_plan",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "repair_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "theme_repairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "source_theme_id": {
+                                            "type": "integer"
+                                        },
+                                        "source_theme_label": {
+                                            "type": "string"
+                                        },
+                                        "completeness_check": {
+                                            "type": "string",
+                                            "enum": ["fail"]
+                                        },
+                                        "concepts_ranked_by_representational_load": {
+                                            "type": "array",
+                                            "items": {
                                                 "type": "object",
                                                 "additionalProperties": False,
                                                 "properties": {
-                                                    "outcome": {
+                                                    "concept": {
+                                                        "type": "string"
+                                                    },
+                                                    "estimated_load": {
                                                         "type": "string",
                                                         "enum": [
-                                                            "rename_and_narrow",
-                                                            "dissolve_and_reallocate"
+                                                            "high",
+                                                            "medium",
+                                                            "low"
                                                         ]
                                                     },
-                                                    "residual_label": {
-                                                        "type": [
-                                                            "string",
-                                                            "null"
-                                                        ]
+                                                    "evidence_from_summary_or_failed_batches": {
+                                                        "type": "string"
                                                     },
-                                                    "residual_core_scope": {
-                                                        "type": [
-                                                            "string",
-                                                            "null"
-                                                        ]
-                                                    },
-                                                    "residual_organizing_proposition": {
-                                                        "type": [
-                                                            "string",
-                                                            "null"
-                                                        ]
-                                                    },
-                                                    "residual_inclusions": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "residual_exclusions": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "residual_expected_to_pass": {
+                                                    "independently_synthesizable": {
                                                         "type": "boolean"
-                                                    },
-                                                    "dissolution_reason": {
-                                                        "type": [
-                                                            "string",
-                                                            "null"
-                                                        ]
                                                     }
                                                 },
                                                 "required": [
-                                                    "outcome",
-                                                    "residual_label",
-                                                    "residual_core_scope",
-                                                    "residual_organizing_proposition",
-                                                    "residual_inclusions",
-                                                    "residual_exclusions",
-                                                    "residual_expected_to_pass",
-                                                    "dissolution_reason"
+                                                    "concept",
+                                                    "estimated_load",
+                                                    "evidence_from_summary_or_failed_batches",
+                                                    "independently_synthesizable"
                                                 ]
-                                            },
-                                            "repair_narrative": {
-                                                "type": "string"
                                             }
                                         },
-                                        "required": [
-                                            "source_theme_id",
-                                            "source_theme_label",
-                                            "completeness_check",
-                                            "concepts_ranked_by_representational_load",
-                                            "extractions",
-                                            "source_theme_resolution",
-                                            "repair_narrative"
-                                        ]
-                                    }
-                                },
-                                "schema_repairs": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "affected_theme_ids": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "integer"
-                                                }
-                                            },
-                                            "repair_narrative": {
-                                                "type": "string"
-                                            }
-                                        },
-                                        "required": [
-                                            "affected_theme_ids",
-                                            "repair_narrative"
-                                        ]
-                                    }
-                                }
-                            },
-                            "required": [
-                                "theme_repairs",
-                                "schema_repairs"
-                            ]
-                        }
-                    },
-                    "required": [
-                        "repair_plan"
-                    ]
-                }
-            }
-
-        else:
-            json_schema = {
-                "name": "theme_schema_repair_plan",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "repair_plan": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "theme_repairs": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "source_theme_id": {"type": "integer"},
-                                            "source_theme_label": {"type": "string"},
-                                            "completeness_check": {
-                                                "type": "string",
-                                                "enum": ["fail"]
-                                            },
-                                            "concepts_ranked_by_representational_load": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "concept": {"type": "string"},
-                                                        "estimated_load": {
-                                                            "type": "string",
-                                                            "enum": ["high", "medium", "low"]
-                                                        },
-                                                        "evidence_from_summary_or_failed_batches": {"type": "string"},
-                                                        "independently_synthesizable": {"type": "boolean"}
-                                                    },
-                                                    "required": [
-                                                        "concept",
-                                                        "estimated_load",
-                                                        "evidence_from_summary_or_failed_batches",
-                                                        "independently_synthesizable"
-                                                    ]
-                                                }
-                                            },
-                                            "extractions": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "concept": {"type": "string"},
-                                                        "action": {
-                                                            "type": "string",
-                                                            "enum": ["new_theme", "move_to_existing_theme"]
-                                                        },
-                                                        "target_theme_id": {
-                                                            "type": ["integer", "null"]
-                                                        },
-                                                        "new_theme_label": {
-                                                            "type": ["string", "null"]
-                                                        },
-                                                        "new_theme_core_scope": {
-                                                            "type": ["string", "null"]
-                                                        },
-                                                        "new_theme_inclusions": {
-                                                            "type": "array",
-                                                            "items": {"type": "string"}
-                                                        },
-                                                        "new_theme_exclusions": {
-                                                            "type": "array",
-                                                            "items": {"type": "string"}
-                                                        },
-                                                        "receiving_theme_scope_update": {
-                                                            "type": ["string", "null"]
-                                                        },
-                                                        "reason": {"type": "string"}
-                                                    },
-                                                    "required": [
-                                                        "concept",
-                                                        "action",
-                                                        "target_theme_id",
-                                                        "new_theme_label",
-                                                        "new_theme_core_scope",
-                                                        "new_theme_inclusions",
-                                                        "new_theme_exclusions",
-                                                        "receiving_theme_scope_update",
-                                                        "reason"
-                                                    ]
-                                                }
-                                            },
-                                            "source_theme_resolution": {
+                                        "extractions": {
+                                            "type": "array",
+                                            "items": {
                                                 "type": "object",
                                                 "additionalProperties": False,
                                                 "properties": {
-                                                    "outcome": {
+                                                    "concept": {
+                                                        "type": "string"
+                                                    },
+                                                    "action": {
                                                         "type": "string",
-                                                        "enum": ["rename_and_narrow", "dissolve_and_reallocate"]
+                                                        "enum": [
+                                                            "new_theme",
+                                                            "move_to_existing_theme"
+                                                        ]
                                                     },
-                                                    "residual_label": {
-                                                        "type": ["string", "null"]
+                                                    "target_theme_id": {
+                                                        "type": [
+                                                            "integer",
+                                                            "null"
+                                                        ]
                                                     },
-                                                    "residual_core_scope": {
-                                                        "type": ["string", "null"]
+                                                    "new_theme_label": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ]
                                                     },
-                                                    "residual_inclusions": {
+                                                    "new_theme_core_scope": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ]
+                                                    },
+                                                    "new_theme_organizing_proposition": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ]
+                                                    },
+                                                    "new_theme_inclusions": {
                                                         "type": "array",
-                                                        "items": {"type": "string"}
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
                                                     },
-                                                    "residual_exclusions": {
+                                                    "new_theme_exclusions": {
                                                         "type": "array",
-                                                        "items": {"type": "string"}
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
                                                     },
-                                                    "residual_expected_to_pass": {"type": "boolean"},
-                                                    "dissolution_reason": {
-                                                        "type": ["string", "null"]
+                                                    "receiving_theme_scope_update": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ]
+                                                    },
+                                                    "receiving_theme_organizing_proposition_update": {
+                                                        "type": [
+                                                            "string",
+                                                            "null"
+                                                        ]
+                                                    },
+                                                    "reason": {
+                                                        "type": "string"
                                                     }
                                                 },
                                                 "required": [
-                                                    "outcome",
-                                                    "residual_label",
-                                                    "residual_core_scope",
-                                                    "residual_inclusions",
-                                                    "residual_exclusions",
-                                                    "residual_expected_to_pass",
-                                                    "dissolution_reason"
+                                                    "concept",
+                                                    "action",
+                                                    "target_theme_id",
+                                                    "new_theme_label",
+                                                    "new_theme_core_scope",
+                                                    "new_theme_organizing_proposition",
+                                                    "new_theme_inclusions",
+                                                    "new_theme_exclusions",
+                                                    "receiving_theme_scope_update",
+                                                    "receiving_theme_organizing_proposition_update",
+                                                    "reason"
                                                 ]
-                                            },
-                                            "repair_narrative": {"type": "string"}
+                                            }
                                         },
-                                        "required": [
-                                            "source_theme_id",
-                                            "source_theme_label",
-                                            "completeness_check",
-                                            "concepts_ranked_by_representational_load",
-                                            "extractions",
-                                            "source_theme_resolution",
-                                            "repair_narrative"
-                                        ]
-                                    }
-                                },
-                                "schema_repairs": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "affected_theme_ids": {
-                                                "type": "array",
-                                                "items": {"type": "integer"}
+                                        "source_theme_resolution": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "outcome": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "rename_and_narrow",
+                                                        "dissolve_and_reallocate"
+                                                    ]
+                                                },
+                                                "residual_label": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "residual_core_scope": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "residual_organizing_proposition": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "residual_inclusions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "residual_exclusions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "residual_expected_to_pass": {
+                                                    "type": "boolean"
+                                                },
+                                                "dissolution_reason": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                }
                                             },
-                                            "repair_narrative": {"type": "string"}
+                                            "required": [
+                                                "outcome",
+                                                "residual_label",
+                                                "residual_core_scope",
+                                                "residual_organizing_proposition",
+                                                "residual_inclusions",
+                                                "residual_exclusions",
+                                                "residual_expected_to_pass",
+                                                "dissolution_reason"
+                                            ]
                                         },
-                                        "required": [
-                                            "affected_theme_ids",
-                                            "repair_narrative"
-                                        ]
-                                    }
+                                        "repair_narrative": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "source_theme_id",
+                                        "source_theme_label",
+                                        "completeness_check",
+                                        "concepts_ranked_by_representational_load",
+                                        "extractions",
+                                        "source_theme_resolution",
+                                        "repair_narrative"
+                                    ]
                                 }
                             },
-                            "required": [
-                                "theme_repairs",
-                                "schema_repairs"
-                            ]
-                        }
-                    },
-                    "required": ["repair_plan"]
-                }
+                            "schema_repairs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "affected_theme_ids": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "integer"
+                                            }
+                                        },
+                                        "repair_narrative": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "affected_theme_ids",
+                                        "repair_narrative"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "theme_repairs",
+                            "schema_repairs"
+                        ]
+                    }
+                },
+                "required": [
+                    "repair_plan"
+                ]
             }
+        }
 
+        
         # Generate the repair instructions for this schema
         response = utils.call_chat_completion(
             sys_prompt=sys_prompt,
@@ -6016,96 +5802,58 @@ class Summarize:
         structural problems and then to apply those repairs in a separate call.
         """
         
-        if self.use_organizing_proposition:
-            fall_back = {
-                "themes": unstable_schema_rq[
-                    [
-                        "theme_label",
-                        "theme_description",
-                        "organizing_proposition",
-                        "instructions",
-                    ]
-                ].to_dict(orient="records")
-            }
-
-        else:
-            fall_back = {
-                "themes": unstable_schema_rq[
-                    ["theme_label", "theme_description", "instructions"]
-                ].to_dict(orient="records")
-            }
         
-        if self.use_organizing_proposition:
-            json_schema = {
-                "name": "theme_schema_repair_implementer",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "themes": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "theme_label": {
-                                        "type": "string"
-                                    },
-                                    "theme_description": {
-                                        "type": "string"
-                                    },
-                                    "organizing_proposition": {
-                                        "type": ["string", "null"]
-                                    },
-                                    "instructions": {
-                                        "type": "string"
-                                    }
-                                },
-                                "required": [
-                                    "theme_label",
-                                    "theme_description",
-                                    "organizing_proposition",
-                                    "instructions"
-                                ],
-                                "additionalProperties": False
-                            }
-                        }
-                    },
-                    "required": [
-                        "themes"
-                    ],
-                    "additionalProperties": False
-                }
-            }
+        fall_back = {
+            "themes": unstable_schema_rq[
+                [
+                    "theme_label",
+                    "theme_description",
+                    "organizing_proposition",
+                    "instructions",
+                ]
+            ].to_dict(orient="records")
+        }
 
-        else:
-            json_schema = {
-                "name": "theme_schema_repair_implementer",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "themes": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "theme_label": {"type": "string"},
-                                    "theme_description": {"type": "string"},
-                                    "instructions": {"type": "string"}
+        json_schema = {
+            "name": "theme_schema_repair_implementer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "themes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "theme_label": {
+                                    "type": "string"
                                 },
-                                "required": [
-                                    "theme_label",
-                                    "theme_description",
-                                    "instructions"
-                                ],
-                                "additionalProperties": False
-                            }
+                                "theme_description": {
+                                    "type": "string"
+                                },
+                                "organizing_proposition": {
+                                    "type": ["string", "null"]
+                                },
+                                "instructions": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "theme_label",
+                                "theme_description",
+                                "organizing_proposition",
+                                "instructions"
+                            ],
+                            "additionalProperties": False
                         }
-                    },
-                    "required": ["themes"],
-                    "additionalProperties": False
-                }
+                    }
+                },
+                "required": [
+                    "themes"
+                ],
+                "additionalProperties": False
             }
+        }
 
         response = utils.call_chat_completion(
             sys_prompt=sys_prompt,
@@ -6454,7 +6202,7 @@ class Summarize:
                     "TEXT TO ANALYZE:\n"
                     f"{summary}\n"
                 )
-                sys_prompt = Prompts().gen_theme_schema_cluster_source(provide_organizing_proposition=self.use_organizing_proposition)
+                sys_prompt = Prompts().gen_theme_schema_cluster_source()
                 # Get the initial schema for this question from the LLM
 
                 theme_list = self._llm_gen_initial_schema(user_prompt, sys_prompt)
@@ -6486,10 +6234,8 @@ class Summarize:
                     stable_output_columns = [
                         "theme_label",
                         "theme_description",
+                        "organizing_proposition"
                     ]
-                    # Add the organizing proposition if its selected
-                    if self.use_organizing_proposition:
-                        stable_output_columns.append("organizing_proposition")
 
                     stable_output_columns.extend(
                         [
@@ -6537,10 +6283,9 @@ class Summarize:
                         "theme_id",
                         "theme_label",
                         "theme_description",
-                    ]
+                        "organizing_proposition"
 
-                    if self.use_organizing_proposition:
-                        history_theme_columns.append("organizing_proposition")
+                    ]
 
                     history_theme_columns.extend(
                         [
@@ -6590,7 +6335,7 @@ class Summarize:
                             "-------------------------------------------------------------\n\n"
                         )
 
-                        sys_prompt_gen_repair = Prompts().gen_theme_schema_repair_instructions(provide_organizing_proposition=self.use_organizing_proposition)
+                        sys_prompt_gen_repair = Prompts().gen_theme_schema_repair_instructions()
 
                         # Get the repair plan
                         repair_plan = self._llm_gen_schema_repair_plan(user_prompt_gen_repair, sys_prompt_gen_repair)
@@ -6645,7 +6390,7 @@ class Summarize:
                             f"{repair_plan_json}\n\n"
                         )
                         # Then the sys prompt
-                        sys_prompt = Prompts().implement_schema_repairs(provide_organizing_proposition=self.use_organizing_proposition)
+                        sys_prompt = Prompts().implement_schema_repairs()
 
                         # Get the repaired themes from the LLM
                         theme_list = self._llm_apply_schema_repair_plan(
@@ -6684,7 +6429,7 @@ class Summarize:
                             f"SCHEMA HISTORY: {full_history_json}\n\n"
                         )
 
-                        sys_prompt = Prompts().gen_theme_schema_optimize(provide_organizing_proposition=self.use_organizing_proposition)
+                        sys_prompt = Prompts().gen_theme_schema_optimize()
 
                         optimized_schema = self._llm_apply_schema_optimization(sys_prompt=sys_prompt, user_prompt=user_prompt)
 
@@ -8032,9 +7777,7 @@ class Summarize:
             theme_id = row["theme_id"]
             theme_label = row["theme_label"]
             theme_description = row["theme_description"]
-            organizing_proposition = (
-                row.get("organizing_proposition") if self.use_organizing_proposition else None
-                )
+            organizing_proposition = row.get("organizing_proposition")
             allocated_length = row["allocated_length"]
             needs_repair = row.get("needs_repair", pd.NA)
             optimized = row.get("optimized", False)
@@ -8065,10 +7808,8 @@ class Summarize:
                     "needs_repair": needs_repair,
                     "optimized": optimized,
                     "stable": stable,
+                    "organizing_proposition": organizing_proposition
                 }
-
-                if self.use_organizing_proposition:
-                    no_insight_row["organizing_proposition"] = organizing_proposition
 
                 no_insight_df = pd.DataFrame([no_insight_row])
                 continue
@@ -8084,22 +7825,13 @@ class Summarize:
                 theme_type = "general"
                 
             # Build the prompt
-            sys_prompt = Prompts().populate_themes(theme_len=allocated_length, theme_type=theme_type, provide_organizing_proposition=self.use_organizing_proposition)
-
-            # COnditionally add to the user prompt
-            # Set it to empty and populate if the attrbute is set to true
-            organizing_proposition_input = ""
-
-            if self.use_organizing_proposition and theme_type == "general":
-                organizing_proposition_input = (
-                    f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
-                )
+            sys_prompt = Prompts().populate_themes(theme_len=allocated_length, theme_type=theme_type)
 
             user_prompt = (
                 f"RESEARCH QUESTION: {rq_text}\n"
                 f"THEME LABEL: {theme_label}\n"
                 f"THEME DESCRIPTION: {theme_description}\n"
-                f"{organizing_proposition_input}"
+                f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
                 f"INSIGHTS TO SYNTHESIZE:\n"
                 f"{insights_str}\n\n"
             )
@@ -8175,11 +7907,7 @@ class Summarize:
             thematic_summary["theme_id"] = int(theme_id)
             thematic_summary["theme_label"] = theme_label
             thematic_summary["theme_description"] = theme_description
-
-            # Conditionally add the organizing proposition to the thematic summary if the attribute is set to true
-            if self.use_organizing_proposition:
-                thematic_summary["organizing_proposition"] = organizing_proposition
-
+            thematic_summary["organizing_proposition"] = organizing_proposition          
             thematic_summary["allocated_length"] = allocated_length
             thematic_summary["needs_repair"] = needs_repair
             thematic_summary["optimized"] = optimized
