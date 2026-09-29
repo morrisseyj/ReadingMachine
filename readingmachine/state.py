@@ -961,6 +961,7 @@ class SummaryState:
         self.mapped_theme_list = []
         self.populated_theme_list = []
         self.orphan_list = []
+        self.schema_repair_list = []
         self.redundancy_list = []
 
     @classmethod
@@ -1007,6 +1008,7 @@ class SummaryState:
         state.mapped_theme_list = state._load_attribute_from_file(config.summary_state_prefix["mapped_theme_list"]) # List of len(n) containing the mapped themes for each theme mapping pass
         state.populated_theme_list = state._load_attribute_from_file(config.summary_state_prefix["populated_theme_list"]) # List of len(n) containing the populated themes for each theme population pass
         state.orphan_list = state._load_attribute_from_file(config.summary_state_prefix["orphan_list"]) # List of len(n) containing the orphaned insights for each theme population pass
+        state.schema_repair_list = state._load_attribute_from_file(config.summary_state_prefix["schema_repair_list"]) # List of len (n) containing the repairs proposed to the schem at each pass
         state.redundancy_list = state._load_attribute_from_file(config.summary_state_prefix["redundancy_list"]) # List of len(1) containing the output of the final redundancy pass
 
         return state
