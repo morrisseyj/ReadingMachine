@@ -1731,7 +1731,7 @@ class Prompts:
             "- new_theme_inclusions: concepts that must be included in the new theme's INCLUDE rule.\n"
             "- new_theme_exclusions: concepts that must be excluded from the new theme's EXCLUDE rule.\n"
             "- receiving_theme_scope_update: scope update that must be incorporated into an existing receiving theme.\n"
-            "- receiving_theme_organizing_proposition_update: the conceptual proposition that should govern an existing receiving theme after its scope is updated. Use it to write the receiving theme's final organizing_proposition without introducing a different thematic logic.\n""
+            "- receiving_theme_organizing_proposition_update: the conceptual proposition that should govern an existing receiving theme after its scope is updated. Use it to write the receiving theme's final organizing_proposition without introducing a different thematic logic.\n"
             "- source_theme_resolution: specifies whether the original failed theme becomes a narrowed successor or is dissolved.\n"
             "- outcome: if \"rename_and_narrow\", keep a narrowed successor theme using the residual fields; if \"dissolve_and_reallocate\", remove the source theme entirely.\n"
             "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
@@ -1836,207 +1836,654 @@ class Prompts:
             "- Do NOT output markdown\n"
             "- Output only the rewritten schema JSON\n"
         )
-    
-    def gen_theme_schema_optimize(self):
+
+
+    def gen_theme_schema_optimize_plan(self):
         """
-        Construct the prompt for schema optimization.
+        Construct the prompt for schema-optimization planning.
 
-        Creates a prompt instructing a language model to review the current
-        theme schema and identify non-speculative improvements that enhance
-        conceptual coherence, boundary clarity, and overall schema quality
-        without reintroducing representational overload or completeness failures.
-
-        Returns
-        -------
-        str
-            Prompt instructing the model to either return an optimized schema
-            or indicate that no further changes are warranted.
-
-        Notes
-        -----
-        This prompt is used after schema repair and stabilization. Unlike the
-        repair-planning prompt, its purpose is not to decompose overloaded
-        themes but to improve the quality of an already functioning schema.
-
-        The prompt explicitly constrains optimization by bounded synthesis
-        requirements. Proposed changes must preserve the ability of themes to
-        synthesize their assigned content without triggering completeness
-        failures.
-
-        The expected response is a JSON object containing:
-
-        - `no_change`
-        - `themes`
-
-        If:
-
-            no_change = true
-
-        then the schema is considered converged and no further optimization is
-        required.
-
-        If:
-
-            no_change = false
-
-        then the prompt requires the full revised schema to be returned.
-
-        This prompt is part of the schema-stabilization workflow and represents
-        the final schema-refinement stage before synthesis outputs are treated
-        as stable.
+        Reviews a complete, functioning thematic schema and either declares
+        convergence or returns a structured optimization plan. It does not rewrite
+        the schema directly.
         """
 
         return(
-            "## ROLE\n"
-            "You are a Schema Optimization Engine.\n"
+            """
+            ## ROLE
 
-            "## TASK\n"
-            "You are part of an iterative loop of schema refinement. Your task is to propose improvements to the current schema that would enhance its overall quality and coherence without reintroducing completeness failures.\n\n"
+            You are a Schema Optimization Architect.
 
-            "## INPUTS\n"
-            "You will receive:\n"
-            "1. The current research question\n"
-            "2. The history of schema iterations, including the thematic summaries they produced.\n"
-            "   - Each iteration is marked with the highest iteration number representing the most recent version of the schema.\n"
-            "   - Prior iterations include both efforts to partition themes to ensure all themes pass a completeness check and efforts to optimize the schema by improving conceptual coherence, boundary clarity, and overall quality without risking new failures.\n"
-            "   - Iterations with different objectives are marked as such.\n"
-            "   - The most recent iteration is flagged as such and should be the focus of your optimization efforts.\n"
+            Your task is to inspect a functioning thematic codebook and determine whether
+            there are obvious, non-speculative improvements to its conceptual organization.
 
-            "## CODEBOOK STRUCTURE\n"
-            "Each theme defines a conceptual territory using:\n"
-            "- theme_label\n"
-            "- theme_description\n"
-            "- organizing_proposition\n"
-            "- instructions\n\n"
-            "These fields perform different functions within the schema.\n"
-            "The theme_description defines the conceptual territory represented by the theme.\n"
-            "For substantive themes, the organizing_proposition states the central conceptual insight expressed by the theme. "
-            "It articulates the underlying idea, relationship, process, pattern, distinction, trajectory, mechanism, argument, "
-            "or dynamic that unifies its thematic logic.\n"
-            "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
-            "organizing_proposition must be null.\n"
-            "The instructions operationalize assignment into the conceptual territory through "
-            "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
+            You produce an optimization plan. You do NOT rewrite the schema.
 
-            "## INCLUDE/EXCLUDE LOGIC\n"
-            "All themes must define precise operational assignment rules:\n"
-            "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
-            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+            ## WORKFLOW CONTEXT
 
-            "INCLUDE rules define the bounded conceptual territory assigned to the theme.\n"
-            "EXCLUDE rules must define conceptual territories that belong to OTHER THEMES in the current schema.\n"
-            "Do NOT write EXCLUDE rules as simple inverses of the INCLUDE rule.\n"
-            "Do NOT write generic EXCLUDE rules such as 'exclude if the text does not address this theme.'\n"
-            "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining conceptual partition.\n"
-            "When writing EXCLUDE rules:\n"
-            "- identify the neighboring themes most likely to overlap with the current theme\n"
-            "- explicitly exclude those conceptual territories\n"
-            "- route ambiguous material toward the appropriate neighboring themes\n\n"
+            The thematic synthesis workflow:
 
-            "## SPECIAL THEMES\n"
-            "**Conflict Theme (Conditional)**\n"
-            "Create a theme where \"theme_label\" is exactly \"Conflict\" ONLY if the data contains "
-            "substantively incompatible interpretations, claims, or prescriptions that cannot be "
-            "maintained within a single coherent conceptual frame.\n\n"
+            1. Generates a thematic codebook.
+            2. Assigns insights to its themes.
+            3. Synthesizes each theme under bounded output constraints.
+            4. Checks whether all assigned content was represented.
+            5. Reinserts omitted content.
+            6. Repairs overloaded themes until every theme passes.
+            7. Optimizes the functioning schema without recreating overload.
 
-            "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
+            You are operating at step 7.
 
-            "Conflict is an architectural category rather than a substantive thematic region. Therefore its organizing_proposition must be null.\n\n"
+            Every theme in the current schema has passed its completeness check.
+            Optimization must preserve that viability.
 
-            "Do NOT create a Conflict theme if the material merely:\n"
-            "- Presents reinforcing critiques\n"
-            "- Describes layered constraints or interacting factors\n"
-            "- Articulates trade-offs within a shared conceptual frame\n"
-            "- Expresses variation in emphasis without incompatible positions\n\n"
+            ## INPUTS
 
-            "A Conflict theme requires identifiable polarity between positions.\n\n"
+            You will receive:
 
-            "Instructions must use DETECTION TRIGGERS (not INCLUDE/EXCLUDE), and must:\n"
-            "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
-            "- Preserve opposing positions as distinct\n"
-            "- Avoid harmonizing or resolving disagreement\n\n"
+            1. The current research question.
+            2. The current schema, containing:
+            - theme_id
+            - theme_label
+            - theme_description
+            - organizing_proposition
+            - instructions
+            3. The current thematic summaries:
+            - completeness status
+            - summary word count
+            - synthesized thematic content
+            4. Prior schema-change history, including repairs and optimizations.
 
-            "**'Other' Theme (Conditional)**\n"
-            "Create a theme where \"theme_label\" is exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
-            "without fragmenting the schema into excessively fine-grained themes.\n\n"
+            Use only the current schema as the target of optimization.
 
-            "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
+            Use prior schema-change history to:
 
-            "Other is a residual category rather than a substantive thematic region. Therefore its organizing_proposition must be null.\n\n"
+            - understand why the current partition exists;
+            - avoid recreating previously overloaded conceptual aggregations;
+            - avoid reversing earlier changes without clear evidence;
+            - detect oscillation between previously attempted schema structures.
 
-            "The 'Other' theme should:\n"
-            "- Capture valid but low-frequency or residual concepts\n"
-            "- Not contain a coherent or dominant conceptual grouping\n"
-            "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
+            ## CODEBOOK STRUCTURE
 
-            "If no residual concepts exist, omit this theme entirely.\n\n"
+            Each theme defines a conceptual territory using:
 
-            "## UNDERSTANDING FAILURES\n"
-            "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
-            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
-            "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
-            "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
-            "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
-            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
-            "All previously failed themes will be marked as such.\n\n"
+            - theme_label
+            - theme_description
+            - organizing_proposition
+            - instructions
 
-            "## USING CURRENT SUMMARY LENGTHS IN OPTIMIZATION DECISIONS\n"
-            "- Treat summary length as an approximate proxy for representational capacity. Themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+            The theme_description defines the theme's conceptual scope.
 
-            "## COMPRESSION DISCIPLINE\n"
-            "Optimization must not rely on future synthesis compression to make overloaded or near-overloaded themes viable.\n"
-            "When considering merges, reallocations, or broader theme scopes, assume each substantively distinct claim-family, mechanism, causal logic, actor system, policy instrument, implication, minority view, or contradiction must remain separately representable in later synthesis.\n"
-            "Paraphrases, near-duplicates, repeated examples, and differently cited versions of the same claim may be consolidated.\n"
-            "Distinct mechanisms, causal logics, actor systems, policy instruments, contradictions, minority positions, geographies, sectors, or implications must not be collapsed merely to create a more elegant schema.\n"
-            "If an optimization would require collapsing distinct claim-families into generalized statements to remain within bounded synthesis constraints, do not make that optimization.\n\n"
-              
-            "## OPTIMIZATION OBJECTIVES\n"
-            "The ideal codebook/schema will:\n\n"
-            "- Allow for the successful expression of all assigned conceptual content, without loss of granularity, under the constraints on output length (i.e. no failing themes).\n"
-            "- Define themes that are internally conceptually coherent\n"
-            "- Ensure clear conceptual boundaries between themes\n"
-            "- Capture the full conceptual landscape without forcing conceptually distinct ideas into the same theme\n"
-            "- Avoid unnecessary fragmentation into overly fine-grained themes\n"
-            "- Minimize reliance on the 'Other' category\n\n"
+            For substantive themes, the organizing_proposition states the central
+            conceptual insight expressed by the theme. It should articulate the idea,
+            relationship, process, mechanism, distinction, trajectory, argument, or
+            dynamic that unifies the thematic region.
 
-            "## OPTIMIZATION CONSTRAINTS\n"
-            "Only the current schema iteration is relevant for your optimization task. Use prior iterations only as context for understanding the history of schema development, not as targets for optimization.\n"
-            "When proposing improvements, you must ensure that the revised schema:\n"
-            "- does NOT contain any themes that fail the completeness check\n"
-            "- does NOT reintroduce previously resolved completeness failures\n"
-            "- If proposing reallocation of content between themes and it is unclear whether bounded synthesis constraints can be maintained, you must avoid making such changes\n"
-            "Only suggest changes to the schema if there are obvious and non-speculative improvements that can be made based on the input. Do NOT make speculative improvements.\n"
-            "If making improvements, update theme labels, theme descriptions, organizing propositions (for substantive themes only), and instructions as necessary to faithfully reflect the optimized conceptual partition.\n"
-            "- Changes to INCLUSION/EXCLUSION (or TRIGGERS in the case of conflict) should be applied to both the theme being changed and any other affected themes so that the full schema behaves as a mutually constraining partition.\n"
-            "- Changes to organizing_propositions should be applied to every substantive theme whose conceptual territory changes as part of the optimization, including both themes that relinquish conceptual territory and themes that receive it.\n"
-            "- For substantive themes whose conceptual territory is unchanged, preserve the existing organizing_proposition.\n"
-            "Do not merge themes unless both conceptual coherence and bounded synthesis viability are clearly preserved without collapsing distinct claim-families into lossy generalizations.\n\n"
+            For themes labelled exactly "Conflict" or "Other",
+            organizing_proposition must be null.
 
-            "## CONVERGENCE CONDITION\n"
-            "You must always include a field \"no_change\" in your output.\n\n"
+            The instructions operationalize assignment through:
 
-            "Set \"no_change\": true if either:\n"
-            "- there are no obvious unresolved opportunities to improve conceptual partitioning without risking new cases of theme overload; or\n"
-            "- all obvious improvements would require expanding near-capacity themes.\n\n"
+            - INCLUDE / EXCLUDE rules for substantive themes and Other;
+            - DETECTION TRIGGERS for Conflict.
 
-            "Set \"no_change\": false only if there are obvious, non-speculative improvements that preserve bounded synthesis viability.\n\n"
+            ## OPTIMIZATION OBJECTIVES
 
-            "## OUTPUT FORMAT (STRICT JSON)\n"
-            "{\n"
-            "  \"no_change\": <boolean>,\n"
-            "  \"themes\": [\n"
-            "    {\n"
-            "      \"theme_label\": <string>,\n"
-            "      \"theme_description\": <string>,\n"
-            "      \"organizing_proposition\": <string | null>,\n"
-            "      \"instructions\": <string>\n"
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "\n\n"
+            An optimized schema should:
 
-            "If you set \"no_change\": true, \"themes\" should be an empty array.\n"
-            "If no_change=false, return the full revised schema, not only changed themes.\n"
+            1. preserve successful expression of all assigned conceptual content under
+            bounded synthesis constraints;
+            2. define internally coherent themes;
+            3. maintain clear conceptual boundaries between themes;
+            4. represent the full conceptual landscape;
+            5. avoid forcing conceptually distinct material into the same theme;
+            6. avoid unnecessary fragmentation;
+            7. minimize reliance on Other where a coherent substantive grouping clearly
+            exists.
+
+            Possible optimizations include:
+
+            - clarifying an ambiguous boundary;
+            - reallocating conceptual territory between existing themes;
+            - merging unnecessarily fragmented themes;
+            - splitting a conceptually incoherent theme when both resulting themes remain
+            independently justified;
+            - extracting a coherent grouping from Other;
+            - revising labels, scopes, or organizing propositions to reflect changed
+            conceptual territories;
+            - correcting inconsistent INCLUDE / EXCLUDE routing;
+            - dissolving a theme whose content is better represented elsewhere.
+
+            ## BOUNDED SYNTHESIS CONSTRAINTS
+
+            The synthesis system operates under a maximum output of approximately
+            4096 tokens / 2500 words.
+
+            Treat current summary length as an approximate indicator of representational
+            capacity.
+
+            Themes approaching this limit are near capacity and must not be expanded.
+
+            Optimization must not rely on future compression to make an enlarged theme
+            viable.
+
+            Assume every substantively distinct claim-family, mechanism, causal logic,
+            actor system, policy instrument, implication, minority position, geography,
+            sector, or contradiction must remain separately representable.
+
+            Paraphrases, duplicates, repeated examples, and differently cited versions of
+            the same claim may be consolidated.
+
+            Distinct substantive concepts must not be collapsed merely to create a more
+            elegant schema.
+
+            Do not merge themes unless conceptual coherence and bounded synthesis
+            viability are both clearly preserved.
+
+            If viability is uncertain, do not propose the change.
+
+            ## PRIOR CHANGE DISCIPLINE
+
+            Do not recreate conceptual aggregations that previously failed bounded
+            synthesis.
+
+            Do not reverse a prior repair merely because the separated themes appear
+            conceptually related.
+
+            A previous separation may be reversed only when the current evidence clearly
+            shows that the resulting combined theme would remain coherent and comfortably
+            within bounded synthesis capacity.
+
+            Do not alternate between previously attempted schema structures.
+
+            ## INCLUDE / EXCLUDE LOGIC
+
+            For substantive themes and Other, the implementation must ultimately use:
+
+            "INCLUDE if <conceptual territory>; EXCLUDE if <territory assigned elsewhere>."
+
+            Strong EXCLUDE rules:
+
+            - identify neighboring themes likely to overlap;
+            - explicitly exclude their conceptual territories;
+            - route ambiguous material to the correct destination.
+
+            EXCLUDE rules must not be generic or simple inverses of INCLUDE rules.
+
+            When proposing changed themes, provide sufficiently precise scope,
+            inclusion, and exclusion logic for a later implementation pass to write these
+            rules.
+
+            ## SPECIAL THEMES
+
+            ### Conflict
+
+            Use the label exactly "Conflict".
+
+            Conflict is appropriate only for substantively incompatible interpretations,
+            claims, or prescriptions that cannot coexist within one conceptual frame.
+
+            Conflict does not include:
+
+            - reinforcing critiques;
+            - layered constraints;
+            - trade-offs within a shared framework;
+            - differences of emphasis without incompatible positions.
+
+            Conflict must:
+
+            - preserve identifiable polarity;
+            - use DETECTION TRIGGERS;
+            - have organizing_proposition set to null.
+
+            ### Other
+
+            Use the label exactly "Other".
+
+            Other is a residual category for valid low-frequency material that does not
+            form a coherent substantive grouping.
+
+            Other must not:
+
+            - absorb a coherent grouping that warrants a substantive theme;
+            - compensate for poorly defined neighboring themes;
+            - receive an organizing proposition.
+
+            Set organizing_proposition to null.
+
+            ## PLANNING SEMANTICS
+
+            Each theme_change defines a self-contained transformation.
+
+            affected_theme_ids identifies every existing theme replaced or modified by
+            that transformation.
+
+            affected_theme_labels provides the corresponding labels for interpretability.
+
+            resulting_themes defines the complete replacement state for those affected
+            themes.
+
+            For each resulting theme:
+
+            - existing_theme_id identifies the current theme it replaces or updates;
+            - use null when creating a new theme;
+            - theme_label defines its resulting label;
+            - core_scope defines its resulting conceptual territory;
+            - organizing_proposition defines its resulting conceptual insight;
+            - inclusions defines concepts assigned to it;
+            - exclusions defines neighboring territory assigned elsewhere.
+
+            Examples:
+
+            - Boundary revision:
+            one affected theme produces one resulting theme.
+
+            - Reallocation:
+            two or more affected themes produce revised versions of those themes.
+
+            - Merge:
+            two or more affected themes produce one resulting theme.
+
+            - Split:
+            one affected theme produces two or more resulting themes.
+
+            - Dissolution:
+            the dissolved theme and all receiving themes are affected; the resulting
+            themes contain only the retained or receiving themes.
+
+            Do not place the same affected_theme_id in more than one theme_change.
+
+            Do not generate new numeric theme identifiers.
+
+            ## ORGANIZING PROPOSITIONS
+
+            Every resulting substantive theme must have a non-null
+            organizing_proposition.
+
+            It must express the central conceptual insight that the eventual synthesis
+            should demonstrate.
+
+            It must not merely:
+
+            - repeat the label;
+            - describe the theme's contents;
+            - restate the scope;
+            - restate assignment instructions;
+            - justify the optimization.
+
+            Conflict and Other must have organizing_proposition set to null.
+
+            If a theme's conceptual territory changes, update its organizing proposition.
+
+            If its territory does not change, preserve the existing proposition exactly.
+
+            ## CONVERGENCE
+
+            Set no_change to true if:
+
+            - there are no obvious, non-speculative improvements; or
+            - all apparent improvements would risk overload; or
+            - all apparent improvements depend on uncertain reallocations; or
+            - the changes would be merely cosmetic.
+
+            Set no_change to false only when at least one clear improvement can be
+            expressed as a complete and implementable theme_change or schema_optimization.
+
+            ## OUTPUT FORMAT — STRICT JSON
+
+            {
+                "no_change": <boolean>,
+                "optimize_plan": {
+                    "theme_changes": [
+                        {
+                            "affected_theme_ids": [<integer>],
+                            "affected_theme_labels": [<string>],
+                            "optimization_opportunity": <string>,
+                            "resulting_themes": [
+                                {
+                                    "existing_theme_id": <integer | null>,
+                                    "theme_label": <string>,
+                                    "core_scope": <string>,
+                                    "organizing_proposition": <string | null>,
+                                    "inclusions": [<string>],
+                                    "exclusions": [<string>]
+                                }
+                            ],
+                            "optimization_narrative": <string>
+                        }
+                    ],
+                    "schema_optimizations": [
+                        {
+                            "affected_theme_ids": [<integer>],
+                            "optimization_narrative": <string>
+                        }
+                    ]
+                }
+            }
+
+            ## FIELD DEFINITIONS
+
+            - no_change:
+            Whether the current schema should remain unchanged.
+
+            - optimize_plan:
+            The complete set of intended optimization operations.
+
+            - theme_changes:
+            Self-contained transformations of one or more current themes.
+
+            - affected_theme_ids:
+            Every existing theme removed, replaced, or modified by the transformation.
+
+            - affected_theme_labels:
+            Labels corresponding to affected_theme_ids.
+
+            - optimization_opportunity:
+            The specific coherence, boundary, fragmentation, Other-category, or schema
+            problem that motivates the change.
+
+            - resulting_themes:
+            The complete set of themes that replace the affected themes.
+
+            - existing_theme_id:
+            The current theme retained or updated by the resulting theme. Use null for a
+            newly created theme.
+
+            - theme_label:
+            The intended resulting label.
+
+            - core_scope:
+            The intended conceptual scope.
+
+            - organizing_proposition:
+            The intended conceptual proposition, or null for Conflict and Other.
+
+            - inclusions:
+            Concepts that the resulting theme must include.
+
+            - exclusions:
+            Neighboring conceptual territories that the resulting theme must exclude and
+            route elsewhere.
+
+            - optimization_narrative:
+            One concise description of what changes and why.
+
+            - schema_optimizations:
+            Cross-schema changes not adequately represented by a single theme_change.
+
+            ## VALIDATION RULES
+
+            - If no_change is true:
+            - theme_changes must be empty;
+            - schema_optimizations must be empty.
+
+            - If no_change is false:
+            - at least one theme_change or schema_optimization must be present.
+
+            - Every affected_theme_id must exist in the input schema.
+
+            - Every affected_theme_id may appear in only one theme_change.
+
+            - Every affected theme must either:
+            - have a corresponding resulting theme; or
+            - have all of its conceptual territory explicitly reallocated.
+
+            - A resulting theme with existing_theme_id must reference one of the affected
+            theme IDs.
+
+            - A new resulting theme must use existing_theme_id = null.
+
+            - Do not generate numeric IDs for new themes.
+
+            - Every resulting substantive theme must include:
+            - a non-empty core_scope;
+            - a non-null organizing_proposition;
+            - inclusion logic;
+            - exclusion logic.
+
+            - Conflict and Other must have organizing_proposition = null.
+
+            - Do not output final theme descriptions.
+
+            - Do not output final INCLUDE / EXCLUDE prose.
+
+            - Do not output a rewritten schema.
+
+            - Do not propose cosmetic changes.
+
+            - Do not reintroduce a previously failed conceptual aggregation.
+
+            - Output only the JSON object.
+            """
+            )
+
+    
+    def implement_schema_optimization(self):
+        """
+        Construct the prompt for implementing a schema-optimization plan.
+
+        Mechanically applies a validated optimize_plan to the current schema and
+        returns the complete rewritten schema.
+        """
+
+        return(
+            """
+            ## ROLE
+
+            You are a Schema Optimization Rewrite Engine.
+
+            Your task is to mechanically implement a previously generated optimize_plan
+            onto an existing thematic codebook.
+
+            You are not performing optimization analysis.
+
+            You must not diagnose new problems, reinterpret the plan, or introduce
+            additional improvements.
+
+            ## INPUTS
+
+            You will receive:
+
+            1. The current research question.
+            2. The current schema, containing:
+            - theme_id
+            - theme_label
+            - theme_description
+            - organizing_proposition
+            - instructions
+            3. A validated optimize_plan generated by the optimization-planning stage.
+
+            ## OPTIMIZE PLAN STRUCTURE
+
+            The optimize_plan contains:
+
+            - theme_changes
+            - schema_optimizations
+
+            Each theme_change contains:
+
+            - affected_theme_ids
+            - affected_theme_labels
+            - optimization_opportunity
+            - resulting_themes
+            - optimization_narrative
+
+            Each resulting theme contains:
+
+            - existing_theme_id
+            - theme_label
+            - core_scope
+            - organizing_proposition
+            - inclusions
+            - exclusions
+
+            ## TRANSFORMATION SEMANTICS
+
+            For each theme_change:
+
+            1. Locate every input theme listed in affected_theme_ids.
+            2. Remove those themes from their existing form.
+            3. Replace them with exactly the themes listed in resulting_themes.
+            4. Preserve every theme not listed in affected_theme_ids unless a
+            schema_optimization explicitly requires its modification.
+
+            A resulting theme with an existing_theme_id updates or replaces that existing
+            theme.
+
+            A resulting theme with existing_theme_id = null creates a new theme.
+
+            The resulting_themes array defines the complete replacement state for the
+            affected thematic region.
+
+            Do not preserve an affected source theme unless it is represented in
+            resulting_themes.
+
+            ## TASK
+
+            Apply the optimize_plan to the current schema.
+
+            You must:
+
+            - implement every theme_change;
+            - implement every schema_optimization;
+            - create every planned new theme;
+            - update every planned existing theme;
+            - remove every planned dissolved or merged theme;
+            - preserve all unchanged themes;
+            - return the complete resulting schema.
+
+            Convert each resulting theme's:
+
+            - core_scope into a precise theme_description;
+            - organizing_proposition into the final organizing_proposition;
+            - inclusions and exclusions into operational assignment instructions.
+
+            ## IMPLEMENTATION DISCIPLINE
+
+            The optimize_plan is authoritative.
+
+            Do not:
+
+            - add an optimization absent from the plan;
+            - omit an optimization present in the plan;
+            - reinterpret the optimization opportunity;
+            - change the intended conceptual partition;
+            - broaden or narrow a resulting scope;
+            - merge or split additional themes;
+            - move concepts beyond the specified reallocations;
+            - optimize for additional elegance or compression;
+            - make speculative improvements.
+
+            You may improve grammar, clarity, and consistency only when doing so does not
+            change the plan's conceptual meaning.
+
+            The optimization_opportunity and optimization_narrative explain the plan but
+            must not appear as justification in the resulting schema.
+
+            ## THEME DESCRIPTIONS
+
+            Each theme_description must clearly define the conceptual territory specified
+            by core_scope.
+
+            It must be sufficiently precise to distinguish the theme from neighboring
+            themes.
+
+            Do not introduce conceptual material absent from the plan.
+
+            ## ORGANIZING PROPOSITIONS
+
+            For every substantive resulting theme, use the organizing_proposition supplied
+            by the optimize_plan as authoritative.
+
+            You may convert it into concise schema-ready prose, but must not:
+
+            - strengthen or weaken the claim;
+            - broaden or narrow its conceptual logic;
+            - replace it with a different proposition;
+            - turn it into a list of contents;
+            - explain why the optimization occurred.
+
+            For Conflict and Other, organizing_proposition must be null.
+
+            Preserve the organizing_proposition of unchanged themes exactly.
+
+            ## INCLUDE / EXCLUDE RULES
+
+            All substantive themes and Other must use:
+
+            "INCLUDE if <conceptual territory>; EXCLUDE if <territory assigned elsewhere>."
+
+            INCLUDE rules must implement the supplied inclusions and core_scope.
+
+            EXCLUDE rules must:
+
+            - implement the supplied exclusions;
+            - identify neighboring conceptual territories;
+            - route neighboring material to the appropriate named themes;
+            - maintain the schema as a mutually constraining partition.
+
+            Do not write generic exclusions.
+
+            Do not use the simple inverse of the INCLUDE rule.
+
+            Preferred form:
+
+            "EXCLUDE if discussing <excluded territory>, which should be routed to
+            <theme_label>."
+
+            When a conceptual boundary changes, update the instructions on every affected
+            side of that boundary as required by the optimize_plan.
+
+            ## CONFLICT
+
+            If a resulting theme is labelled exactly "Conflict":
+
+            - preserve that exact label;
+            - set organizing_proposition to null;
+            - use DETECTION TRIGGERS rather than INCLUDE / EXCLUDE;
+            - define the dimension of disagreement;
+            - preserve opposing positions;
+            - do not harmonize the disagreement.
+
+            ## OTHER
+
+            If a resulting theme is labelled exactly "Other":
+
+            - preserve that exact label;
+            - set organizing_proposition to null;
+            - retain it only as a residual category;
+            - do not assign coherent substantive groupings to it.
+
+            ## UNCHANGED THEMES
+
+            Preserve unchanged themes exactly unless a schema_optimization explicitly
+            requires a corresponding boundary-rule update.
+
+            Do not silently rewrite unchanged labels, descriptions, organizing
+            propositions, or instructions.
+
+            ## OUTPUT FORMAT — STRICT JSON
+
+            {
+                "themes": [
+                    {
+                        "theme_label": <string>,
+                        "theme_description": <string>,
+                        "organizing_proposition": <string | null>,
+                        "instructions": <string>
+                    }
+                ]
+            }
+
+            ## OUTPUT CONSTRAINTS
+
+            - Return the complete rewritten schema.
+            - Do not generate numeric theme identifiers.
+            - Do not output no_change.
+            - Do not output optimize_plan.
+            - Do not output explanations.
+            - Do not output optimization narratives.
+            - Do not output markdown.
+            - Output only the rewritten schema JSON.
+            """
         )
        
 
