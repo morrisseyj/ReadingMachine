@@ -8,7 +8,8 @@ All notable methodological and software changes to ReadingMachine are documented
 
 ### Changed
 
-- Made the use of organizing principle for themes a default that can't be opted out of. Done because its performant and making it standard removed conditional complexity from prompts and execution code 
+- Made the use of organizing principle for themes a default that can't be opted out of. Done because its performant and making it standard removed conditional complexity from prompts and execution code.
+- Updated the schema optimization pass so that it is decomposed into plan optimizaton and and implement plan, mirroring the split in responsibilities for schema repair.
 
 ## [v0.2.0] - 2026-09-22
 
