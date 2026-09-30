@@ -5475,13 +5475,6 @@ class Summarize:
         The returned object is a planning artifact only. It does not directly
         modify SummaryState or any stored theme schema.
         """
-        fall_back = {
-            "repair_plan": {
-                "theme_repairs": [],
-                "schema_repairs": []
-            },
-        } 
-
         
         json_schema = {
             "name": "theme_schema_repair_plan",
@@ -5739,15 +5732,21 @@ class Summarize:
 
         
         # Generate the repair instructions for this schema
-        response = utils.call_chat_completion(
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
-            fall_back=fall_back,
+            fall_back=None,
             return_json=True,
             json_schema=json_schema,
+            return_with_error=True,
         )
+
+        if response is None:
+            raise ValueError(
+                f"Repair plan returned an empty response. Error {error}"
+            )
 
 
         repair_plan = response.get("repair_plan", {
@@ -5757,7 +5756,7 @@ class Summarize:
 
         return repair_plan
 
-    def _llm_apply_schema_repair_plan(self, unstable_schema_rq, sys_prompt, user_prompt):
+    def _llm_apply_schema_repair_plan(self, sys_prompt, user_prompt):
         """
         Apply a schema-repair plan to an unstable question-specific schema.
 
@@ -5769,10 +5768,6 @@ class Summarize:
 
         Parameters
         ----------
-        unstable_schema_rq : pd.DataFrame
-            Current unstable theme schema for one research question. Used to build
-            the fallback schema returned if the LLM call fails.
-
         sys_prompt : str
             System prompt defining the constraints for applying the repair plan.
 
@@ -5802,18 +5797,6 @@ class Summarize:
         structural problems and then to apply those repairs in a separate call.
         """
         
-        
-        fall_back = {
-            "themes": unstable_schema_rq[
-                [
-                    "theme_label",
-                    "theme_description",
-                    "organizing_proposition",
-                    "instructions",
-                ]
-            ].to_dict(orient="records")
-        }
-
         json_schema = {
             "name": "theme_schema_repair_implementer",
             "strict": True,
@@ -5855,19 +5838,135 @@ class Summarize:
             }
         }
 
-        response = utils.call_chat_completion(
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
-            fall_back=fall_back,
+            fall_back=None,
             return_json=True,
-            json_schema=json_schema
+            json_schema=json_schema, 
+            return_with_error=True
         )
+
+        if response is None:
+            raise ValueError(
+                f"Schema repair plan implimenter returned an empty response. Error {error}"
+            )
 
         themes = response.get("themes", [])
         
         return themes
+
+
+    def _repair_schema(self):
+        """
+        Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
+        """
+
+        # Build the latest schema with the populated themes, word counts etc
+        latest_populated_schema_df = (
+            self.theme_schema_list[-1]
+            # merge with populated themes to summaries
+            .merge( 
+                self.populated_theme_list[-1], 
+                how = "left",
+                on = ["question_id", "theme_id"]
+                )
+            .assign(
+                # Identify pass/fail themes based on failed batch summaries
+                status = lambda x: np.where(
+                    x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---"),
+                    "fail", 
+                    "pass"
+                    )
+                )
+            # Calculate word count for all summaries
+            .assign(word_count = lambda x: x["thematic_summary"].str.split().str.len().fillna(0).astype(int))
+            # Set word count to null for failing themes as we don't yet know thier conceptual capacity
+            .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
+            )
+
+        # Loop over the schema by question to send each question schema as a json to the repair planner
+        updated_schema_list = []
+
+        for row, index in self.corpus_state.questions:
+            print(f"Repairing schema for question {row} of {len(self.corpus_state.questions)}")
+            # Get the current question schema
+            current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row]
+            # Check whether any of its themes need repairs
+            if not (current_populated_question_schema_df["status"] == "fail").any():
+                # If none need repairs, we skip and just append this to the updated schema and continue the loop
+                updated_schema_list.append(current_populated_question_schema_df)
+                continue
+            
+            else:
+                # Otherwise we send for repairs
+                # Get the sys prompt
+                plan_sys_prompt =  Prompts().gen_theme_schema_repair_instructions()
+                
+                # Make the user prompt: 
+                # First convert to json to make the 
+                current_populated_question_schema_json = current_populated_question_schema_df.to_json(
+                    orient="records",
+                    force_ascii=False,
+                    indent=2,
+                )
+                # Get the schema history
+                schema_history_json = json.dumps(
+                    [
+                        {
+                            "iteration": iteration,
+                            "repairs": json.loads(
+                                repair_df.to_json(
+                                    orient="records",
+                                    force_ascii=False,
+                                )
+                            ),
+                        }
+                        for iteration, repair_df in enumerate(self.schema_repair_list)
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+                plan_user_prompt = (
+                    f"RESEARCH QUESTON:\n{row}\n\n"
+                    f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
+                    f"SCHEMA HISTORY:\n{schema_history_json}"
+
+                )
+                # Get the repair plan from the LLM
+                repair_plan_json = self._llm_gen_schema_repair_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
+                # Convert the repair plan to a df to eventually return
+                repair_plan_for_history_df = KJTHIUTHRIUTHRIUEHIUERH IREUHTIREUHTIEURHTIUERHTIUERHTIUR
+
+                # Pass the repair plan to the repair implementer
+                # Gen the prompts
+                implement_sys_prompt = Prompts.implement_schema_repairs()
+                # User prompt 
+                implement_user_prompt = plan_user_prompt + "\n\n" + repair_plan_json
+                # Call the LLM
+                updated_question_schema_json = self._llm_apply_schema_repair_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
+                # Convert the output to df 
+                updated_question_schema_df = updated_question_schema_json.json_dumps()
+                # Append the df to the list
+                updated_schema_list.append(updated_question_schema_df)
+
+            # Concat the list of dfs to get a single df of the schema
+            updated_schema_df = pd.concat(updated_schema_list)
+            # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
+            return(updated_schema_df, )
+
+
+
+
+
+
+
+
+
+
 
     def _llm_gen_schema_optimization_plan(
         self,
@@ -6059,6 +6158,9 @@ class Summarize:
         return response
 
 
+    
+
+
 
     def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
         """
@@ -6131,6 +6233,24 @@ class Summarize:
         optimized_schema = response["themes"]
 
         return optimized_schema
+
+    
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+    def _optimize_schema(self):
+
 
 
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
