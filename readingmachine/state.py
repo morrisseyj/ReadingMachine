@@ -1239,27 +1239,27 @@ class SummaryState:
         print(f"Summary outputs saved successfully to {save_path}.")
         
 
-    def rewind_to(self, stage: str, index: int):
+    def rewind_to(self, stage: str, index: int) -> None:
         """
         Rewind SummaryState to a specified synthesis stage and iteration.
 
-        Truncates the iterative synthesis artifact lists so that the saved
-        summary state reflects progress only through the requested stage and
-        iteration. This is useful when rerunning part of the synthesis pipeline
-        from an earlier theme-schema, mapping, population, or orphan-handling
-        pass.
+        Truncates the iterative synthesis artifacts so that state is retained only
+        through the requested stage and zero-based iteration index.
+
+        Schema-change plans are stored in ``schema_repair_list``. Plan ``i``
+        describes the transition from ``theme_schema_list[i]`` to
+        ``theme_schema_list[i + 1]``. Therefore, rewinding to iteration ``index``
+        retains the first ``index`` plans.
 
         Parameters
         ----------
         stage : str
             Stage to retain through. Must be one of:
 
-            - `"schema"`: retain theme schemas through `index`
-            - `"mapping"`: retain theme schemas and mapped themes through `index`
-            - `"populate"`: retain theme schemas, mappings, and populated themes
-            through `index`
-            - `"orphan"`: retain theme schemas, mappings, populated themes, and
-            orphan outputs through `index`
+            - ``"schema"``
+            - ``"mapping"``
+            - ``"populate"``
+            - ``"orphan"``
 
         index : int
             Zero-based iteration index to retain for the target stage.
@@ -1267,25 +1267,19 @@ class SummaryState:
         Raises
         ------
         ValueError
-            If `stage` is not valid.
-
-        ValueError
-            If `index` is negative.
-
-        ValueError
-            If `index` exceeds the available entries for the selected stage.
+            If ``stage`` is invalid, ``index`` is negative, or ``index`` exceeds
+            the available entries for the requested stage.
 
         Notes
         -----
-        Rewinding realigns the dependent synthesis artifact lists so that later
-        stages do not remain ahead of earlier stages. The redundancy list is
-        always cleared, since redundancy reduction is only valid after the final
-        synthesis state has been reached.
+        The expected relationship is:
 
-        After truncating the in-memory artifact lists, this method immediately
-        calls `save()` to persist the rewound state to disk.
+            len(schema_repair_list) == len(theme_schema_list) - 1
+
+        Each retained repair plan must have a corresponding resulting schema.
+        Redundancy outputs are always cleared because they are valid only for the
+        final synthesis state.
         """
-
         stage_order = {
             "schema": 0,
             "mapping": 1,
@@ -1294,7 +1288,13 @@ class SummaryState:
         }
 
         if stage not in stage_order:
-            raise ValueError("Invalid stage name.")
+            valid_stages = ", ".join(stage_order)
+            raise ValueError(
+                f"Invalid stage name {stage!r}. Expected one of: {valid_stages}."
+            )
+
+        if index < 0:
+            raise ValueError("Index must be >= 0.")
 
         target_depth = stage_order[stage]
 
@@ -1305,42 +1305,45 @@ class SummaryState:
             self.orphan_list,
         ]
 
-        if index < 0:
-            raise ValueError("Index must be >= 0.")
-
         target_list = structural[target_depth]
-        if index >= len(target_list):
-            raise ValueError("Index exceeds available passes.")
 
-        # Now realign explicitly
+        if index >= len(target_list):
+            raise ValueError(
+                f"Index {index} exceeds the available {stage} passes "
+                f"(count={len(target_list)})."
+            )
+
         if target_depth == 0:  # schema
-            self.theme_schema_list = self.theme_schema_list[:index+1]
+            self.theme_schema_list = self.theme_schema_list[:index + 1]
             self.mapped_theme_list = self.mapped_theme_list[:index]
             self.populated_theme_list = self.populated_theme_list[:index]
             self.orphan_list = self.orphan_list[:index]
 
         elif target_depth == 1:  # mapping
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
+            self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.mapped_theme_list = self.mapped_theme_list[:index + 1]
             self.populated_theme_list = self.populated_theme_list[:index]
             self.orphan_list = self.orphan_list[:index]
 
         elif target_depth == 2:  # populate
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
-            self.populated_theme_list = self.populated_theme_list[:index+1]
+            self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.mapped_theme_list = self.mapped_theme_list[:index + 1]
+            self.populated_theme_list = self.populated_theme_list[:index + 1]
             self.orphan_list = self.orphan_list[:index]
 
-        elif target_depth == 3:  # orphan
-            self.theme_schema_list = self.theme_schema_list[:index+1]
-            self.mapped_theme_list = self.mapped_theme_list[:index+1]
-            self.populated_theme_list = self.populated_theme_list[:index+1]
-            self.orphan_list = self.orphan_list[:index+1]
+        else:  # orphan
+            self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.mapped_theme_list = self.mapped_theme_list[:index + 1]
+            self.populated_theme_list = self.populated_theme_list[:index + 1]
+            self.orphan_list = self.orphan_list[:index + 1]
 
-        # Always clear redundancy
+        # Plan i creates schema i + 1. Retaining schemas through `index`
+        # therefore requires plans 0 through index - 1.
+        self.schema_repair_list = self.schema_repair_list[:index]
+
+        # Redundancy reduction is valid only for the final synthesis state.
         self.redundancy_list = []
-        
-        # Save the state after rewinding (handles the deleting of old files and writes the current state objects to file)
+
         self.save()
 
     def restart(self, confirm = None):
@@ -1400,6 +1403,7 @@ class SummaryState:
             self.mapped_theme_list = []
             self.populated_theme_list = []
             self.orphan_list = []
+            self.schema_repair_list = []
             self.redundancy_list = []
 
             # Clear disk state
@@ -1480,6 +1484,7 @@ class SummaryState:
             "mapped_theme_list": len(self.mapped_theme_list),
             "populated_theme_list": len(self.populated_theme_list),
             "orphan_list": len(self.orphan_list),
+            "schema_repair_list": len(self.schema_repair_list),
             "redundancy_list": len(self.redundancy_list)
         }
         if not diagnostic:
@@ -1578,6 +1583,7 @@ class SummaryState:
             self.mapped_theme_list,
             self.populated_theme_list,
             self.orphan_list,
+            self.schema_repair_list, 
             self.redundancy_list,
         ]
 
@@ -1644,6 +1650,7 @@ class SummaryState:
         new_state.mapped_theme_list = [df.copy(deep=True) for df in self.mapped_theme_list]
         new_state.populated_theme_list = [df.copy(deep=True) for df in self.populated_theme_list]
         new_state.orphan_list = [df.copy(deep=True) for df in self.orphan_list]
+        new_state.schema_repair_list = [df.copy(deep=True) for df in self.schema_repair_list]
         new_state.redundancy_list = [df.copy(deep=True) for df in self.redundancy_list]
         return new_state
 
