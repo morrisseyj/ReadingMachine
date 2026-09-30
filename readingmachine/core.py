@@ -6062,35 +6062,41 @@ class Summarize:
 
     def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
         """
-        Optimize a repaired theme schema without reintroducing overload.
+        Apply a validated optimization plan to a repaired theme schema.
 
+        Returns the complete rewritten theme schema without performing additional
+        optimization analysis.
         """
-        fallback_optimizer_response = {
-            "no_change": True,
-            "themes": []
-        }
-
+        # Json for structured output
         json_schema = {
-            "name": "theme_schema_optimizer",
+            "name": "theme_schema_optimize_implementer",
             "strict": True,
             "schema": {
                 "type": "object",
                 "properties": {
-                    "no_change": {
-                        "type": "boolean"
-                    },
                     "themes": {
                         "type": "array",
+                        "minItems": 1,
                         "items": {
                             "type": "object",
                             "properties": {
-                                "theme_label": {"type": "string"},
-                                "theme_description": {"type": "string"},
-                                "instructions": {"type": "string"}
+                                "theme_label": {
+                                    "type": "string"
+                                },
+                                "theme_description": {
+                                    "type": "string"
+                                },
+                                "organizing_proposition": {
+                                    "type": ["string", "null"]
+                                },
+                                "instructions": {
+                                    "type": "string"
+                                }
                             },
                             "required": [
                                 "theme_label",
                                 "theme_description",
+                                "organizing_proposition",
                                 "instructions"
                             ],
                             "additionalProperties": False
@@ -6098,31 +6104,32 @@ class Summarize:
                     }
                 },
                 "required": [
-                    "no_change",
                     "themes"
                 ],
                 "additionalProperties": False
             }
         }
 
-        response = utils.call_chat_completion(
+        # Call the response
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
-            fall_back=fallback_optimizer_response,
+            fall_back=None,
             return_json=True,
-            json_schema=json_schema
+            json_schema=json_schema,
+            return_with_error=True,
         )
 
-        optimized_schema = response.get("themes", [])
+        if response is None: # i.e. is fall_back
+            raise ValueError(
+                "Schema optimization implementation returned an empty response. "
+                f"Error: {error}"
+            )
 
-        if response.get("no_change", False):
-            print("Optimizer indicated no change needed. Retaining existing schema.")
-            return("no change")
+        optimized_schema = response["themes"]
 
-        else:
-            optimized_schema = response.get("themes", [])
         return optimized_schema
 
 
