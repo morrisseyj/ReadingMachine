@@ -5869,47 +5869,201 @@ class Summarize:
         
         return themes
 
+    def _llm_gen_schema_optimization_plan(
+        self,
+        stable_schema,
+        sys_prompt,
+        user_prompt,
+    ):
+        """
+        Generate a schema-optimization plan.
+
+        Returns a response containing:
+        - no_change: whether optimization has converged
+        - optimize_plan: proposed theme and schema changes
+        """
+
+        fall_back = None
+
+        json_schema = {
+            "name": "theme_schema_optimize_planner",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "no_change": {
+                        "type": "boolean"
+                    },
+                    "optimize_plan": {
+                        "type": "object",
+                        "properties": {
+                            "theme_changes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "affected_theme_ids": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "integer"
+                                            }
+                                        },
+                                        "affected_theme_labels": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "optimization_opportunity": {
+                                            "type": "string"
+                                        },
+                                        "resulting_themes": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "existing_theme_id": {
+                                                        "type": [
+                                                            "integer",
+                                                            "null",
+                                                        ]
+                                                    },
+                                                    "theme_label": {
+                                                        "type": "string"
+                                                    },
+                                                    "core_scope": {
+                                                        "type": "string"
+                                                    },
+                                                    "organizing_proposition": {
+                                                        "type": [
+                                                            "string",
+                                                            "null",
+                                                        ]
+                                                    },
+                                                    "inclusions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "exclusions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "existing_theme_id",
+                                                    "theme_label",
+                                                    "core_scope",
+                                                    "organizing_proposition",
+                                                    "inclusions",
+                                                    "exclusions",
+                                                ],
+                                                "additionalProperties": False,
+                                            }
+                                        },
+                                        "optimization_narrative": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "affected_theme_ids",
+                                        "affected_theme_labels",
+                                        "optimization_opportunity",
+                                        "resulting_themes",
+                                        "optimization_narrative",
+                                    ],
+                                    "additionalProperties": False,
+                                }
+                            },
+                            "schema_optimizations": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "affected_theme_ids": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "integer"
+                                            }
+                                        },
+                                        "optimization_narrative": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "affected_theme_ids",
+                                        "optimization_narrative",
+                                    ],
+                                    "additionalProperties": False,
+                                }
+                            }
+                        },
+                        "required": [
+                            "theme_changes",
+                            "schema_optimizations",
+                        ],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": [
+                    "no_change",
+                    "optimize_plan",
+                ],
+                "additionalProperties": False,
+            }
+        }
+
+        response, error = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=fall_back,
+            return_json=True,
+            json_schema=json_schema,
+            return_with_error=True
+        )
+
+        # Check if fall back used
+        if response is None:
+            raise ValueError(
+                f"Schema optmizer returned empty response. Error: {error}"
+            )
+
+        # Get no change and plan to make sure no_change does not have a plan
+        no_change = response["no_change"]
+        optimize_plan = response["optimize_plan"]
+
+        # Check if changes proposed
+        has_changes = bool( # bool on an empty list return false
+            optimize_plan["theme_changes"]
+            or optimize_plan["schema_optimizations"]
+        )
+
+        # Riase error if reponse malformed - no changes and plan for changes
+        if no_change and has_changes:
+            raise ValueError(
+                "Optimization planner returned no_change=True with a non-empty plan."
+            )
+
+        # Check the inverse
+        if not no_change and not has_changes:
+            raise ValueError(
+                "Optimization planner returned no_change=False with an empty plan."
+            )
+
+        # Return the plan
+        return response
+
+
+
     def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
         """
         Optimize a repaired theme schema without reintroducing overload.
 
-        Calls the configured language model to review a repaired schema and make
-        conservative improvements to theme coherence, boundaries, and organization.
-        The optimizer may return a revised schema or indicate that no improvement is
-        needed.
-
-        Parameters
-        ----------
-        sys_prompt : str
-            System prompt defining the optimization rules and constraints.
-
-        user_prompt : str
-            Prompt containing the repaired schema and any context needed to assess
-            whether optimization is safe.
-
-        Returns
-        -------
-        list[dict] or str
-            Returns a list of optimized theme definitions when changes are proposed.
-            Each theme dictionary contains:
-
-            - `theme_label`
-            - `theme_description`
-            - `instructions`
-
-            Returns the string `"no change"` when the optimizer indicates that the
-            existing schema should be retained.
-
-        Notes
-        -----
-        Optimization is intentionally separate from decomposition and repair. The
-        repair step prioritizes resolving overloaded or incomplete themes; the
-        optimization step may then improve conceptual coherence only when doing so
-        does not recreate the representational overload that caused earlier
-        failures.
-
-        This method performs only the LLM optimization call. It does not assign
-        theme IDs, persist outputs, or mutate SummaryState.
         """
         fallback_optimizer_response = {
             "no_change": True,
