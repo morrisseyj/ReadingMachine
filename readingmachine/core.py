@@ -5413,10 +5413,10 @@ class Summarize:
         return themes
 
 
-    def schema_change_plan_to_history_df(
+    def _schema_change_plan_to_history_df(
         plan_response,
         *,
-        iteration_id=None,
+        iteration=None,
         research_question=None,
     ):
         """
@@ -5490,7 +5490,7 @@ class Summarize:
                     )
 
             rows.append({
-                "iteration_id": iteration_id,
+                "iteration": iteration,
                 "research_question": research_question,
                 "changed_by": changed_by,
                 "source_theme_id": source["source_theme_id"],
@@ -5506,7 +5506,7 @@ class Summarize:
             })
 
         columns = [
-            "iteration_id",
+            "iteration",
             "research_question",
             "changed_by",
             "source_theme_id",
@@ -5522,16 +5522,13 @@ class Summarize:
         return pd.DataFrame(rows).reindex(columns=columns)
 
 
-    def schema_history_to_llm_json(history):
+    def _schema_history_to_json_string(history, *, indent = 2):
         """
         Convert a flat schema-change history dataframe, or list of dataframes,
         into compact JSON-serializable history for planner prompts.
         """
 
         ### HELPERS
-
-        def schema_history_to_llm_json_string(history, *, indent=2):
-            return json.dumps(schema_history_to_llm_json(history), indent=indent, ensure_ascii=False)
 
 
         def clean_scalar(value):
@@ -5574,7 +5571,7 @@ class Summarize:
                 "target_boundary_constraints": clean_scalar(row.get("target_boundary_constraints")),
             })
 
-        return records
+        return json.dumps(records, indent=indent, ensure_ascii=False)
 
     
     def _llm_gen_schema_repair_plan(self, user_prompt, sys_prompt):
@@ -6002,7 +5999,7 @@ class Summarize:
         updated_schema_list = []
 
         for row, index in self.corpus_state.questions:
-            print(f"Repairing schema for question {row} of {len(self.corpus_state.questions)}")
+            print(f"Repairing schema for question: {row} of {len(self.corpus_state.questions)}")
             # Get the current question schema
             current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row]
             # Check whether any of its themes need repairs
@@ -6017,40 +6014,38 @@ class Summarize:
                 plan_sys_prompt =  Prompts().gen_theme_schema_repair_instructions()
                 
                 # Make the user prompt: 
-                # First convert to json to make the 
+                # First convert the current schema to json to send to the LLM
                 current_populated_question_schema_json = current_populated_question_schema_df.to_json(
                     orient="records",
                     force_ascii=False,
                     indent=2,
                 )
                 # Get the schema history
-                schema_history_json = json.dumps(
-                    [
-                        {
-                            "iteration": iteration,
-                            "repairs": json.loads(
-                                repair_df.to_json(
-                                    orient="records",
-                                    force_ascii=False,
-                                )
-                            ),
-                        }
-                        for iteration, repair_df in enumerate(self.schema_repair_list)
-                    ],
-                    ensure_ascii=False,
-                    indent=2,
-                )
+                schema_history_df_list = []
+                for index, df enumerate(self.summary_state.schema_repair_list):
+                    df["iteration"] = index + 1
+                    schema_history_df_list.append(df)
+
+                schema_history_df = pd.concat(schema_history_df_list)
+                # Filter so we have the schema history just for this research question
+                schema_history_df_rq = schema_history_df_list.query("rq == row") #Check that these have the same format
+
+                schema_history_json_string = self._schema_history_to_json_string(schema_history_df)
 
                 plan_user_prompt = (
                     f"RESEARCH QUESTON:\n{row}\n\n"
                     f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
-                    f"SCHEMA HISTORY:\n{schema_history_json}"
+                    f"SCHEMA HISTORY:\n{schema_history_json_string}"
 
                 )
                 # Get the repair plan from the LLM
                 repair_plan_json = self._llm_gen_schema_repair_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
                 # Convert the repair plan to a df to eventually return
-                repair_plan_for_history_df = KJTHIUTHRIUTHRIUEHIUERH IREUHTIREUHTIEURHTIUERHTIUERHTIUR
+                repair_plan_for_history_df = self._schema_change_plan_to_history_df(
+                    repair_plan_json,
+                    iteration = len(self.summary_state.schema_repair_list) + 1,
+                    research_question = row
+                    )
 
                 # Pass the repair plan to the repair implementer
                 # Gen the prompts
