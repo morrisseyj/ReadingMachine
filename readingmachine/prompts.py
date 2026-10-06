@@ -1285,78 +1285,46 @@ class Prompts:
             "You are not tethered to the original structure of the provided text."
         )
 
-    def gen_theme_schema_repair_instructions(self):
+    
+    def gen_theme_schema_repair_plan(self):
         """
+
         Construct the prompt for schema-repair planning.
 
         Creates a prompt instructing a language model to analyze failed theme
+
         schemas and generate a structured decomposition plan for reducing
+
         representational overload.
 
         Returns
+
         -------
-        str
-            Prompt instructing the model to identify overloaded conceptual
-            regions, extract independently synthesizable claim-families, and
-            return a structured schema-repair plan as JSON.
 
-        Notes
-        -----
-        This prompt is used during iterative schema refinement after theme
-        population, orphan reintegration, and completeness checks have been
-        performed.
-
-        The prompt treats synthesis failures as evidence that a theme's assigned
-        conceptual territory exceeds bounded synthesis capacity. Rather than
-        rewriting the schema directly, the model is asked to generate a repair
-        plan describing how conceptual territory should be redistributed.
-
-        The repair-planning stage is intentionally separated from schema
-        implementation. This allows:
-
-        - diagnosis of representational overload
-        - inspection of proposed repairs
-        - independent schema rewriting
-        - avoidance of performative repair
-
-        The generated repair plan identifies:
-
-        - failing themes
-        - claim-families ranked by representational load
-        - concepts to extract
-        - concepts to reassign
-        - residual theme scopes
-        - schema-level repair recommendations
-
-        The expected response is a structured JSON object containing:
-
-        - `repair_plan`
-            - `theme_repairs`
-            - `schema_repairs`
-
-        This prompt is part of the schema-stabilization workflow and does not
-        generate a new schema directly. It produces a planning artifact that is
-        subsequently consumed by the schema-repair implementation stage.
         """
 
-        return(
+        return (
             "## ROLE\n"
             "You are a synthesis capacity architect specializing in the decomposition of thematic clusters into components small enough to operationalize bounded synthesis constraints.\n\n"
 
             "## THE TASK\n"
             "You are working as part of an iterative loop to refine a thematic codebook.\n"
-            "That iterative loop works as follows: " \
-            "1. Generate a thematic codebook.\n" 
-            "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n" 
+            "That iterative loop works as follows:\n"
+            "1. Generate a thematic codebook.\n"
+            "2. Assign content to the codebook themes based on the instructions defined in the codebook.\n"
             "3. Attempt to synthesize the content assigned to each theme under bounded output constraints.\n"
-            "4. Check whether synthesis included all the assigned content\n"
-            "5. Forcibly reinsert any content that was lost\n"
-            "   - Insertion is done in batches to ensure full insertion considering stress on the LLM context window\n"
-            "   - If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
+            "4. Check whether synthesis included all the assigned content.\n"
+            "5. Forcibly reinsert any content that was lost.\n"
+            "- Insertion is done in batches to ensure full insertion considering stress on the LLM context window.\n"
+            "- If insertion for a batch causes the theme to exceed bounded synthesis constraints, the batch content is summarized under 'FAILED BATCH SUMMARIES' and the theme is marked as failing.\n"
             "6. Update the codebook to partition failing themes into smaller independently synthesizable claim-families so that synthesis and reinsertion can pass.\n\n"
 
-            "You are currently at step 6 of this process."
-            "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n\n"
+            "You are currently at step 6 of this process.\n\n"
+
+            "Your task is to generate a decomposition plan that separates failing themes into sufficiently small claim-families that they can pass subsequent synthesis and reinsertion without exceeding bounded synthesis constraints.\n"
+            "You have authority over the conceptual plan: decide which conceptual territories must be extracted, retained, moved, or kept separate.\n"
+            "You do not implement that plan. Do not write the resulting schema, final labels, theme descriptions, organizing propositions, or assignment-rule prose.\n"
+            "A separate implementation stage will translate your conceptual decisions into a complete working schema.\n\n"
 
             "## UNDERSTANDING THE CODEBOOK STRUCTURE\n"
             "### STRUCTURE\n"
@@ -1368,64 +1336,51 @@ class Prompts:
 
             "These fields perform different functions within the schema.\n"
             "The theme_description defines the conceptual territory represented by the theme.\n"
-            "For substantive themes, the organizing_proposition states the central conceptual "
-            "insight expressed by that thematic region. It articulates the underlying idea, "
-            "relationship, process, pattern, distinction, trajectory, mechanism, argument, "
-            "or other conceptual structure that unifies its thematic logic.\n"
-            "For themes whose theme_label is exactly \"Conflict\" or \"Other\", "
-            "organizing_proposition must be null because these are architectural categories "
-            "rather than substantive thematic regions.\n"
-            "The instructions operationalize assignment into that conceptual territory through "
-            "INCLUDE / EXCLUDE rules or, for Conflict, DETECTION TRIGGERS.\n\n"
+            "For substantive themes, the organizing_proposition states the central conceptual insight expressed by that thematic region. It articulates the underlying idea, relationship, process, pattern, distinction, trajectory, mechanism, argument, or other conceptual structure that unifies its thematic logic.\n"
+            "For themes whose theme_label is exactly \"Conflict\" or \"Other\", organizing_proposition must be null because these are architectural categories rather than substantive thematic regions.\n"
+            "The instructions operationalize assignment into that conceptual territory through INCLUDE / EXCLUDE rules for substantive and Other themes, or, DETECTION TRIGGERS, for the Conflict theme.\n\n"
 
             "### INCLUDE/EXCLUDE LOGIC\n"
             "All themes define precise operational assignment rules:\n"
-            "- Substantive Themes or Other: 'INCLUDE if <conceptual territory>; EXCLUDE if <conceptual territories assigned to other themes>.'\n"
-            "- Conflict: 'DETECTION TRIGGERS: Flag if <fault line A> vs <fault line B>.'\n\n"
+            "- Substantive Themes or Other: 'INCLUDE if the material falls within this theme's conceptual territory; EXCLUDE if it belongs more precisely in a neighboring theme.'\n"
+            "- Conflict: 'DETECTION TRIGGERS: Flag if the material presents substantively incompatible claims, interpretations, or prescriptions that cannot be held within one coherent thematic frame.'\n\n"
 
             "INCLUDE rules define the conceptual material assigned to the synthesis region.\n"
             "EXCLUDE rules define conceptual material that must be routed to neighboring synthesis regions.\n"
             "EXCLUDE rules should not be the simple inverses of the INCLUDE rule.\n"
             "A strong EXCLUDE rule explicitly routes ambiguous or neighboring material toward other themes so the full schema behaves as a mutually constraining assignment partition.\n"
             "When generating the scope logic in the repair plan, provide sufficient specificity to allow for subsequent EXCLUDE rules to be written that can:\n"
-            "- identify the neighboring themes most likely to overlap with the current theme\n"
-            "- explicitly exclude those conceptual territories\n"
-            "- route ambiguous material toward the appropriate neighboring themes\n\n"
-
+            "- identify the neighboring themes most likely to overlap with the current theme;\n"
+            "- explicitly exclude those conceptual territories;\n"
+            "- route ambiguous material toward the appropriate neighboring themes.\n\n"
             "### SPECIAL THEMES\n"
             "**Conflict Theme (Conditional)**\n"
-            "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains "
-            "substantively incompatible interpretations, claims, or prescriptions that cannot be "
-            "maintained within a single coherent conceptual frame.\n\n"
+            "Have \"theme_label\" as exactly \"Conflict\" ONLY if the data contains substantively incompatible interpretations, claims, or prescriptions that cannot be maintained within a single coherent conceptual frame.\n\n"
             "Note: This 'Conflict' theme should not receive an organizing_proposition. Its organizing_proposition should be set to null.\n"
-
             "Do NOT paraphrase or rename this label. Use exactly \"Conflict\".\n\n"
 
             "Do NOT create a Conflict theme if the material merely:\n"
-            "- Presents reinforcing critiques\n"
-            "- Describes layered constraints or interacting factors\n"
-            "- Articulates trade-offs within a shared conceptual frame\n"
-            "- Expresses variation in emphasis without incompatible positions\n\n"
+            "- Presents reinforcing critiques;\n"
+            "- Describes layered constraints or interacting factors;\n"
+            "- Articulates trade-offs within a shared conceptual frame;\n"
+            "- Expresses variation in emphasis without incompatible positions.\n\n"
 
             "A Conflict theme requires identifiable polarity between positions.\n\n"
 
-            "Instructions for conflict will invoke DETECTION TRIGGERS (not INCLUDE/EXCLUDE). If scope logic amends conflict it must be sufficiently specific to allow subsequent rules to:\n"
-            "- Define the conceptual dimension of disagreement (e.g. mechanism, definition, policy logic, normative claim)\n"
-            "- Preserve opposing positions as distinct\n"
-            "- Avoid harmonizing or resolving disagreement\n\n"
+            "Instructions for Conflict will invoke DETECTION TRIGGERS rather than INCLUDE / EXCLUDE rules. If scope logic amends Conflict, it must be sufficiently specific to allow subsequent rules to:\n"
+            "- define the conceptual dimension of disagreement, such as mechanism, definition, policy logic, or normative claim;\n"
+            "- preserve opposing positions as distinct;\n"
+            "- avoid harmonizing or resolving disagreement.\n\n"
 
-            "**'Other' Theme (Conditional)**\n"
-            "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage "
-            "without fragmenting the schema into excessively fine-grained themes.\n"
+            "**Other Theme (Conditional)**\n"
+            "Have \"theme_label\" as exactly \"Other\" ONLY if needed to ensure full conceptual coverage without fragmenting the schema into excessively fine-grained themes.\n"
             "Note: This 'Other' theme should not receive an organizing_proposition. Its organizing_proposition should be set to null.\n"
-
             "Do NOT paraphrase or rename this label. Use exactly \"Other\".\n\n"
 
-            "The 'Other' theme should:\n"
-            "- Capture valid but low-frequency or residual concepts\n"
-            "- Not contain a coherent or dominant conceptual grouping\n"
-            "- Not substitute for poorly defined or overly broad themes elsewhere\n\n"
-
+            "The Other theme should:\n"
+            "- capture valid but low-frequency or residual concepts;\n"
+            "- not contain a coherent or dominant conceptual grouping;\n"
+            "- not substitute for poorly defined or overly broad themes elsewhere.\n\n"
             "If no residual concepts exist, omit this theme entirely.\n\n"
 
             "## INPUT\n"
@@ -1433,129 +1388,89 @@ class Prompts:
 
             "1. The research question.\n\n"
 
-            "2. The current schema state. This is the only schema that should be "
-            "repaired. It is organized as one integrated record per theme so that the "
-            "theme's conceptual definition, assignment rules, synthesis result, and "
-            "operational status can be evaluated together.\n\n"
-
+            "2. The current schema state. This is the only schema that should be repaired. It is organized as one integrated record per theme so that the theme's conceptual definition, assignment rules, synthesis result, and operational status can be evaluated together.\n"
             "Each theme record contains:\n"
-            "   - theme_id: the current numeric identifier for the theme\n"
-            "   - theme_label: the current theme label\n"
-            "   - theme_description: the conceptual territory represented by the theme\n"
-            "   - organizing_proposition: the central conceptual insight expressed by "
-            "the theme, or null for Conflict and Other\n"
-            "   - instructions: the current INCLUDE / EXCLUDE rules or Conflict "
-            "DETECTION TRIGGERS\n"
-            "   - theme_summary: the current attempt to synthesize all content assigned "
-            "to the theme\n"
-            "   - completeness_status: the result of orphan detection and attempted "
-            "reinsertion\n"
-            "   - word_count: the length of the successfully completed theme summary, "
-            "or null if the theme failed\n"
-            "   - failed_batch_summaries: summaries of content that could not be "
-            "reinserted within bounded synthesis constraints, or null if none exist\n\n"
+            "- theme_id: the current numeric identifier for the theme;\n"
+            "- theme_label: the current theme label;\n"
+            "- theme_description: the conceptual territory represented by the theme;\n"
+            "- organizing_proposition: the central conceptual insight expressed by the theme, or null for Conflict and Other;\n"
+            "- instructions: the current INCLUDE / EXCLUDE rules or Conflict DETECTION TRIGGERS;\n"
+            "- theme_summary: the current attempt to synthesize all content assigned to the theme;\n"
+            "- completeness_status: the result of orphan detection and attempted reinsertion;\n"
+            "- word_count: the length of the successfully completed theme summary, or null if the theme failed;\n"
+            "- failed_batch_summaries: summaries of content that could not be reinserted within bounded synthesis constraints, or null if none exist.\n\n"
 
-            "`completeness_status` must be interpreted as follows:\n"
-            "   - `pass` means all assigned content was successfully represented after "
-            "orphan detection and reinsertion.\n"
-            "   - `fail` means one or more orphan-reinsertion batches could not be "
-            "incorporated without exceeding bounded synthesis constraints. The theme "
-            "therefore requires structural decomposition.\n\n"
+            "\"completeness_status\" must be interpreted as follows:\n"
+            "- \"pass\" means all assigned content was successfully represented after orphan detection and reinsertion;\n"
+            "- \"fail\" means one or more orphan-reinsertion batches could not be incorporated without exceeding bounded synthesis constraints. The theme therefore requires structural decomposition.\n\n"
+            "\"word_count\" is an approximate indicator of current representational load:\n"
+            "- A passing theme with a high word count is approaching bounded synthesis capacity and should not receive substantial additional territory.\n"
+            "- A lower word count suggests more available capacity, but does not by itself establish conceptual fit.\n"
+            "- \"word_count = null\" means the theme failed during reinsertion. Its true representational load is unknown and must be assumed to exceed operational capacity.\n\n"
 
-            "`word_count` is an approximate indicator of current representational load:\n"
-            "   - A passing theme with a high word count is approaching bounded "
-            "synthesis capacity and should not receive substantial additional territory.\n"
-            "   - A lower word count suggests more available capacity, but does not by "
-            "itself establish conceptual fit.\n"
-            "   - `word_count = null` means the theme failed during reinsertion. Its true "
-            "representational load is unknown and must be assumed to exceed operational "
-            "capacity.\n\n"
+            "\"failed_batch_summaries\" contain material that was correctly assigned under the theme's current instructions but could not be incorporated into the theme summary without exceeding the output constraint. Treat this material as evidence of the conceptual territory and claim-families responsible for the theme's representational load. Do not assume it was incorrectly assigned merely because reinsertion failed.\n\n"
 
-            "`failed_batch_summaries` contain material that was correctly assigned under "
-            "the theme's current instructions but could not be incorporated into the "
-            "theme summary without exceeding the output constraint. Treat this material "
-            "as evidence of the conceptual territory and claim-families responsible for "
-            "the theme's representational load. Do not assume it was incorrectly assigned "
-            "merely because reinsertion failed.\n\n"
-
-            "Evaluate each theme as a complete unit: its description, organizing "
-            "proposition, assignment rules, synthesized content, completeness status, "
-            "word count, and failed batches jointly define the current structural "
-            "problem.\n\n"
-
+            "Evaluate each theme as a complete unit: its description, organizing proposition, assignment rules, synthesized content, completeness status, word count, and failed batches jointly define the current structural problem.\n\n"
             "3. The schema-change history.\n\n"
 
-            "The schema-change history contains a chronological record of previously "
-            "implemented repairs and optimizations. If it is empty, no schema changes "
-            "have been implemented to date.\n\n"
+            "The schema-change history contains a chronological record of previously implemented repairs and optimizations. If it is empty, no schema changes have been implemented to date.\n\n"
 
-            "Each history record may include:\n"
-            "   - plan_type: repair or optimization\n"
-            "   - original_theme: the theme that was changed\n"
-            "   - original_theme_concepts: the major conceptual territories previously "
-            "grouped within that theme\n"
-            "   - resolution_attempted: the structural change that was implemented\n"
-            "   - new_themes_created: new themes and their scopes\n"
-            "   - existing_themes_updated: existing themes that received conceptual "
-            "territory and their resulting scopes\n"
-            "   - original_theme_outcome: whether the original theme was narrowed, "
-            "retained, merged, or dissolved\n"
-            "   - original_theme_updated_label: its resulting label, where applicable\n"
-            "   - original_theme_updated_scope: its resulting scope, where applicable\n\n"
+            "Each history record describes one prior implemented repair or optimization plan and may include:\n"
+            "- changed_by: whether the prior change came from a repair_plan or optimize_plan;\n"
+            "- changed_sources: source themes whose conceptual territory, assignment behavior, or existence changed;\n"
+            "- source_theme_id and source_theme_label: the identifier and label of each changed source theme at the time of the change;\n"
+            "- largest_source_territories: the major source territories identified during the prior change, where available;\n"
+            "- territories_removed: conceptual territories removed from each changed source theme and the target_ref they were routed to;\n"
+            "- source_result: whether each changed source theme was retained and narrowed or dissolved and reallocated;\n"
+            "- source_result.resulting_scope: the resulting conceptual scope of any retained source theme;\n"
+            "- source_result.boundary_constraints: separations used to prevent removed territory from being assigned back into the source;\n"
+            "- changed_targets: new or existing themes that received territory, changed scope, or changed assignment behavior;\n"
+            "- received_territories: conceptual territories received by each changed target and the source themes they came from;\n"
+            "- changed_targets.resulting_scope: the resulting conceptual scope of each new or updated target theme;\n"
+            "- changed_targets.boundary_constraints: separations used to keep the new or updated target distinct from neighboring themes.\n\n"
 
-            "Historical labels and identifiers may no longer match the current schema. "
-            "Interpret history through its descriptions of conceptual territory and "
-            "implemented changes rather than requiring exact identifier matches.\n\n"
+            "Historical labels and identifiers may no longer match the current schema. Interpret history through its descriptions of conceptual territory and implemented changes rather than requiring exact identifier matches.\n\n"
 
-            "Use the schema-change history to avoid recreating previously overloaded "
-            "conceptual aggregations, reversing necessary decompositions, repeating "
-            "ineffective changes, or oscillating between earlier schema structures.\n\n"
+            "Use the schema-change history to avoid recreating previously overloaded conceptual aggregations, moving removed territories back into sources they were separated from, reversing necessary decompositions, repeating ineffective changes, or oscillating between earlier schema structures.\n\n"
 
-            "Focus all new repair decisions on the integrated current schema state. "
-            "History provides evidence about earlier structural decisions; it is not a "
-            "set of obsolete schemas to revise.\n\n"
+            "Focus all new repair decisions on the integrated current schema state. History provides evidence about earlier structural decisions; it is not a set of obsolete schemas to revise.\n\n"
 
             "## UNDERSTANDING FAILURES\n"
-            "The synthesis system operates under bounded output constraints (4096 tokens/~2500 words).\n"
-            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure (i.e. truncation).\n"
+            "The synthesis system operates under bounded output constraints of 4096 tokens / approximately 2500 words.\n"
+            "A theme fails when the assigned content cannot be synthesized by a subsequent LLM call without excessive compression or output failure, such as truncation.\n"
             "A coherent theme can compress many related insights into a smaller number of generalized statements.\n"
-            "A heterogeneous theme cannot be compressed safely without loss of nuance, because preserving conceptual fidelity requires many distinct statements.\n"
+            "A heterogeneous theme cannot be compressed safely without loss of nuance because preserving conceptual fidelity requires many distinct statements.\n"
             "As conceptual heterogeneity increases, the number of statements required for faithful synthesis also increases.\n"
-            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints - the failure mode is truncated output.\n"
-            "All failed themes will include summaries of the content that could not be integrated ('FAILED BATCH SUMMARIES'), which should be used as evidence for how to revise the schema.\n"
+            "Failures therefore indicate that the assigned conceptual territory requires more representational capacity than is available under bounded synthesis constraints.\n"
+            "All failed themes will include summaries of the content that could not be integrated under FAILED BATCH SUMMARIES. Use these as evidence for how to revise the schema.\n\n"
 
             "## REQUIRED STRUCTURAL REPAIR\n"
-            "If 'schema_has_failures' = True for the most recent iteration, every failing non-Conflict theme must be decomposed.\n"
-            "For each failing theme, identify the largest independently synthesizable claim-family by representational load currently assigned to that theme.\n"
-            "An independently synthesizable claim-family is a recurring group of claims with its own mechanism, actor system, policy instrument, causal structure, constraint type, or argumentative logic that can be synthesized as a bounded unit.\n\n"
+            "If \"schema_has_failures = True\" for the most recent iteration, every failing coverage-bearing theme must be decomposed.\n"
+            "Substantive themes and Other are coverage-bearing themes. Conflict is not a coverage-bearing theme because it is a reflective category for preserving disagreement rather than a guarantee of insight coverage.\n"
+            "For each failing coverage-bearing theme, identify up to the five largest independently synthesizable claim-families by representational load currently assigned to that theme, ordered from largest to smallest.\n"
 
-            "By 'largest', prioritize the claim-family that:\n"
+            "By \"largest\", prioritize the claim-family that:\n"
             "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
             "2. recurs across multiple sources or batches;\n"
             "3. can plausibly function as an independent bounded synthesis region;\n"
-            "4. can plausibly be synthesized within bounded output constraints (4096 tokens/~2500 words).\n\n"
+            "4. can plausibly be synthesized within bounded output constraints of 4096 tokens / approximately 2500 words.\n\n"
 
-            "Extract that claim-family from the failed source theme by assigning it to a new theme, unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
+            "Extract that claim-family from the failed source theme by assigning it to a new theme unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
             "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
             "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
 
-            "Do not write final theme descriptions or final INCLUDE/EXCLUDE prose. Provide scope logic that a second-stage schema rewriter can use to generate labels, descriptions, and operational INCLUDE/EXCLUDE rules.\n"
-            "The scope logic must be specific enough to support future INCLUDE rules for retained/new/receiving themes and future EXCLUDE rules that prevent extracted content from drifting back into the narrowed source theme.\n"
-            "Scope logic should identify neighboring themes most likely to overlap, the conceptual territory to route away from the source theme, and the destination for that territory.\n\n"
+            "Overloaded \"Other\" themes should be handled the same way as substantive themes: extracting the largest coherent independently synthesizable conceptual territory into a new substantive theme or an existing theme with sufficient space. Continue until the residual Other theme is bounded-synthesis viable, or dissolve Other if no residual category remains necessary. There should remain, at most, only one \"Other\" theme.\n"
+            "Do not use Conflict as a destination for repair extractions; repair must preserve coverage through substantive themes or Other.\n\n"
 
-            "For each substantive new theme, substantive narrowed residual theme, or substantive "
-            "existing receiving theme whose scope is revised, describe the organizing proposition "
-            "that articulates the central conceptual insight expressed by the theme. "
-            "For any resulting theme whose theme_label is exactly \"Conflict\" or \"Other\", "
-            "set the relevant organizing-proposition field to null.\n"
-            "This proposition for substantive themes should explain the underlying idea, relationship, mechanism, process, pattern, argument, or dynamic that unifies the claims expected to be synthesized under that theme. "
-            "This should not be a description of the theme's contents, nor an explanation of why the theme was created. "
-            "Rather, it states the higher-level conceptual proposition that the eventual thematic synthesis should demonstrate through the evidence assigned to that theme.\n\n"
+            "Do not write final labels, theme descriptions, organizing propositions, or INCLUDE / EXCLUDE prose. Provide conceptual scope logic that a second-stage schema implementer can use to generate those fields.\n"
+            "The conceptual scope logic must be specific enough to identify what belongs in each new, retained, or receiving thematic region and what must remain outside it.\n"
+            "Identify neighboring territories most likely to overlap, the conceptual territory to route away from the source theme, its destination, and any separations the implementer must preserve.\n"
+            "Do not make wording or presentation decisions on the implementer's behalf. The plan is authoritative about conceptual movement and separation; the implementer is responsible for expressing those decisions as a valid schema.\n\n"
 
-            "## USING FAILED BATCH SUMMARIES and CURRENT SUMMARY LENGTHS in repair decisions.\n"
-            "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit (4096 tokens/~2500 words) are near capacity and should not be expanded further.\n"
+            "## USING FAILED BATCH SUMMARIES AND CURRENT SUMMARY LENGTHS\n"
+            "- Treat summary length as an approximate proxy for representational capacity. Passing themes approaching the system limit of approximately 4096 tokens / 2500 words are near capacity and should not be expanded further.\n"
             "- Treat content in failed batch summaries as conceptual content correctly assigned to this theme under its existing instructions.\n"
-            "- Use the synthesized theme content **and** FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
+            "- Use the synthesized theme content and FAILED BATCH SUMMARIES to identify the largest independently synthesizable claim-families currently assigned to a failing theme.\n\n"
 
             "## USING PRIOR ITERATIONS\n"
             "- Use prior iterations only to identify recurring instability patterns, repeated failures, and ineffective prior repairs. Do not optimize older iterations independently from the current schema state.\n"
@@ -1567,1037 +1482,735 @@ class Prompts:
             "Do not overload passing themes merely to avoid creating additional themes.\n"
             "Do not return repair plans that merely polish boundaries, rename themes, or clarify wording without materially reducing representational load.\n"
             "A repair is insufficient if it removes only minor examples, edge cases, citation-specific details, or already-covered neighboring concepts.\n"
-            "When narrowing a failed theme, the scope logic must reduce included territory and identify excluded territory so extracted material is not reassigned back in later iterations.\n"
-            "For every substantive theme requiring an organizing proposition, it should make "
-            "explicit the conceptual logic that already underlies the repaired theme.\n"
-            "For Conflict and Other themes, do not invent substantive thematic coherence; set "
-            "the corresponding organizing-proposition field to null.\n"
-            "Do not generate organizing propositions that merely restate the theme label, describe the theme's contents, or justify the repair decisions.\n"
-            "The organizing proposition should express the central conceptual insight that unifies the thematic region created by the repair and that the eventual "
-            "thematic synthesis should demonstrate through the evidence mapped to that theme.\n"
-            "When a repaired theme is substantially narrowed, revise its organizing proposition so that it reflects only the conceptual logic of the remaining "
-            "thematic region. Do not preserve a broader proposition that depends upon conceptual territory extracted elsewhere.\n"
-        
-        "## OUTPUT FORMAT (STRICT JSON)\n"
-        "{\n"
-        "  \"repair_plan\": {\n"
-        "    \"theme_repairs\": [\n"
-        "      {\n"
-        "        \"source_theme_id\": <integer>,\n"
-        "        \"source_theme_label\": <string>,\n"
-        "        \"completeness_check\": \"fail\",\n"
-        "        \"concepts_ranked_by_representational_load\": [\n"
-        "          {\n"
-        "            \"concept\": <string>,\n"
-        "            \"estimated_load\": \"high\" | \"medium\" | \"low\",\n"
-        "            \"evidence_from_summary_or_failed_batches\": <string>,\n"
-        "            \"independently_synthesizable\": <boolean>\n"
-        "          }\n"
-        "        ],\n"
-        "        \"extractions\": [\n"
-        "          {\n"
-        "            \"concept\": <string>,\n"
-        "            \"action\": \"new_theme\" | \"move_to_existing_theme\",\n"
-        "            \"target_theme_id\": <integer | null>,\n"
-        "            \"new_theme_label\": <string | null>,\n"
-        "            \"new_theme_core_scope\": <string | null>,\n"
-        "            \"new_theme_organizing_proposition\": <string | null>,\n"
-        "            \"new_theme_inclusions\": [<string>],\n"
-        "            \"new_theme_exclusions\": [<string>],\n"
-        "            \"receiving_theme_scope_update\": <string | null>,\n"
-        "            \"receiving_theme_organizing_proposition_update\": <string | null>,\n"
-        "            \"reason\": <string>\n"
-        "          }\n"
-        "        ],\n"
-        "        \"source_theme_resolution\": {\n"
-        "          \"outcome\": \"rename_and_narrow\" | \"dissolve_and_reallocate\",\n"
-        "          \"residual_label\": <string | null>,\n"
-        "          \"residual_core_scope\": <string | null>,\n"
-        "          \"residual_organizing_proposition\": <string | null>,\n"
-        "          \"residual_inclusions\": [<string>],\n"
-        "          \"residual_exclusions\": [<string>],\n"
-        "          \"residual_expected_to_pass\": <boolean>,\n"
-        "          \"dissolution_reason\": <string | null>\n"
-        "        },\n"
-        "        \"repair_narrative\": <string>\n"
-        "      }\n"
-        "    ],\n"
-        "    \"schema_repairs\": [\n"
-        "      {\n"
-        "        \"affected_theme_ids\": [<integer>],\n"
-        "        \"repair_narrative\": <string>\n"
-        "      }\n"
-        "    ]\n"
-        "  }\n"
-        "}\n\n"
-
-        "Field definitions:\n"
-        "- repair_plan: contains decomposition operations needed for the second-stage schema rewrite.\n"
-        "- theme_repairs: one decomposition plan for each failed non-Conflict theme.\n"
-        "- source_theme_id: the input theme_id of the failed theme being decomposed.\n"
-        "- source_theme_label: the input label of the failed theme being decomposed.\n"
-        "- concepts_ranked_by_representational_load: major claim-families inside the failed theme, ordered from largest to smallest expected synthesis burden.\n"
-        "- concept: a distinct claim-family, mechanism, actor system, policy instrument, causal structure, or constraint type.\n"
-        "- estimated_load: rough estimate of how much synthesis capacity this concept consumes.\n"
-        "- evidence_from_summary_or_failed_batches: concise evidence that this concept recurs in the current summary or failed batch summaries.\n"
-        "- independently_synthesizable: true if the concept can plausibly function as a bounded synthesis region.\n"
-        "- extractions: claim-families removed from the failed source theme.\n"
-        "- action: use \"new_theme\" when extracted material should become a new theme; use \"move_to_existing_theme\" only when an existing theme has clear conceptual fit and spare representational capacity.\n"
-        "- target_theme_id: existing receiving theme_id, or null if action is \"new_theme\".\n"
-        "- new_theme_label: proposed label when action is \"new_theme\", otherwise null.\n"
-        "- new_theme_core_scope: proposed conceptual scope when action is \"new_theme\", otherwise null.\n"
-        "- new_theme_organizing_proposition: when action is \"new_theme\" and the proposed "
-        "new_theme_label is substantive, state the central conceptual insight expressed by "
-        "the proposed theme. Explain the underlying idea, relationship, mechanism, process, "
-        "pattern, argument, or dynamic that unifies the claims expected to be synthesized "
-        "under that theme. This must not merely describe the theme's contents or explain why "
-        "the theme was created. Set this field to null when action is not \"new_theme\" or "
-        "when new_theme_label is exactly \"Conflict\" or \"Other\".\n"
-        "- new_theme_inclusions: concepts that should be included in the new theme.\n"
-        "- new_theme_exclusions: neighboring concepts that should be excluded from the new theme.\n"
-        "- receiving_theme_scope_update: scope update required for an existing receiving theme, or null if action is \"new_theme\".\n"
-        "- receiving_theme_organizing_proposition_update: when action is "
-        "\"move_to_existing_theme\" and the receiving theme is substantive, state the "
-        "organizing proposition that should govern the receiving theme after the proposed "
-        "scope update. If its existing proposition remains fully suitable, restate it without "
-        "substantive revision. Otherwise revise it to express the central conceptual insight "
-        "of the expanded thematic region. Set this field to null when action is \"new_theme\" "
-        "or when the receiving theme is exactly \"Conflict\" or \"Other\".\n"
-        "- reason: concise explanation for why this extraction reduces representational load.\n"
-        "- source_theme_resolution: describes what happens to the original failed theme after extractions.\n"
-        "- outcome: use \"rename_and_narrow\" when a bounded successor to the source theme remains; use \"dissolve_and_reallocate\" when no coherent bounded residual remains.\n"
-        "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
-        "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
-        "- residual_organizing_proposition: when outcome is \"rename_and_narrow\" and the "
-        "residual_label is substantive, state the central conceptual insight expressed by "
-        "the narrowed residual theme. It must reflect only the remaining thematic region and "
-        "must not depend on claims or conceptual territory extracted elsewhere. Set this field "
-        "to null when the source theme is dissolved or when residual_label is exactly "
-        "\"Conflict\" or \"Other\".\n"
-        "- residual_inclusions: concepts that remain assigned to the narrowed residual theme.\n"
-        "- residual_exclusions: extracted or neighboring concepts that must be excluded from the residual theme.\n"
-        "- residual_expected_to_pass: whether the residual is expected to synthesize within bounded output constraints.\n"
-        "- dissolution_reason: required if outcome is \"dissolve_and_reallocate\", otherwise null.\n"
-        "- repair_narrative: one concise sentence explaining the decomposition.\n"
-        "- schema_repairs: schema-level repairs affecting relationships across multiple themes.\n"
-        "- affected_theme_ids: input theme_ids affected by the schema-level repair.\n\n"
-
-        "Validation rules:\n"
-        "- Every theme repair must include at least one extraction.\n"
-        "- Every failed non-Conflict theme must appear exactly once in theme_repairs.\n"
-        "- Every theme repair must identify concepts_ranked_by_representational_load.\n"
-        "- Every theme repair must extract at least the largest independently synthesizable high-load claim-family.\n"
-        "- If the residual is still likely to fail, extract additional claim-families until the residual is expected to pass or dissolve the source theme.\n"
-        "- Do NOT create new numeric theme identifiers; only reference input theme_id values when identifying source or receiving themes.\n"
-        "- Do NOT use move_to_existing_theme unless the receiving theme has both clear conceptual fit and spare representational capacity.\n"
-        "- Every extraction with action='new_theme' and a substantive new_theme_label must "
-        "include a non-null new_theme_organizing_proposition.\n"
-        "- Every extraction with action='new_theme' and new_theme_label exactly equal to "
-        "'Conflict' or 'Other' must set new_theme_organizing_proposition to null.\n"
-        "- Every extraction with action='new_theme' must set receiving_theme_organizing_proposition_update to null.\n"
-        "- Every extraction with action='move_to_existing_theme' must set new_theme_organizing_proposition to null.\n"
-        "- Every extraction with action='move_to_existing_theme' targeting a substantive "
-        "theme must include a non-null receiving_theme_organizing_proposition_update.\n"
-        "- Every extraction with action='move_to_existing_theme' targeting a theme whose "
-        "theme_label is exactly 'Conflict' or 'Other' must set "
-        "receiving_theme_organizing_proposition_update to null.\n"
-        "- Every source theme with outcome='rename_and_narrow' and a substantive "
-        "residual_label must include a non-null residual_organizing_proposition.\n"
-        "- Every source theme with outcome='rename_and_narrow' and residual_label exactly "
-        "equal to 'Conflict' or 'Other' must set residual_organizing_proposition to null.\n"
-        "- Every source theme with outcome='dissolve_and_reallocate' must set residual_organizing_proposition to null.\n"
-        "- An organizing proposition for a substantive theme must articulate the central "
-        "conceptual insight expressed by the theme, not merely list likely contents, "
-        "paraphrase the theme label, restate the scope, or justify the repair decision.\n"
-        "- A residual organizing proposition must reflect only the remaining thematic region and must not depend on conceptual territory extracted elsewhere.\n"
-        "- A receiving theme's organizing proposition must remain coherent after the proposed scope update; do not broaden it in a way that collapses conceptually distinct thematic regions.\n"
-        "- Do NOT output final INCLUDE/EXCLUDE prose; provide scope logic only.\n"
-        "- Do NOT claim a new theme is needed unless at least one extraction uses action='new_theme' with that exact new_theme_label.\n"
-        "- Do NOT output a rewritten schema.\n"
-        "- Do NOT output polished final theme prose.\n"
-        "- Output only decomposition operations and conceptual reallocations.\n"
-        "- Cosmetic edits do NOT count as repairs.\n"
-        "- The Conflict theme must preserve conceptual polarity.\n"
-        "- The Other theme must remain a residual category.\n"
-        "- The repaired codebook must support full assignment of the conceptual content.\n"
-        )
+            "When narrowing a failed theme, the plan must reduce its conceptual territory and identify boundaries that prevent extracted material from being assigned back in later iterations.\n"
+            "Specify the conceptual result, not its final schema wording. Do not generate or revise labels, descriptions, organizing propositions, INCLUDE / EXCLUDE rules, or DETECTION TRIGGERS.\n"
+            "Do not leave conceptual choices to the implementer. Every extraction, destination, retained source scope, changed target scope, dissolution, and required separation must be explicit in the plan.\n"
+            "Do not make changes for schema elegance, stylistic consistency, or improved prose. Those are outside the planning task.\n\n"
             
-    def implement_schema_repairs(self):
+            "## OUTPUT CONTRACT\n"
+            "Return exactly one strict JSON object matching this contract. Replace type markers with real values from the current input:\n\n"
+            "{\n"
+            '  "no_change": boolean,\n'
+            '  "schema_change_plan": {\n'
+            '    "changed_by": "repair_plan|optimize_plan",\n'
+            '    "changed_sources": [\n'
+            "      {\n"
+            '        "source_theme_id": integer,\n'
+            '        "source_theme_label": string,\n'
+            '        "largest_source_territories": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "rank": integer,\n'
+            '            "action": "extract|retain"\n'
+            "          }\n"
+            "        ],\n"
+            '        "territories_removed": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "destination_ref": string\n'
+            "          }\n"
+            "        ],\n"
+            '        "source_result": {\n'
+            '          "action": "retain_and_narrow|dissolve_and_reallocate",\n'
+            '          "resulting_scope": string_or_null,\n'
+            '          "boundary_constraints": [string]\n'
+            "        }\n"
+            "      }\n"
+            "    ],\n"
+            '    "changed_targets": [\n'
+            "      {\n"
+            '        "target_ref": string,\n'
+            '        "target_type": "new_theme|existing_theme",\n'
+            '        "target_theme_id": integer_or_null,\n'
+            '        "target_theme_label": string_or_null,\n'
+            '        "theme_kind": "substantive|conflict|other",\n'
+            '        "received_territories": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "source_theme_id": integer,\n'
+            '            "source_theme_label": string\n'
+            "          }\n"
+            "        ],\n"
+            '        "resulting_scope": string,\n'
+            '        "boundary_constraints": [string]\n'
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "}\n\n"
+
+            "## FIELD DEFINITIONS\n"
+            "- no_change: true only when an optimization planner finds no clear, non-speculative conceptual improvement. In repair planning, no_change must be false.\n"
+            "- schema_change_plan: the complete conceptual change plan that the implementation stage must realize.\n"
+            "- changed_by: one of \"repair_plan\" or \"optimize_plan\". Use \"repair_plan\" for bounded-synthesis failure repair. Use \"optimize_plan\" for post-repair schema optimization.\n"
+            "- changed_sources: source themes whose conceptual territory, assignment behavior, or existence is changed. Use exactly one changed_sources entry per changed source theme. Do not combine multiple source themes in one entry. Do not create separate entries for separate operations on the same source theme. Do not include unchanged themes.\n"
+            "- source_theme_id: the input theme_id of the source theme being changed.\n"
+            "- source_theme_label: the input label of the source theme being changed.\n"
+            "- largest_source_territories: for repair planning, list up to the five largest conceptual territories contributing to the source theme's representational load, ordered from largest to smallest. For optimization planning, list only the source territories directly involved in the optimization.\n"
+            "- territory: a conceptual territory, claim-family, mechanism, actor system, policy instrument, causal structure, constraint type, disagreement dimension, residual category, or argumentative logic.\n"
+            "- rank: the territory's rank within largest_source_territories, beginning with 1. In repair planning, rank 1 is the largest load-bearing territory in the failing source theme.\n"
+            "- action: one of \"extract\" or \"retain\". Use \"extract\" when the territory is removed from the source theme. Use \"retain\" when the territory remains in the source theme if the source theme is retained.\n"
+            "- territories_removed: all conceptual territories removed from the source theme and their destinations. Every territory with action = \"extract\" must appear here. If source_result.action = \"dissolve_and_reallocate\", this must account for the source theme's full conceptual territory, including any residual territory not listed in largest_source_territories.\n"
+            "- destination_ref: the target_ref of the changed target receiving the removed territory. For new themes, use a stable local reference such as \"target_1\" rather than a numeric theme id.\n"
+            "- source_result: the planned result for the source theme after removals.\n"
+            "- source_result.action: one of \"retain_and_narrow\" or \"dissolve_and_reallocate\". Use \"retain_and_narrow\" when a coherent bounded source theme remains. Use \"dissolve_and_reallocate\" when no coherent bounded residual remains and the source theme should be removed.\n"
+            "- source_result.resulting_scope: the complete conceptual scope remaining in the source theme if retained, or null if dissolved.\n"
+            "- source_result.boundary_constraints: conceptual separations and routing requirements that must be preserved when implementing the retained source theme. If the source is dissolved, use an empty array unless there are constraints needed to prevent its former territory from being recombined.\n"
+            "- changed_targets: every new or existing target theme that receives territory, changes scope, or changes assignment behavior. Use exactly one changed_targets entry per changed target theme or planned new theme. Do not create separate target entries for separate source territories going to the same target. Do not include unchanged themes.\n"
+            "- target_ref: a stable reference for this target within the plan. For existing themes, use a string based on the input theme id, such as \"theme_4\". For new themes, use a stable local reference such as \"target_1\".\n"
+            "- target_type: one of \"new_theme\" or \"existing_theme\".\n"
+            "- target_theme_id: for existing themes, the input theme_id. For new themes, null.\n"
+            "- target_theme_label: for existing themes, the input theme_label. For new themes, null because the implementation stage will write the label.\n"
+            "- theme_kind: one of \"substantive\", \"conflict\", or \"other\". Use \"conflict\" only for the exact Conflict theme. Use \"other\" only for the exact Other theme.\n"
+            "- received_territories: all territories this target receives from changed source themes.\n"
+            "- received_territories.source_theme_id: the input theme_id of the source theme from which the territory was removed.\n"
+            "- received_territories.source_theme_label: the input label of the source theme from which the territory was removed.\n"
+            "- resulting_scope: the complete conceptual scope of the target theme after receiving the planned territory. For existing targets, this must describe the updated scope including both retained prior territory and received territory. For new targets, this must describe the full conceptual scope the implementation stage should express.\n"
+            "- boundary_constraints: conceptual separations and routing requirements that must be preserved when implementing the new or updated target theme, including what should remain outside it and where neighboring material should be routed.\n\n"
+
+            "## REPAIR-SPECIFIC OUTPUT REQUIREMENTS\n"
+            "- Output only the JSON object.\n"
+            "- Do not output markdown.\n"
+            "- Do not output explanations outside the JSON object.\n"
+            "- no_change must be false.\n"
+            "- changed_by must be exactly \"repair_plan\".\n"
+            "- Every failing coverage-bearing theme must appear exactly once in changed_sources.\n"
+            "- Do not include unchanged passing themes in changed_sources.\n"
+            "- Each changed_sources entry must describe exactly one source theme.\n"
+            "- largest_source_territories must list up to the five largest load-bearing conceptual territories in that source theme, ordered from largest to smallest.\n"
+            "- rank must begin at 1 and increase by 1 within each source theme.\n"
+            "- Do not list minor examples, edge cases, citation-specific details, or low-load fragments merely to fill five slots.\n"
+            "- Each failing source theme must remove territory through territories_removed. If source_result.action = \"retain_and_narrow\", at least one listed territory must have action = \"extract\". If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the full source territory regardless of listed actions.\n"
+            "- Every territory with action = \"extract\" must appear in territories_removed.\n"
+            "- If source_result.action = \"retain_and_narrow\", source_result.resulting_scope must describe the complete narrowed conceptual scope remaining after extraction.\n"
+            "- If source_result.action = \"retain_and_narrow\", source_result.boundary_constraints must exclude all extracted territory and route it to the correct changed target.\n"
+            "- If source_result.action = \"dissolve_and_reallocate\", source_result.resulting_scope must be null.\n"
+            "- If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the source theme's full conceptual territory, including residual territory not listed in largest_source_territories.\n"
+            "- If multiple territories are removed from the same source theme, include them together in that source theme's territories_removed array.\n"
+            "- If territory from one source theme goes to multiple targets, represent this through multiple territories_removed entries with different destination_ref values, not multiple changed_sources entries.\n"
+            "- Each changed target theme or planned new theme must appear exactly once in changed_targets.\n"
+            "- If one target receives territory from multiple sources, combine all received territories in that target's received_territories array.\n"
+            "- Every territories_removed.destination_ref must match exactly one changed_targets.target_ref.\n"
+            "- Every changed_targets.received_territories entry must correspond to a territory removed from the referenced source theme.\n"
+            "- Do not create numeric theme identifiers for new themes.\n"
+            "- For target_type = \"new_theme\", set target_theme_id to null and target_theme_label to null.\n"
+            "- For target_type = \"existing_theme\", set target_theme_id and target_theme_label from the input schema.\n"
+            "- Use target_type = \"existing_theme\" only when the receiving theme has clear conceptual fit and spare representational capacity.\n"
+            "- Do not overload passing themes merely to avoid creating new themes.\n"
+            "- Use theme_kind = \"substantive\" for ordinary conceptual synthesis regions.\n"
+            "- Use theme_kind = \"other\" only for the exact Other residual category.\n"
+            "- Do not create or expand Conflict during repair planning.\n"
+            "- Do not output final theme labels, descriptions, organizing propositions, INCLUDE / EXCLUDE prose, or DETECTION TRIGGERS for new or changed themes.\n"
+            "- The plan must define the conceptual end state for every changed source and every changed target through resulting_scope and boundary_constraints.\n"
+            "- Output only the JSON object.\n"
+        )
+
+    def gen_theme_schema_optimize_plan(self):
+
         """
-        Construct the prompt for implementing a schema-repair plan.
 
-        Creates a prompt instructing a language model to apply a previously
-        generated repair plan to an existing theme schema and return a rewritten
-        schema.
+        Construct the prompt for schema-optimization planning.
 
-        Returns
-        -------
-        str
-            Prompt instructing the model to mechanically implement the supplied
-            repair plan and return the revised theme schema as strict JSON.
+        Reviews a complete, functioning thematic schema and either declares
 
-        Notes
-        -----
-        This prompt is used after schema-repair planning. The repair plan remains
-        authoritative: the model is instructed not to perform new diagnosis,
-        optimization, reinterpretation, or additional restructuring.
+        convergence or returns a structured optimization plan. It does not rewrite
 
-        The expected response is a JSON object containing:
+        the schema directly.
 
-        - `themes`
-
-        Each returned theme must contain:
-
-        - `theme_label`
-        - `theme_description`
-        - `instructions`
-
-        The implementation stage converts repair-plan scope logic into final theme
-        descriptions and operational assignment instructions.
-
-        This separation between repair planning and repair implementation helps
-        ensure that schema changes are inspectable and reduces the risk of
-        performative repair.
-        """          
-        
+        """
         return(
             "## ROLE\n"
-            "You are a Schema Rewrite Engine.\n"
-            "Your task is to mechanically implement a previously generated decomposition repair plan onto an existing thematic codebook.\n"
-            "You are NOT performing conceptual diagnosis, optimization, reinterpretation, or strategic reasoning.\n"
-            "You must only implement the supplied repair operations faithfully and consistently.\n\n"
+            "You are a Schema Optimization Architect.\n"
+            "Your task is to inspect a functioning thematic codebook and determine whether there are obvious, non-speculative improvements to its conceptual organization.\n"
+            "You produce a conceptual optimization plan. You do NOT rewrite the schema.\n"
+            "You have authority over conceptual decisions: determine which conceptual territories should move, separate, combine, remain, or disappear.\n"
+            "You do not write final schema fields. A separate implementation stage will realize your plan as labels, descriptions, organizing propositions, and assignment instructions.\n\n"
+
+            "## WORKFLOW CONTEXT\n"
+            "The thematic synthesis workflow:\n"
+            "1. Generates a thematic codebook.\n"
+            "2. Assigns insights to its themes.\n"
+            "3. Synthesizes each theme under bounded output constraints.\n"
+            "4. Checks whether all assigned content was represented.\n"
+            "5. Reinserts omitted content.\n"
+            "6. Repairs overloaded themes until every theme passes.\n"
+            "7. Optimizes the functioning schema without recreating overload.\n\n"
+
+            "You are operating at step 7.\n"
+            "Every theme in the current schema has passed its completeness check.\n"
+            "Optimization must preserve that viability.\n\n"
+
+            "## INPUTS\n"
+            "You will receive:\n"
+            "1. The current research question.\n\n"
+
+            "2. The current schema, containing:\n"
+            "- theme_id;\n"
+            "- theme_label;\n"
+            "- theme_description;\n"
+            "- organizing_proposition;\n"
+            "- instructions.\n\n"
+
+            "3. The current thematic summaries, containing:\n"
+            "- completeness status;\n"
+            "- summary word count;\n"
+            "- synthesized thematic content.\n\n"
+
+            "4. The schema-change history.\n"
+            "Each history record describes one prior implemented repair or optimization plan and may include:\n"
+            "- changed_by: whether the prior change came from a repair_plan or optimize_plan;\n"
+            "- changed_sources: source themes whose conceptual territory, assignment behavior, or existence changed;\n"
+            "- source_theme_id and source_theme_label: the identifier and label of each changed source theme at the time of the change;\n"
+            "- largest_source_territories: the major source territories identified during the prior change, where available;\n"
+            "- territories_removed: conceptual territories removed from each changed source theme and the target_ref they were routed to;\n"
+            "- source_result: whether each changed source theme was retained and narrowed or dissolved and reallocated;\n"
+            "- source_result.resulting_scope: the resulting conceptual scope of any retained source theme;\n"
+            "- source_result.boundary_constraints: separations used to prevent removed territory from being assigned back into the source;\n"
+            "- changed_targets: new or existing themes that received territory, changed scope, or changed assignment behavior;\n"
+            "- received_territories: conceptual territories received by each changed target and the source themes they came from;\n"
+            "- changed_targets.resulting_scope: the resulting conceptual scope of each new or updated target theme;\n"
+            "- changed_targets.boundary_constraints: separations used to keep the new or updated target distinct from neighboring themes.\n\n"
+
+            "Historical labels and identifiers may no longer match the current schema. Interpret history through its descriptions of conceptual territory and implemented changes rather than requiring exact identifier matches.\n\n"
+
+            "Use the schema-change history to avoid recreating previously overloaded conceptual aggregations, moving removed territories back into sources they were separated from, reversing necessary decompositions, repeating ineffective changes, or oscillating between earlier schema structures.\n\n"
+
+            "Focus all new optimization decisions on the current schema and summaries. History provides evidence about earlier structural decisions; it is not a set of obsolete schemas to revise.\n\n"
+
+            "## CODEBOOK STRUCTURE\n"
+            "Each theme defines a conceptual territory using:\n"
+            "- theme_label;\n"
+            "- theme_description;\n"
+            "- organizing_proposition;\n"
+            "- instructions.\n\n"
+            "The theme_description defines the theme's conceptual scope.\n"
+            "For substantive themes, the organizing_proposition states the central conceptual insight expressed by the theme. It should articulate the idea, relationship, process, mechanism, distinction, trajectory, argument, or dynamic that unifies the thematic region.\n"
+            "For themes labelled exactly \"Conflict\" or \"Other\", organizing_proposition must be null.\n"
+            "The instructions operationalize assignment through:\n"
+            "- INCLUDE / EXCLUDE rules for substantive themes and Other;\n"
+            "- DETECTION TRIGGERS for Conflict.\n\n"
+
+            "## OPTIMIZATION OBJECTIVES\n"
+            "An optimized schema should:\n"
+            "1. preserve successful expression of all assigned conceptual content under bounded synthesis constraints;\n"
+            "2. define internally coherent themes;\n"
+            "3. maintain clear conceptual boundaries between themes;\n"
+            "4. represent the full conceptual landscape;\n"
+            "5. avoid forcing conceptually distinct material into the same theme;\n"
+            "6. avoid unnecessary fragmentation;\n"
+            "7. minimize reliance on Other where a coherent substantive grouping clearly exists.\n\n"
+
+            "Possible optimizations include:\n"
+            "- revising an ambiguous conceptual boundary only when the change alters assignment behavior or the conceptual scope a later synthesis must express;\n"
+            "- reallocating conceptual territory between existing themes;\n"
+            "- merging unnecessarily fragmented themes;\n"
+            "- splitting a conceptually incoherent theme when both resulting themes remain independently justified;\n"
+            "- extracting a coherent grouping from Other;\n"
+            "- revising conceptual scopes where the current partition misrepresents the thematic content;\n"
+            "- correcting inconsistent conceptual routing;\n"
+            "- dissolving a theme whose content is better represented elsewhere.\n\n"
+
+            "## BOUNDED SYNTHESIS CONSTRAINTS\n"
+            "The synthesis system operates under a maximum output of 4096 tokens / approximately 2500 words.\n"
+            "Treat current summary length as an approximate indicator of representational capacity.\n"
+            "Themes approaching this limit are near capacity and must not be expanded.\n"
+            "Optimization must not rely on future compression to make an enlarged theme viable.\n"
+            "Assume every substantively distinct claim-family, mechanism, causal logic, actor system, policy instrument, implication, minority position, geography, sector, or contradiction must remain separately representable.\n"
+            "Paraphrases, duplicates, repeated examples, and differently cited versions of the same claim may be consolidated.\n"
+            "Distinct substantive concepts must not be collapsed merely to create a more elegant schema.\n"
+            "Do not merge themes unless conceptual coherence and bounded-synthesis viability are both clearly preserved.\n"
+            "If viability is uncertain, do not propose the change.\n\n"
+
+            "## PRIOR CHANGE DISCIPLINE\n"
+            "Do not recreate conceptual aggregations that previously failed bounded synthesis.\n"
+            "Do not reverse a prior repair merely because the separated themes appear conceptually related.\n"
+            "A previous separation may be reversed only when the current evidence clearly shows that the resulting combined theme would remain coherent and comfortably within bounded-synthesis capacity.\n"
+            "Do not alternate between previously attempted schema structures.\n\n"
+
+            "## INCLUDE / EXCLUDE LOGIC\n"
+            "For substantive themes and Other, the implementation must ultimately use:\n"
+            "'INCLUDE if the material falls within the theme's conceptual territory; EXCLUDE if the material belongs more precisely in another theme or should be handled by Conflict.'\n\n"
+
+            "Strong EXCLUDE rules:\n"
+            "- identify neighboring themes likely to overlap;\n"
+            "- explicitly exclude their conceptual territories;\n"
+            "- route ambiguous material to the correct destination.\n\n"
+            "EXCLUDE rules must not be generic or simple inverses of INCLUDE rules.\n"
+            "When proposing conceptual changes, provide sufficiently precise territory and boundary constraints for a later implementation pass to write these rules.\n"
+            "Do not write the final rule prose yourself.\n\n"
+
+            "## SPECIAL THEMES\n"
+            "### Conflict\n"
+            'Use the label exactly "Conflict".\n'
+            "Conflict is appropriate only for substantively incompatible interpretations, claims, or prescriptions that cannot coexist within one conceptual frame.\n\n"
+
+            "Conflict does not include:\n"
+            "- reinforcing critiques;\n"
+            "- layered constraints;\n"
+            "- trade-offs within a shared framework;\n"
+            "- differences of emphasis without incompatible positions.\n\n"
+
+            "Conflict must:\n"
+            "- preserve identifiable polarity;\n"
+            "- use DETECTION TRIGGERS;\n"
+            "- have organizing_proposition set to null.\n\n"
+
+            "### Other\n"
+            'Use the label exactly "Other".\n'
+            "Other is a residual category for valid low-frequency material that does not form a coherent substantive grouping.\n\n"
+
+            "Other must not:\n"
+            "- absorb a coherent grouping that warrants a substantive theme;\n"
+            "- compensate for poorly defined neighboring themes;\n"
+            "- receive an organizing proposition.\n\n"
+
+            "Set organizing_proposition to null.\n\n"
+
+            "## PLANNING SEMANTICS\n"
+            "You have authority over the conceptual plan. Decide which conceptual territories must be moved, separated, combined, retained, or dissolved.\n"
+            "You do not implement that plan. Do not write the resulting schema, final labels, theme descriptions, organizing propositions, INCLUDE / EXCLUDE prose, or DETECTION TRIGGERS.\n"
+            "A separate implementation stage will receive the current schema and your plan. It will translate your conceptual decisions into a complete working schema.\n"
+            "The implementation stage may make wording decisions, but it must not reconsider or alter your conceptual decisions.\n\n"
+
+            "Each changed_sources entry describes a conceptual transformation centered on one source theme:\n"
+            "- source_theme_id and source_theme_label identify the current source theme;\n"
+            "- largest_source_territories identifies the source territories directly involved in the optimization;\n"
+            "- territories_removed identifies conceptual territory removed from the source theme and the target that receives it;\n"
+            "- source_result states whether the source remains as a narrowed conceptual region or is dissolved entirely;\n"
+            "- source_result.boundary_constraints state the conceptual separations the implementer must preserve for the retained source.\n\n"
+
+            "Each changed_targets entry describes the resulting conceptual scope of one new or existing receiving theme:\n"
+            "- target_ref identifies the receiving target within the plan;\n"
+            "- target_type states whether the target is a new theme or an existing theme;\n"
+            "- target_theme_id and target_theme_label identify existing receiving themes;\n"
+            "- received_territories identifies the conceptual territory received from changed source themes;\n"
+            "- resulting_scope states the complete conceptual scope of the target after the optimization;\n"
+            "- boundary_constraints state the conceptual separations the implementer must preserve for the new or updated target.\n\n"
+
+            "Use target_type = \"existing_theme\" when the territory should move to an existing theme with clear conceptual fit and sufficient bounded-synthesis capacity.\n"
+            "Set target_theme_id to that input theme_id and target_theme_label to that input theme_label.\n\n"
+
+            "Use target_type = \"new_theme\" when the conceptual territory should become a new independently represented theme.\n"
+            "Set target_theme_id to null and target_theme_label to null because the new target theme does not yet have an id or label.\n"
+            "Do not propose its final label or prose.\n\n"
+
+            "Represent common optimizations as follows:\n"
+            "- Split: remove one or more conceptual territories from a source into new targets, then retain and narrow or dissolve the source.\n"
+            "- Reallocation: move conceptual territory from the source to an existing target, then retain and narrow or dissolve the source.\n"
+            "- Merge: dissolve the redundant source and move all of its conceptual territory to the surviving existing target.\n"
+            "- Extraction from Other: move a coherent conceptual territory to a new substantive target and retain a narrowed residual Other theme.\n"
+            "- Conflict trigger revision: treat Conflict as an existing target whose resulting_scope and boundary_constraints define the revised disagreement dimension and detection-trigger requirements.\n"
+            "- Dissolution: reallocate the source theme's full conceptual territory and set source_result.action to \"dissolve_and_reallocate\".\n\n"
+
+            "A wording-only label, description, proposition, instruction, or boundary clarification is not a conceptual optimization unless it changes assignment behavior or the conceptual scope that subsequent synthesis must express.\n"
+            "If no conceptual territory or relationship should change, return no_change = true and leave implementation to later schema-writing processes.\n"
+            "Do not generate numeric identifiers for new themes.\n\n"
+
+            "## CONVERGENCE\n"
+            "Set no_change to true if:\n"
+            "- there are no obvious, non-speculative conceptual improvements;\n"
+            "- all apparent improvements would risk overload;\n"
+            "- all apparent improvements depend on uncertain reallocations;\n"
+            "- the changes would be merely cosmetic or wording-level and would not affect assignment behavior or synthesis scope;\n"
+            "- an apparent improvement cannot be expressed as explicit changed_sources and changed_targets entries.\n\n"
+
+            "Set no_change to false only when at least one clear conceptual improvement can be expressed as a complete and implementable schema_change_plan.\n\n"
+            
+            "## OUTPUT CONTRACT\n"
+            "Return exactly one strict JSON object matching this contract. Replace type markers with real values from the current input:\n\n"
+            "{\n"
+            '  "no_change": boolean,\n'
+            '  "schema_change_plan": {\n'
+            '    "changed_by": "repair_plan|optimize_plan",\n'
+            '    "changed_sources": [\n'
+            "      {\n"
+            '        "source_theme_id": integer,\n'
+            '        "source_theme_label": string,\n'
+            '        "largest_source_territories": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "rank": integer,\n'
+            '            "action": "extract|retain"\n'
+            "          }\n"
+            "        ],\n"
+            '        "territories_removed": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "destination_ref": string\n'
+            "          }\n"
+            "        ],\n"
+            '        "source_result": {\n'
+            '          "action": "retain_and_narrow|dissolve_and_reallocate",\n'
+            '          "resulting_scope": string_or_null,\n'
+            '          "boundary_constraints": [string]\n'
+            "        }\n"
+            "      }\n"
+            "    ],\n"
+            '    "changed_targets": [\n'
+            "      {\n"
+            '        "target_ref": string,\n'
+            '        "target_type": "new_theme|existing_theme",\n'
+            '        "target_theme_id": integer_or_null,\n'
+            '        "target_theme_label": string_or_null,\n'
+            '        "theme_kind": "substantive|conflict|other",\n'
+            '        "received_territories": [\n'
+            "          {\n"
+            '            "territory": string,\n'
+            '            "source_theme_id": integer,\n'
+            '            "source_theme_label": string\n'
+            "          }\n"
+            "        ],\n"
+            '        "resulting_scope": string,\n'
+            '        "boundary_constraints": [string]\n'
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "}\n\n"
+
+            "## FIELD DEFINITIONS\n"
+            "- no_change: true only when an optimization planner finds no clear, non-speculative conceptual improvement. In repair planning, no_change must be false.\n"
+            "- schema_change_plan: the complete conceptual change plan that the implementation stage must realize.\n"
+            "- changed_by: one of \"repair_plan\" or \"optimize_plan\". Use \"repair_plan\" for bounded-synthesis failure repair. Use \"optimize_plan\" for post-repair schema optimization.\n"
+            "- changed_sources: source themes whose conceptual territory, assignment behavior, or existence is changed. Use exactly one changed_sources entry per changed source theme. Do not combine multiple source themes in one entry. Do not create separate entries for separate operations on the same source theme. Do not include unchanged themes.\n"
+            "- source_theme_id: the input theme_id of the source theme being changed.\n"
+            "- source_theme_label: the input label of the source theme being changed.\n"
+            "- largest_source_territories: for repair planning, list up to the five largest conceptual territories contributing to the source theme's representational load, ordered from largest to smallest. For optimization planning, list only the source territories directly involved in the optimization.\n"
+            "- territory: a conceptual territory, claim-family, mechanism, actor system, policy instrument, causal structure, constraint type, disagreement dimension, residual category, or argumentative logic.\n"
+            "- rank: the territory's rank within largest_source_territories, beginning with 1. In repair planning, rank 1 is the largest load-bearing territory in the failing source theme.\n"
+            "- action: one of \"extract\" or \"retain\". Use \"extract\" when the territory is removed from the source theme. Use \"retain\" when the territory remains in the source theme if the source theme is retained.\n"
+            "- territories_removed: all conceptual territories removed from the source theme and their destinations. Every territory with action = \"extract\" must appear here. If source_result.action = \"dissolve_and_reallocate\", this must account for the source theme's full conceptual territory, including any residual territory not listed in largest_source_territories.\n"
+            "- destination_ref: the target_ref of the changed target receiving the removed territory. For new themes, use a stable local reference such as \"target_1\" rather than a numeric theme id.\n"
+            "- source_result: the planned result for the source theme after removals.\n"
+            "- source_result.action: one of \"retain_and_narrow\" or \"dissolve_and_reallocate\". Use \"retain_and_narrow\" when a coherent bounded source theme remains. Use \"dissolve_and_reallocate\" when no coherent bounded residual remains and the source theme should be removed.\n"
+            "- source_result.resulting_scope: the complete conceptual scope remaining in the source theme if retained, or null if dissolved.\n"
+            "- source_result.boundary_constraints: conceptual separations and routing requirements that must be preserved when implementing the retained source theme. If the source is dissolved, use an empty array unless there are constraints needed to prevent its former territory from being recombined.\n"
+            "- changed_targets: every new or existing target theme that receives territory, changes scope, or changes assignment behavior. Use exactly one changed_targets entry per changed target theme or planned new theme. Do not create separate target entries for separate source territories going to the same target. Do not include unchanged themes.\n"
+            "- target_ref: a stable reference for this target within the plan. For existing themes, use a string based on the input theme id, such as \"theme_4\". For new themes, use a stable local reference such as \"target_1\".\n"
+            "- target_type: one of \"new_theme\" or \"existing_theme\".\n"
+            "- target_theme_id: for existing themes, the input theme_id. For new themes, null.\n"
+            "- target_theme_label: for existing themes, the input theme_label. For new themes, null because the implementation stage will write the label.\n"
+            "- theme_kind: one of \"substantive\", \"conflict\", or \"other\". Use \"conflict\" only for the exact Conflict theme. Use \"other\" only for the exact Other theme.\n"
+            "- received_territories: all territories this target receives from changed source themes.\n"
+            "- received_territories.source_theme_id: the input theme_id of the source theme from which the territory was removed.\n"
+            "- received_territories.source_theme_label: the input label of the source theme from which the territory was removed.\n"
+            "- resulting_scope: the complete conceptual scope of the target theme after receiving the planned territory. For existing targets, this must describe the updated scope including both retained prior territory and received territory. For new targets, this must describe the full conceptual scope the implementation stage should express.\n"
+            "- boundary_constraints: conceptual separations and routing requirements that must be preserved when implementing the new or updated target theme, including what should remain outside it and where neighboring material should be routed.\n\n"
+
+            "## OPTIMIZATION-SPECIFIC OUTPUT REQUIREMENTS\n"
+            "- Output only the JSON object.\n"
+            "- Do not output markdown.\n"
+            "- Do not output explanations outside the JSON object.\n"
+            "- changed_by must be exactly \"optimize_plan\".\n"
+            "- Set no_change to true only when there is no clear, non-speculative conceptual improvement that preserves bounded-synthesis viability.\n"
+            "- If no_change is true, changed_sources must be an empty array and changed_targets must be an empty array.\n"
+            "- schema_change_plan must still be present when no_change is true, with changed_by = \"optimize_plan\", changed_sources = [], and changed_targets = [].\n"
+            "- If no_change is false, at least one changed source theme must appear in changed_sources.\n"
+            "- Each changed source theme must appear exactly once in changed_sources.\n"
+            "- A changed_sources entry must describe exactly one source theme.\n"
+            "- Do not include unchanged themes in changed_sources.\n"
+            "- For optimization planning, largest_source_territories must list only the source territories directly involved in the optimization.\n"
+            "- rank must begin at 1 and increase by 1 within each source theme.\n"
+            "- Every territory with action = \"extract\" must appear in territories_removed.\n"
+            "- If source_result.action = \"retain_and_narrow\", source_result.resulting_scope must describe the complete narrowed conceptual scope remaining after extraction or reallocation.\n"
+            "- If source_result.action = \"retain_and_narrow\", source_result.boundary_constraints must preserve the revised conceptual boundary and route removed territory to the correct changed target.\n"
+            "- If source_result.action = \"dissolve_and_reallocate\", source_result.resulting_scope must be null.\n"
+            "- If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the source theme's full conceptual territory.\n"
+            "- If multiple territories are removed from the same source theme, include them together in that source theme's territories_removed array.\n"
+            "- If territory from one source theme goes to multiple targets, represent this through multiple territories_removed entries with different destination_ref values, not multiple changed_sources entries.\n"
+            "- Each changed target theme or planned new theme must appear exactly once in changed_targets.\n"
+            "- If one target receives territory from multiple sources, combine all received territories in that target's received_territories array.\n"
+            "- Every territories_removed.destination_ref must match exactly one changed_targets.target_ref.\n"
+            "- Every changed_targets.received_territories entry must correspond to a territory removed from the referenced source theme.\n"
+            "- Do not create numeric theme identifiers for new themes.\n"
+            "- For target_type = \"new_theme\", set target_theme_id to null and target_theme_label to null.\n"
+            "- For target_type = \"existing_theme\", set target_theme_id and target_theme_label from the input schema.\n"
+            "- Use target_type = \"existing_theme\" only when the receiving theme has clear conceptual fit and sufficient bounded-synthesis capacity.\n"
+            "- Do not merge, expand, or reallocate into a theme if bounded-synthesis viability is uncertain.\n"
+            "- For theme_kind = \"conflict\", the implementation stage will use the exact label \"Conflict\" and DETECTION TRIGGERS rather than INCLUDE / EXCLUDE rules.\n"
+            "- For theme_kind = \"conflict\", resulting_scope and boundary_constraints must define the revised disagreement dimension and trigger boundaries.\n"
+            "- For theme_kind = \"other\", the implementation stage will use the exact label \"Other\" and keep it as a residual category.\n"
+            "- Do not output final theme labels, descriptions, organizing propositions, INCLUDE / EXCLUDE prose, or DETECTION TRIGGERS for new or changed themes.\n"
+            "- The plan must define the conceptual end state for every changed source and every changed target through resulting_scope and boundary_constraints.\n"
+            "- Output only the JSON object.\n"
+            )
+
+    def implement_schema_change_plan(self):
+
+        """
+
+        Implements the change plans developed by the schema repair and optmization calls
+
+        """
+
+        return (
+            "## ROLE\n\n"
+            "You are a Schema Change Implementation Engine.\n\n"
+
+            "Your task is to mechanically implement a previously generated\n"
+            "schema_change_plan onto an existing thematic codebook.\n\n"
+
+            "The plan may have been produced by either a repair planner or an optimization\n"
+            "planner. This distinction does not affect implementation.\n\n"
+
+            "You are not performing schema analysis or conceptual planning.\n\n"
+
+            "The plan is authoritative about what conceptual changes must occur. Your role is\n"
+            "limited to expressing those changes as workable schema fields: theme labels,\n"
+            "theme descriptions, organizing propositions, and assignment instructions.\n\n"
+
+            "Do not diagnose new problems, reconsider the plan, or introduce additional\n"
+            "changes.\n\n"
 
             "## INPUTS\n"
             "You will receive:\n\n"
 
             "1. The current research question.\n\n"
 
-            "2. The current populated schema. Each record combines a theme's schema "
-            "definition with the synthesis produced under that definition. Each theme "
-            "record contains:\n"
-            "   - theme_id: the numeric identifier of the current theme\n"
-            "   - theme_label: the current theme label\n"
-            "   - theme_description: the theme's current conceptual scope\n"
-            "   - organizing_proposition: the central conceptual insight expressed by "
-            "the theme, or null for Conflict and Other\n"
-            "   - instructions: the current INCLUDE / EXCLUDE rules or Conflict "
-            "DETECTION TRIGGERS\n"
-            "   - thematic_summary: the current synthesis of the content assigned to "
-            "the theme, including any FAILED BATCH SUMMARIES\n"
-            "   - word_count: the number of words in the thematic synthesis preceding "
-            "the FAILED BATCH SUMMARIES marker\n"
-            "   - status: whether the theme passed or failed complete orphan "
-            "reinsertion\n\n"
+            "2. The current schema, containing:\n"
+            "   - theme_id\n"
+            "   - theme_label\n"
+            "   - theme_description\n"
+            "   - organizing_proposition\n"
+            "   - instructions\n\n"
+            
+            "3. A schema_change_plan generated by a planning stage.\n\n"
+            
+            "## SCHEMA CHANGE PLAN STRUCTURE\n\n"
 
-            "`status` must be interpreted as follows:\n"
-            "   - `pass` means all assigned content was successfully represented after "
-            "orphan detection and reinsertion.\n"
-            "   - `fail` means one or more orphan-reinsertion batches could not be "
-            "incorporated without exceeding bounded synthesis constraints.\n\n"
+            "The schema_change_plan contains:\n"
+            "- theme_changes\n\n"
 
-            "`word_count` is an approximate indicator of representational load:\n"
-            "   - For a passing theme, it represents the length of the completed "
-            "synthesis.\n"
-            "   - For a failing theme, it represents only the content successfully "
-            "integrated before the FAILED BATCH SUMMARIES section. It therefore "
-            "understates the total representational load required by that theme.\n"
-            "   - Passing themes with high word counts are near capacity and must not "
-            "receive unplanned conceptual territory.\n\n"
+            "Each theme_change contains:\n"
+            "- source_theme_id\n"
+            "- source_theme_label\n"
+            "- conceptual_territories\n"
+            "- conceptual_operations\n"
+            "- source_theme_outcome\n"
+            "- change_narrative\n\n"
 
-            "For failing themes, `thematic_summary` contains a section marked "
-            "`--- FAILED BATCH SUMMARIES ---`. This section describes content that was "
-            "correctly assigned to the theme but could not be reinserted within bounded "
-            "synthesis constraints. Use it to understand and faithfully express the "
-            "repair plan. Do not treat failed-batch content as incorrectly assigned "
-            "merely because its insertion failed.\n\n"
+            "Each conceptual_territory contains:\n"
+            "- conceptual_territory\n"
+            "- estimated_load\n"
+            "- evidence_from_summary_or_failed_batches\n"
+            "- independently_synthesizable\n\n"
 
-            "3. A validated `repair_plan` produced by the schema-repair planning stage.\n\n"
+            "Each conceptual_operation contains:\n"
+            "- conceptual_territory\n"
+            "- action\n"
+            "- target_theme_id\n"
+            "- destination_theme_type\n"
+            "- destination_conceptual_territory\n"
+            "- boundary_constraints\n"
+            "- reason\n\n"
 
-            "The repair plan is the authoritative specification of every structural "
-            "change to implement. It defines:\n"
-            "   - which source themes must be decomposed\n"
-            "   - which conceptual territories must be extracted\n"
-            "   - whether extracted territory creates a new theme or moves to an "
-            "existing theme\n"
-            "   - how receiving themes must be updated\n"
-            "   - whether each source theme is narrowed or dissolved\n"
-            "   - the resulting scopes, organizing propositions, inclusions, and "
-            "exclusions\n"
-            "   - any schema-level changes required across multiple themes\n\n"
+            "Each source_theme_outcome contains:\n"
+            "- outcome\n"
+            "- remaining_conceptual_territory\n"
+            "- boundary_constraints\n"
+            "- bounded_synthesis_viable\n"
+            "- dissolution_reason\n\n"
 
-            "Use the current populated schema as context for faithfully implementing the "
-            "repair plan. Do not use it to diagnose additional problems, alter the plan, "
-            "or invent repairs not specified by the planning stage.\n\n"
+            "## AUTHORITY OF THE PLAN\n"
+            "The schema_change_plan defines the intended conceptual partition.\n"
+            "The conceptual territories, destinations, source outcomes, and boundary\n"
+            "constraints are conceptual decisions already made by the planner.\n"
+            "You must translate those decisions into schema-ready prose without changing "
+            "their meaning.\n\n"
 
-            "## REPAIR PLAN FIELD DEFINITIONS\n"
-            "- repair_plan: contains decomposition operations that must be implemented in the rewritten schema.\n"
-            "- theme_repairs: one decomposition plan for each failed non-Conflict theme.\n"
-            "- source_theme_id: the theme_id in the input schema that the repair operation targets.\n"
-            "- source_theme_label: the original label of the targeted theme.\n"
-            "- concepts_ranked_by_representational_load: major claim-families inside the failed theme, ordered from largest to smallest expected synthesis burden. Use this as context only; implement the extractions.\n"
-            "- extractions: claim-families that must be removed from the failed source theme.\n"
-            "- concept: the claim-family being extracted.\n"
-            "- action: if \"new_theme\", create a new theme for the extracted concept; if \"move_to_existing_theme\", update the existing target_theme_id to receive it.\n"
-            "- target_theme_id: existing theme_id that receives the extracted concept, or null if action is \"new_theme\".\n"
-            "- new_theme_label: label to use for a newly created theme, or null if the concept moves to an existing theme.\n"
-            "- new_theme_core_scope: conceptual scope of the new theme.\n"
-            "- new_theme_organizing_proposition: the conceptual proposition established by the repair plan for a newly created theme. Use it to write the final organizing_proposition for that theme without changing its underlying conceptual claim.\n"
-            "- new_theme_inclusions: concepts that must be included in the new theme's INCLUDE rule.\n"
-            "- new_theme_exclusions: concepts that must be excluded from the new theme's EXCLUDE rule.\n"
-            "- receiving_theme_scope_update: scope update that must be incorporated into an existing receiving theme.\n"
-            "- receiving_theme_organizing_proposition_update: the conceptual proposition that should govern an existing receiving theme after its scope is updated. Use it to write the receiving theme's final organizing_proposition without introducing a different thematic logic.\n"
-            "- source_theme_resolution: specifies whether the original failed theme becomes a narrowed successor or is dissolved.\n"
-            "- outcome: if \"rename_and_narrow\", keep a narrowed successor theme using the residual fields; if \"dissolve_and_reallocate\", remove the source theme entirely.\n"
-            "- residual_label: revised label for the narrowed source theme, or null if dissolved.\n"
-            "- residual_core_scope: remaining conceptual scope after extraction, or null if dissolved.\n"
-            "- residual_organizing_proposition: the conceptual proposition established for the narrowed successor to the failed source theme. Use it to write the residual theme's final organizing_proposition so that it reflects only the remaining thematic region.\n"
-            "- residual_inclusions: concepts that must remain included in the narrowed residual theme.\n"
-            "- residual_exclusions: concepts that must be excluded from the narrowed residual theme, especially extracted concepts that should not drift back in.\n"
-            "- dissolution_reason: explanation for dissolution; use it only to understand intent, not as output text.\n"
-            "- schema_repairs: schema-level repairs affecting relationships across multiple themes.\n"
-            "- affected_theme_ids: theme_ids whose descriptions or instructions may need adjustment for a schema-level repair.\n\n"
+            "The following fields provide explanatory context but do not independently "
+            "authorize additional changes:\n"
+            "- estimated_load\n"
+            "- evidence_from_summary_or_failed_batches\n"
+            "- independently_synthesizable\n"
+            "- reason\n"
+            "- bounded_synthesis_viable\n"
+            "- dissolution_reason\n"
+            "- change_narrative\n\n"
 
-            "## TASK\n"
-            "Apply the repair_plan to rewrite the schema.\n\n"
+            "Do not reproduce these explanatory fields in the resulting schema.\n\n"
 
-            "You must:\n"
-            "- create new themes for extractions with action='new_theme'\n"
-            "- update receiving themes for extractions with action='move_to_existing_theme'\n"
-            "- narrow source themes when source_theme_resolution.outcome='rename_and_narrow'\n"
-            "- remove source themes when source_theme_resolution.outcome='dissolve_and_reallocate'\n"
-            "- convert residual_core_scope, residual_inclusions, and residual_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
-            "- convert new_theme_core_scope, new_theme_inclusions, and new_theme_exclusions into clear theme descriptions and INCLUDE/EXCLUDE rules\n"
-            "- convert receiving_theme_scope_update into updated descriptions and INCLUDE/EXCLUDE rules for receiving themes\n"
-            "- convert residual_organizing_proposition into the final organizing_proposition for each narrowed substantive residual theme\n"
-                "- convert new_theme_organizing_proposition into the final organizing_proposition for each newly created substantive theme\n"
-                "- convert receiving_theme_organizing_proposition_update into the final organizing_proposition for each updated substantive receiving theme\n"
-                "- for any resulting theme whose theme_label is exactly \"Conflict\" or "
-                "\"Other\", set organizing_proposition to null\n\n"
+            "## TRANSFORMATION SEMANTICS\n"
+            "Treat the schema_change_plan as one coordinated transformation of the current "
+            "schema.\n\n"
+            "Resolve all theme identifiers against the original current schema before "
+            "constructing the final schema. Do not allow the order of operations to alter the "
+            "planned result.\n\n"
+            "For each theme_change:\n"
+            "1. Locate the source theme identified by source_theme_id.\n"
+            "2. Implement every conceptual_operation.\n"
+            "3. Apply the specified source_theme_outcome.\n"
+            "4. Apply all associated boundary constraints.\n\n"
 
-            "## IMPLEMENTATION RULES\n"
-            "- Implement the repair plan exactly.\n"
-            "- The repair_plan remains authoritative. If summaries suggest additional possible improvements, ignore them unless required to faithfully implement the repair_plan.\n"
-            "- Do NOT reinterpret the repair plan.\n"
-            "- Do NOT preserve broad conceptual aggregations that the repair plan decomposes.\n"
-            "- Do NOT reintroduce extracted claim-families into narrowed source themes.\n"
-            "- Do NOT optimize for elegance, theoretical completeness, or conceptual compression beyond the repair plan.\n"
-            "- Do NOT invent additional restructurings not implied by the repair plan.\n"
-            "- Do NOT make speculative improvements.\n"
-            "- Preserve unchanged themes unless the repair plan requires modification.\n"
-            "- Treat organizing-proposition fields in the repair_plan as authoritative accounts of the conceptual insight the repaired themes should express.\n"
-            "- Convert organizing-proposition fields in the repair_plan into concise, schema-ready organizing_proposition text while preserving their conceptual meaning.\n"
-            "- For every new, narrowed residual, or updated receiving substantive theme, produce the final organizing_proposition by faithfully implementing the corresponding organizing-proposition field supplied in the repair_plan.\n"
-            "- For themes whose theme_label is exactly \"Conflict\" or \"Other\", set organizing_proposition to null.\n"
-            "- You may improve clarity, grammar, and consistency of expression, but do NOT introduce a different proposition, strengthen or weaken the conceptual claim, broaden or narrow its thematic logic, or add interpretations not contained in the repair_plan.\n"
-            "- For newly created themes, derive the final organizing_proposition only from new_theme_organizing_proposition.\n"
-            "- For narrowed residual themes, derive the final organizing_proposition only from residual_organizing_proposition. Do NOT retain elements of the source theme's previous proposition that depend on extracted conceptual territory.\n"
-            "- For updated receiving themes, derive the final organizing_proposition from receiving_theme_organizing_proposition_update. Do NOT preserve the previous proposition where the repair_plan supplies a revised one.\n"
-            "- Preserve the organizing_proposition of unchanged themes exactly unless the repair_plan explicitly requires that theme to be updated.\n"
-            "- The organizing_proposition must express the central conceptual insight of the theme. It must not merely describe the theme's scope, enumerate its contents, restate its assignment instructions, or explain why the theme exists.\n\n"
+            'For a conceptual_operation with action = "new_theme":\n'
+            "- create one new theme representing destination_conceptual_territory;\n"
+            "- use destination_theme_type to determine whether the new theme is substantive, Conflict, or Other;\n"
+            "- write a concise and distinctive theme_label;\n"
+            "- write a precise theme_description;\n"
+            "- write an organizing_proposition when appropriate;\n"
+            "- convert the boundary_constraints into operational assignment instructions;\n"
+            "- do not add conceptual territory beyond what the operation specifies.\n\n"
 
-            "## INCLUDE/EXCLUDE REQUIREMENTS\n"
-            "All substantive themes must use:\n"
-            "'INCLUDE if ...; EXCLUDE if ...'\n\n"
+            'For a conceptual_operation with action = "move_to_existing_theme":\n'
+            "- locate the theme identified by target_theme_id;\n"
+            "- incorporate the specified conceptual_territory into that theme;\n"
+            "- revise its label only if required to represent its planned resulting scope;\n"
+            "- revise its description, organizing proposition, and instructions as required;\n"
+            "- apply the destination_conceptual_territory and boundary_constraints exactly;\n"
+            "- do not broaden the target theme beyond the planned addition.\n\n"
 
-            "INCLUDE rules must reflect the scope logic in the repair plan, including residual_inclusions, new_theme_inclusions, and receiving theme additions where applicable.\n\n"
+            "When multiple operations move territory to the same target theme, integrate all "
+            "of those operations into one coherent resulting theme.\n\n"
 
+            "## SOURCE THEME OUTCOMES\n"
+            'If outcome = "retain_and_narrow":\n'
+            "- retain the source theme;\n"
+            "- restrict it to remaining_conceptual_territory;\n"
+            "- revise its label if necessary to represent that remaining territory;\n"
+            "- rewrite its description, organizing proposition, and instructions so they\n"
+            "  express only that remaining territory;\n"
+            "- implement every supplied boundary constraint;\n"
+            "- exclude all territory moved elsewhere by the plan.\n\n"
+
+            'If outcome = "dissolve_and_reallocate":\n'
+            "- remove the source theme from the resulting schema;\n"
+            "- do not preserve it under a revised label;\n"
+            "- ensure its planned conceptual territories appear only in their specified\n"
+            "  destinations;\n"
+            "- do not create an additional replacement unless a conceptual_operation requires\n"
+            "  one.\n\n"
+
+            "## IMPLEMENTATION DISCIPLINE\n"
+            "Implement every change present in the schema_change_plan and no change absent "
+            "from it.\n"
+            "Do not:\n"
+            "- add a repair or optimization absent from the plan;\n"
+            "- omit a conceptual operation present in the plan;\n"
+            "- reinterpret the planned conceptual territories;\n"
+            "- change the intended conceptual partition;\n"
+            "- broaden or narrow a territory beyond the plan;\n"
+            "- move concepts to an unspecified destination;\n"
+            "- merge or split additional themes;\n"
+            "- preserve a theme the plan dissolves;\n"
+            "- dissolve a theme the plan retains;\n"
+            "- infer new conceptual changes from the research question;\n"
+            "- infer new conceptual changes from explanatory evidence;\n"
+            "- optimize for additional elegance, symmetry, or compression;\n"
+            "- make speculative improvements.\n\n"
+
+            "You may improve grammar, clarity, consistency, and operational precision only "
+            "when doing so does not alter the plan's conceptual meaning.\n\n"
+
+            "## THEME LABELS\n"
+            "Write concise labels that accurately distinguish the planned conceptual "
+            "territories.\n"
+            "Labels are linguistic realizations of the plan, not opportunities to redefine "
+            "the concepts.\n"
+            "Every resulting theme must have a unique label.\n"
+            "Preserve an existing label when it remains accurate. Revise it only when the "
+            "planned change makes revision necessary.\n\n"
+
+            "## THEME DESCRIPTIONS\n"
+            "Each theme_description must clearly define the conceptual territory assigned to "
+            "that theme by the plan.\n"
+            "It must be sufficiently precise to distinguish the theme from neighboring "
+            "themes.\n"
+            "For a new theme, derive the description from destination_conceptual_territory and "
+            "its boundary_constraints.\n"
+            "For a retained source theme, derive the description from "
+            "remaining_conceptual_territory and its boundary_constraints.\n"
+            "For an updated target theme, preserve its existing conceptual territory while "
+            "incorporating only the territory explicitly moved into it.\n"
+            "Do not introduce conceptual material absent from the plan.\n\n"
+
+            "## ORGANIZING PROPOSITIONS\n"
+            "For every substantive changed or newly created theme, write a concise organizing "
+            "proposition that expresses the central conceptual relationship within the "
+            "territory assigned by the plan.\n"
+            "The organizing proposition must synthesize the planned territory without adding "
+            "a new claim, causal interpretation, evaluative position, or conceptual "
+            "distinction.\n"
+            "Do not:\n"
+            "- replace the planned territory with a different proposition;\n"
+            "- strengthen or weaken its conceptual logic;\n"
+            "- turn the proposition into a list of included contents;\n"
+            "- explain why the schema change occurred;\n"
+            "- mention repair, optimization, synthesis failure, or planning evidence.\n\n"
+
+            "Preserve the organizing_proposition of unchanged themes exactly.\n"
+            "For Conflict and Other, organizing_proposition must be null.\n\n"
+
+            "## INCLUDE / EXCLUDE RULES\n"
+            "All substantive themes and Other must use this structure:\n"
+            '"INCLUDE if ; EXCLUDE if ."\n'
+            "INCLUDE rules must operationalize the conceptual territory assigned to the theme.\n"
             "EXCLUDE rules must:\n"
-            "- explicitly route neighboring conceptual material toward named destination themes whenever possible\n"
-            "- reflect residual_exclusions and new_theme_exclusions from the repair plan\n"
-            "- explicitly exclude extracted claim-families from narrowed source themes\n"
-            "- prevent extracted content from drifting back into source themes in later assignment\n"
-            "- preserve non-overlapping assignment behavior\n\n"
+            "- implement the supplied boundary_constraints;\n"
+            "- identify neighboring conceptual territories;\n"
+            "- route neighboring material to the appropriate named themes;\n"
+            "- maintain the schema as a mutually constraining partition.\n\n"
 
-            "Preferred EXCLUDE form:\n"
-            "'EXCLUDE if discussing <excluded territory>, which should be routed to <theme_label>.'\n\n"
+            "Do not write generic exclusions.\n"
+            "Do not use the simple inverse of the INCLUDE rule.\n"
+            "he preferred form is: EXCLUDE if discussing excluded_conceptual_territory, which should be routed to destination_theme.\n"
+            "When the plan changes a conceptual boundary, update instructions only for "
+            "themes identified as source_theme_id or target_theme_id.\n"
+            "Boundary-rule updates do not authorize changes to the underlying conceptual "
+            "territory beyond those specified in the plan.\n\n"
 
-            "Do NOT write generic, inverse, or vague exclusions.\n\n"
+            "## CONFLICT\n"
+            'If the plan explicitly requires a theme representing unresolved disagreement or '
+            'incompatible positions, label that theme exactly "Conflict".\n'
+            "For Conflict:\n"
+            "- preserve that exact label;\n"
+            "- set organizing_proposition to null;\n"
+            "- use DETECTION TRIGGERS rather than INCLUDE / EXCLUDE;\n"
+            "- define the dimension of disagreement;\n"
+            "- preserve the opposing positions;\n"
+            "- do not harmonize the disagreement.\n\n"
 
-            "## CONFLICT THEME\n"
-            "If a Conflict theme exists:\n"
-            "- preserve the label exactly as \"Conflict\"\n"
-            "- preserve conceptual polarity\n"
-            "- use DETECTION TRIGGERS instead of INCLUDE/EXCLUDE\n\n"
+            "Do not create or expand Conflict unless the plan explicitly assigns conceptual\n"
+            "territory to it.\n\n"
 
-            "## OTHER THEME\n"
-            "If an Other theme exists:\n"
-            "- preserve it as a residual category only\n"
-            "- do NOT allow it to absorb coherent conceptual groupings that should become substantive themes\n\n"
+            "## OTHER\n"
+            'If the plan explicitly requires a residual category, label that theme exactly '
+            '"Other".\n'
+            "For Other:\n"
+            "- preserve that exact label;\n"
+            "- set organizing_proposition to null;\n"
+            "- retain it only as a residual category;\n"
+            "- do not assign coherent substantive groupings to it.\n\n"
 
-            "## IMPORTANT\n"
-            "- This is an implementation task, not a planning task.\n"
-            "- The repair plan is the authoritative source of structural change.\n"
-            "- Your job is to produce a clean rewritten schema that faithfully realizes the repair plan.\n"
-            "- Every extraction in the repair plan must be visibly implemented in the resulting schema.\n"
-            "- Every new, narrowed residual, or updated receiving theme must visibly implement the corresponding organizing-proposition field supplied by the repair_plan.\n\n"
+            "Do not move a coherent conceptual territory into Other unless the plan explicitly\n"
+            "requires that destination.\n\n"
 
-            "## OUTPUT FORMAT (STRICT JSON)\n"
+            "## UNCHANGED THEMES\n"
+            "Preserve any theme not identified as a source_theme_id or target_theme_id exactly.\n"
+            "Do not silently rewrite unchanged labels, descriptions, organizing propositions, "
+            "or instructions.\n\n"
+
+            "## OUTPUT FORMAT (STRICT JSON)\n\n"
+            "Return exactly one strict JSON object matching this contract. Replace type markers with the final fields for each resulting theme:\n\n"
             "{\n"
-            "  \"themes\": [\n"
+            '  "themes": [\n'
             "    {\n"
-            "      \"theme_label\": <string>,\n"
-            "      \"theme_description\": <string>,\n"
-            "      \"organizing_proposition\": <string | null>,\n"
-            "      \"instructions\": <string>\n"
+            '      "theme_label": string,\n'
+            '      "theme_description": string,\n'
+            '      "organizing_proposition": string_or_null,\n'
+            '      "instructions": string\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
 
-            "## CONSTRAINTS\n"
-            "- Do NOT generate numeric identifiers\n"
-            "- Do NOT output explanations\n"
-            "- Do NOT output repair narratives\n"
-            "- Do NOT output markdown\n"
-            "- Output only the rewritten schema JSON\n"
-        )
-
-
-    def gen_theme_schema_optimize_plan(self):
-        """
-        Construct the prompt for schema-optimization planning.
-
-        Reviews a complete, functioning thematic schema and either declares
-        convergence or returns a structured optimization plan. It does not rewrite
-        the schema directly.
-        """
-
-        return(
-            """
-            ## ROLE
-
-            You are a Schema Optimization Architect.
-
-            Your task is to inspect a functioning thematic codebook and determine whether
-            there are obvious, non-speculative improvements to its conceptual organization.
-
-            You produce an optimization plan. You do NOT rewrite the schema.
-
-            ## WORKFLOW CONTEXT
-
-            The thematic synthesis workflow:
-
-            1. Generates a thematic codebook.
-            2. Assigns insights to its themes.
-            3. Synthesizes each theme under bounded output constraints.
-            4. Checks whether all assigned content was represented.
-            5. Reinserts omitted content.
-            6. Repairs overloaded themes until every theme passes.
-            7. Optimizes the functioning schema without recreating overload.
-
-            You are operating at step 7.
-
-            Every theme in the current schema has passed its completeness check.
-            Optimization must preserve that viability.
-
-            ## INPUTS
-
-            You will receive:
-
-            1. The current research question.
-            2. The current schema, containing:
-            - theme_id
-            - theme_label
-            - theme_description
-            - organizing_proposition
-            - instructions
-            3. The current thematic summaries:
-            - completeness status
-            - summary word count
-            - synthesized thematic content
-            4. Prior schema-change history, including repairs and optimizations.
-
-            Use only the current schema as the target of optimization.
-
-            Use prior schema-change history to:
-
-            - understand why the current partition exists;
-            - avoid recreating previously overloaded conceptual aggregations;
-            - avoid reversing earlier changes without clear evidence;
-            - detect oscillation between previously attempted schema structures.
-
-            ## CODEBOOK STRUCTURE
-
-            Each theme defines a conceptual territory using:
-
-            - theme_label
-            - theme_description
-            - organizing_proposition
-            - instructions
-
-            The theme_description defines the theme's conceptual scope.
-
-            For substantive themes, the organizing_proposition states the central
-            conceptual insight expressed by the theme. It should articulate the idea,
-            relationship, process, mechanism, distinction, trajectory, argument, or
-            dynamic that unifies the thematic region.
-
-            For themes labelled exactly "Conflict" or "Other",
-            organizing_proposition must be null.
-
-            The instructions operationalize assignment through:
-
-            - INCLUDE / EXCLUDE rules for substantive themes and Other;
-            - DETECTION TRIGGERS for Conflict.
-
-            ## OPTIMIZATION OBJECTIVES
-
-            An optimized schema should:
-
-            1. preserve successful expression of all assigned conceptual content under
-            bounded synthesis constraints;
-            2. define internally coherent themes;
-            3. maintain clear conceptual boundaries between themes;
-            4. represent the full conceptual landscape;
-            5. avoid forcing conceptually distinct material into the same theme;
-            6. avoid unnecessary fragmentation;
-            7. minimize reliance on Other where a coherent substantive grouping clearly
-            exists.
-
-            Possible optimizations include:
-
-            - clarifying an ambiguous boundary;
-            - reallocating conceptual territory between existing themes;
-            - merging unnecessarily fragmented themes;
-            - splitting a conceptually incoherent theme when both resulting themes remain
-            independently justified;
-            - extracting a coherent grouping from Other;
-            - revising labels, scopes, or organizing propositions to reflect changed
-            conceptual territories;
-            - correcting inconsistent INCLUDE / EXCLUDE routing;
-            - dissolving a theme whose content is better represented elsewhere.
-
-            ## BOUNDED SYNTHESIS CONSTRAINTS
-
-            The synthesis system operates under a maximum output of approximately
-            4096 tokens / 2500 words.
-
-            Treat current summary length as an approximate indicator of representational
-            capacity.
-
-            Themes approaching this limit are near capacity and must not be expanded.
-
-            Optimization must not rely on future compression to make an enlarged theme
-            viable.
-
-            Assume every substantively distinct claim-family, mechanism, causal logic,
-            actor system, policy instrument, implication, minority position, geography,
-            sector, or contradiction must remain separately representable.
-
-            Paraphrases, duplicates, repeated examples, and differently cited versions of
-            the same claim may be consolidated.
-
-            Distinct substantive concepts must not be collapsed merely to create a more
-            elegant schema.
-
-            Do not merge themes unless conceptual coherence and bounded synthesis
-            viability are both clearly preserved.
-
-            If viability is uncertain, do not propose the change.
-
-            ## PRIOR CHANGE DISCIPLINE
-
-            Do not recreate conceptual aggregations that previously failed bounded
-            synthesis.
-
-            Do not reverse a prior repair merely because the separated themes appear
-            conceptually related.
-
-            A previous separation may be reversed only when the current evidence clearly
-            shows that the resulting combined theme would remain coherent and comfortably
-            within bounded synthesis capacity.
-
-            Do not alternate between previously attempted schema structures.
-
-            ## INCLUDE / EXCLUDE LOGIC
-
-            For substantive themes and Other, the implementation must ultimately use:
-
-            "INCLUDE if <conceptual territory>; EXCLUDE if <territory assigned elsewhere>."
-
-            Strong EXCLUDE rules:
-
-            - identify neighboring themes likely to overlap;
-            - explicitly exclude their conceptual territories;
-            - route ambiguous material to the correct destination.
-
-            EXCLUDE rules must not be generic or simple inverses of INCLUDE rules.
-
-            When proposing changed themes, provide sufficiently precise scope,
-            inclusion, and exclusion logic for a later implementation pass to write these
-            rules.
-
-            ## SPECIAL THEMES
-
-            ### Conflict
-
-            Use the label exactly "Conflict".
-
-            Conflict is appropriate only for substantively incompatible interpretations,
-            claims, or prescriptions that cannot coexist within one conceptual frame.
-
-            Conflict does not include:
-
-            - reinforcing critiques;
-            - layered constraints;
-            - trade-offs within a shared framework;
-            - differences of emphasis without incompatible positions.
-
-            Conflict must:
-
-            - preserve identifiable polarity;
-            - use DETECTION TRIGGERS;
-            - have organizing_proposition set to null.
-
-            ### Other
-
-            Use the label exactly "Other".
-
-            Other is a residual category for valid low-frequency material that does not
-            form a coherent substantive grouping.
-
-            Other must not:
-
-            - absorb a coherent grouping that warrants a substantive theme;
-            - compensate for poorly defined neighboring themes;
-            - receive an organizing proposition.
-
-            Set organizing_proposition to null.
-
-            ## PLANNING SEMANTICS
-
-            Each theme_change defines a self-contained transformation.
-
-            affected_theme_ids identifies every existing theme replaced or modified by
-            that transformation.
-
-            affected_theme_labels provides the corresponding labels for interpretability.
-
-            resulting_themes defines the complete replacement state for those affected
-            themes.
-
-            For each resulting theme:
-
-            - existing_theme_id identifies the current theme it replaces or updates;
-            - use null when creating a new theme;
-            - theme_label defines its resulting label;
-            - core_scope defines its resulting conceptual territory;
-            - organizing_proposition defines its resulting conceptual insight;
-            - inclusions defines concepts assigned to it;
-            - exclusions defines neighboring territory assigned elsewhere.
-
-            Examples:
-
-            - Boundary revision:
-            one affected theme produces one resulting theme.
-
-            - Reallocation:
-            two or more affected themes produce revised versions of those themes.
-
-            - Merge:
-            two or more affected themes produce one resulting theme.
-
-            - Split:
-            one affected theme produces two or more resulting themes.
-
-            - Dissolution:
-            the dissolved theme and all receiving themes are affected; the resulting
-            themes contain only the retained or receiving themes.
-
-            Do not place the same affected_theme_id in more than one theme_change.
-
-            Do not generate new numeric theme identifiers.
-
-            ## ORGANIZING PROPOSITIONS
-
-            Every resulting substantive theme must have a non-null
-            organizing_proposition.
-
-            It must express the central conceptual insight that the eventual synthesis
-            should demonstrate.
-
-            It must not merely:
-
-            - repeat the label;
-            - describe the theme's contents;
-            - restate the scope;
-            - restate assignment instructions;
-            - justify the optimization.
-
-            Conflict and Other must have organizing_proposition set to null.
-
-            If a theme's conceptual territory changes, update its organizing proposition.
-
-            If its territory does not change, preserve the existing proposition exactly.
-
-            ## CONVERGENCE
-
-            Set no_change to true if:
-
-            - there are no obvious, non-speculative improvements; or
-            - all apparent improvements would risk overload; or
-            - all apparent improvements depend on uncertain reallocations; or
-            - the changes would be merely cosmetic.
-
-            Set no_change to false only when at least one clear improvement can be
-            expressed as a complete and implementable theme_change or schema_optimization.
-
-            ## OUTPUT FORMAT — STRICT JSON
-
-            {
-                "no_change": <boolean>,
-                "optimize_plan": {
-                    "theme_changes": [
-                        {
-                            "affected_theme_ids": [<integer>],
-                            "affected_theme_labels": [<string>],
-                            "optimization_opportunity": <string>,
-                            "resulting_themes": [
-                                {
-                                    "existing_theme_id": <integer | null>,
-                                    "theme_label": <string>,
-                                    "core_scope": <string>,
-                                    "organizing_proposition": <string | null>,
-                                    "inclusions": [<string>],
-                                    "exclusions": [<string>]
-                                }
-                            ],
-                            "optimization_narrative": <string>
-                        }
-                    ],
-                    "schema_optimizations": [
-                        {
-                            "affected_theme_ids": [<integer>],
-                            "optimization_narrative": <string>
-                        }
-                    ]
-                }
-            }
-
-            ## FIELD DEFINITIONS
-
-            - no_change:
-            Whether the current schema should remain unchanged.
-
-            - optimize_plan:
-            The complete set of intended optimization operations.
-
-            - theme_changes:
-            Self-contained transformations of one or more current themes.
-
-            - affected_theme_ids:
-            Every existing theme removed, replaced, or modified by the transformation.
-
-            - affected_theme_labels:
-            Labels corresponding to affected_theme_ids.
-
-            - optimization_opportunity:
-            The specific coherence, boundary, fragmentation, Other-category, or schema
-            problem that motivates the change.
-
-            - resulting_themes:
-            The complete set of themes that replace the affected themes.
-
-            - existing_theme_id:
-            The current theme retained or updated by the resulting theme. Use null for a
-            newly created theme.
-
-            - theme_label:
-            The intended resulting label.
-
-            - core_scope:
-            The intended conceptual scope.
-
-            - organizing_proposition:
-            The intended conceptual proposition, or null for Conflict and Other.
-
-            - inclusions:
-            Concepts that the resulting theme must include.
-
-            - exclusions:
-            Neighboring conceptual territories that the resulting theme must exclude and
-            route elsewhere.
-
-            - optimization_narrative:
-            One concise description of what changes and why.
-
-            - schema_optimizations:
-            Cross-schema changes not adequately represented by a single theme_change.
-
-            ## VALIDATION RULES
-
-            - If no_change is true:
-            - theme_changes must be empty;
-            - schema_optimizations must be empty.
-
-            - If no_change is false:
-            - at least one theme_change or schema_optimization must be present.
-
-            - Every affected_theme_id must exist in the input schema.
-
-            - Every affected_theme_id may appear in only one theme_change.
-
-            - Every affected theme must either:
-            - have a corresponding resulting theme; or
-            - have all of its conceptual territory explicitly reallocated.
-
-            - A resulting theme with existing_theme_id must reference one of the affected
-            theme IDs.
-
-            - A new resulting theme must use existing_theme_id = null.
-
-            - Do not generate numeric IDs for new themes.
-
-            - Every resulting substantive theme must include:
-            - a non-empty core_scope;
-            - a non-null organizing_proposition;
-            - inclusion logic;
-            - exclusion logic.
-
-            - Conflict and Other must have organizing_proposition = null.
-
-            - Do not output final theme descriptions.
-
-            - Do not output final INCLUDE / EXCLUDE prose.
-
-            - Do not output a rewritten schema.
-
-            - Do not propose cosmetic changes.
-
-            - Do not reintroduce a previously failed conceptual aggregation.
-
-            - Output only the JSON object.
-            """
-            )
-
-    
-    def implement_schema_optimization(self):
-        """
-        Construct the prompt for implementing a schema-optimization plan.
-
-        Mechanically applies a validated optimize_plan to the current schema and
-        returns the complete rewritten schema.
-        """
-
-        return(
-            """
-            ## ROLE
-
-            You are a Schema Optimization Rewrite Engine.
-
-            Your task is to mechanically implement a previously generated optimize_plan
-            onto an existing thematic codebook.
-
-            You are not performing optimization analysis.
-
-            You must not diagnose new problems, reinterpret the plan, or introduce
-            additional improvements.
-
-            ## INPUTS
-
-            You will receive:
-
-            1. The current research question.
-            2. The current schema, containing:
-            - theme_id
-            - theme_label
-            - theme_description
-            - organizing_proposition
-            - instructions
-            3. A validated optimize_plan generated by the optimization-planning stage.
-
-            ## OPTIMIZE PLAN STRUCTURE
-
-            The optimize_plan contains:
-
-            - theme_changes
-            - schema_optimizations
-
-            Each theme_change contains:
-
-            - affected_theme_ids
-            - affected_theme_labels
-            - optimization_opportunity
-            - resulting_themes
-            - optimization_narrative
-
-            Each resulting theme contains:
-
-            - existing_theme_id
-            - theme_label
-            - core_scope
-            - organizing_proposition
-            - inclusions
-            - exclusions
-
-            ## TRANSFORMATION SEMANTICS
-
-            For each theme_change:
-
-            1. Locate every input theme listed in affected_theme_ids.
-            2. Remove those themes from their existing form.
-            3. Replace them with exactly the themes listed in resulting_themes.
-            4. Preserve every theme not listed in affected_theme_ids unless a
-            schema_optimization explicitly requires its modification.
-
-            A resulting theme with an existing_theme_id updates or replaces that existing
-            theme.
-
-            A resulting theme with existing_theme_id = null creates a new theme.
-
-            The resulting_themes array defines the complete replacement state for the
-            affected thematic region.
-
-            Do not preserve an affected source theme unless it is represented in
-            resulting_themes.
-
-            ## TASK
-
-            Apply the optimize_plan to the current schema.
-
-            You must:
-
-            - implement every theme_change;
-            - implement every schema_optimization;
-            - create every planned new theme;
-            - update every planned existing theme;
-            - remove every planned dissolved or merged theme;
-            - preserve all unchanged themes;
-            - return the complete resulting schema.
-
-            Convert each resulting theme's:
-
-            - core_scope into a precise theme_description;
-            - organizing_proposition into the final organizing_proposition;
-            - inclusions and exclusions into operational assignment instructions.
-
-            ## IMPLEMENTATION DISCIPLINE
-
-            The optimize_plan is authoritative.
-
-            Do not:
-
-            - add an optimization absent from the plan;
-            - omit an optimization present in the plan;
-            - reinterpret the optimization opportunity;
-            - change the intended conceptual partition;
-            - broaden or narrow a resulting scope;
-            - merge or split additional themes;
-            - move concepts beyond the specified reallocations;
-            - optimize for additional elegance or compression;
-            - make speculative improvements.
-
-            You may improve grammar, clarity, and consistency only when doing so does not
-            change the plan's conceptual meaning.
-
-            The optimization_opportunity and optimization_narrative explain the plan but
-            must not appear as justification in the resulting schema.
-
-            ## THEME DESCRIPTIONS
-
-            Each theme_description must clearly define the conceptual territory specified
-            by core_scope.
-
-            It must be sufficiently precise to distinguish the theme from neighboring
-            themes.
-
-            Do not introduce conceptual material absent from the plan.
-
-            ## ORGANIZING PROPOSITIONS
-
-            For every substantive resulting theme, use the organizing_proposition supplied
-            by the optimize_plan as authoritative.
-
-            You may convert it into concise schema-ready prose, but must not:
-
-            - strengthen or weaken the claim;
-            - broaden or narrow its conceptual logic;
-            - replace it with a different proposition;
-            - turn it into a list of contents;
-            - explain why the optimization occurred.
-
-            For Conflict and Other, organizing_proposition must be null.
-
-            Preserve the organizing_proposition of unchanged themes exactly.
-
-            ## INCLUDE / EXCLUDE RULES
-
-            All substantive themes and Other must use:
-
-            "INCLUDE if <conceptual territory>; EXCLUDE if <territory assigned elsewhere>."
-
-            INCLUDE rules must implement the supplied inclusions and core_scope.
-
-            EXCLUDE rules must:
-
-            - implement the supplied exclusions;
-            - identify neighboring conceptual territories;
-            - route neighboring material to the appropriate named themes;
-            - maintain the schema as a mutually constraining partition.
-
-            Do not write generic exclusions.
-
-            Do not use the simple inverse of the INCLUDE rule.
-
-            Preferred form:
-
-            "EXCLUDE if discussing <excluded territory>, which should be routed to
-            <theme_label>."
-
-            When a conceptual boundary changes, update the instructions on every affected
-            side of that boundary as required by the optimize_plan.
-
-            ## CONFLICT
-
-            If a resulting theme is labelled exactly "Conflict":
-
-            - preserve that exact label;
-            - set organizing_proposition to null;
-            - use DETECTION TRIGGERS rather than INCLUDE / EXCLUDE;
-            - define the dimension of disagreement;
-            - preserve opposing positions;
-            - do not harmonize the disagreement.
-
-            ## OTHER
-
-            If a resulting theme is labelled exactly "Other":
-
-            - preserve that exact label;
-            - set organizing_proposition to null;
-            - retain it only as a residual category;
-            - do not assign coherent substantive groupings to it.
-
-            ## UNCHANGED THEMES
-
-            Preserve unchanged themes exactly unless a schema_optimization explicitly
-            requires a corresponding boundary-rule update.
-
-            Do not silently rewrite unchanged labels, descriptions, organizing
-            propositions, or instructions.
-
-            ## OUTPUT FORMAT — STRICT JSON
-
-            {
-                "themes": [
-                    {
-                        "theme_label": <string>,
-                        "theme_description": <string>,
-                        "organizing_proposition": <string | null>,
-                        "instructions": <string>
-                    }
-                ]
-            }
-
-            ## OUTPUT CONSTRAINTS
-
-            - Return the complete rewritten schema.
-            - Do not generate numeric theme identifiers.
-            - Do not output no_change.
-            - Do not output optimize_plan.
-            - Do not output explanations.
-            - Do not output optimization narratives.
-            - Do not output markdown.
-            - Output only the rewritten schema JSON.
-            """
+            "## OUTPUT CONSTRAINTS\n"
+            "- Return the complete resulting schema.\n"
+            "- Include every retained, updated, and newly created theme.\n"
+            "- Exclude every theme dissolved by the plan.\n"
+            "- Do not generate numeric theme identifiers.\n"
+            "- Do not output no_change.\n"
+            "- Do not output schema_change_plan.\n"
+            "- Do not output planner evidence, reasons, or narratives.\n"
+            "- Do not output explanations.\n"
+            "- Do not output markdown.\n"
+            "- Output only the resulting schema JSON.\n"
         )
        
 
