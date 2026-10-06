@@ -5411,6 +5411,171 @@ class Summarize:
 
         themes = response.get("themes", [])
         return themes
+
+
+    def schema_change_plan_to_history_df(
+        plan_response,
+        *,
+        iteration_id=None,
+        research_question=None,
+    ):
+        """
+        Convert a schema-change planner response into a flat history dataframe.
+
+        One row is produced per changed source theme. Movement and target details
+        are represented as readable newline-delimited strings.
+        """
+
+        ### HELPERS
+
+        def format_target_name(target):
+            if target["target_type"] == "existing_theme":
+                return f'existing theme "{target["target_theme_label"]}"'
+
+            return f'new {target["theme_kind"]} theme'
+        
+        ### \END HELPERS
+
+        schema_change_plan = plan_response.get("schema_change_plan", {})
+        changed_by = schema_change_plan.get("changed_by")
+
+        targets_by_ref = {
+            target["target_ref"]: target
+            for target in schema_change_plan.get("changed_targets", [])
+        }
+
+        rows = []
+
+        for source in schema_change_plan.get("changed_sources", []):
+            source_result = source["source_result"]
+            territories_removed = source.get("territories_removed", [])
+
+            target_refs = []
+            territory_movement_lines = []
+
+            for index, movement in enumerate(territories_removed, start=1):
+                territory = movement["territory"]
+                destination_ref = movement["destination_ref"]
+                target = targets_by_ref.get(destination_ref)
+
+                target_name = destination_ref
+                if target is not None:
+                    target_name = format_target_name(target)
+
+                target_refs.append(destination_ref)
+                territory_movement_lines.append(
+                    f"{index}. {territory} -> {target_name}"
+                )
+
+            unique_target_refs = list(dict.fromkeys(target_refs))
+
+            target_scope_lines = []
+            target_boundary_lines = []
+
+            for target_ref in unique_target_refs:
+                target = targets_by_ref.get(target_ref)
+                if target is None:
+                    continue
+
+                target_name = format_target_name(target)
+
+                target_scope_lines.append(
+                    f"{target_name}: {target['resulting_scope']}"
+                )
+
+                boundary_constraints = target.get("boundary_constraints", [])
+                if boundary_constraints:
+                    target_boundary_lines.append(
+                        f"{target_name}: " + " ".join(boundary_constraints)
+                    )
+
+            rows.append({
+                "iteration_id": iteration_id,
+                "research_question": research_question,
+                "changed_by": changed_by,
+                "source_theme_id": source["source_theme_id"],
+                "source_theme_label": source["source_theme_label"],
+                "source_result_action": source_result["action"],
+                "source_resulting_scope": source_result["resulting_scope"],
+                "source_boundary_constraints": "\n".join(
+                    source_result.get("boundary_constraints", [])
+                ),
+                "territory_movements": "\n".join(territory_movement_lines),
+                "target_resulting_scopes": "\n".join(target_scope_lines),
+                "target_boundary_constraints": "\n".join(target_boundary_lines),
+            })
+
+        columns = [
+            "iteration_id",
+            "research_question",
+            "changed_by",
+            "source_theme_id",
+            "source_theme_label",
+            "source_result_action",
+            "source_resulting_scope",
+            "source_boundary_constraints",
+            "territory_movements",
+            "target_resulting_scopes",
+            "target_boundary_constraints",
+        ]
+
+        return pd.DataFrame(rows).reindex(columns=columns)
+
+
+    def schema_history_to_llm_json(history):
+        """
+        Convert a flat schema-change history dataframe, or list of dataframes,
+        into compact JSON-serializable history for planner prompts.
+        """
+
+        ### HELPERS
+
+        def schema_history_to_llm_json_string(history, *, indent=2):
+            return json.dumps(schema_history_to_llm_json(history), indent=indent, ensure_ascii=False)
+
+
+        def clean_scalar(value):
+            if value is None:
+                return None
+
+            if isinstance(value, float) and pd.isna(value):
+                return None
+
+            if hasattr(value, "item"):
+                return value.item()
+
+            return value
+
+        ### \END HELPERS
+
+
+        if isinstance(history, list):
+            history_df = pd.concat(history, ignore_index=True) if history else pd.DataFrame()
+        else:
+            history_df = history.copy()
+
+        if history_df.empty:
+            return []
+
+        records = []
+
+        for _, row in history_df.iterrows():
+            records.append({
+                "iteration_id": clean_scalar(row.get("iteration_id")),
+                "research_question": clean_scalar(row.get("research_question")),
+                "changed_by": clean_scalar(row.get("changed_by")),
+                "source_theme_id": clean_scalar(row.get("source_theme_id")),
+                "source_theme_label": clean_scalar(row.get("source_theme_label")),
+                "source_outcome": clean_scalar(row.get("source_result_action")),
+                "source_resulting_scope": clean_scalar(row.get("source_resulting_scope")),
+                "source_boundary_constraints": clean_scalar(row.get("source_boundary_constraints")),
+                "territory_movements": clean_scalar(row.get("territory_movements")),
+                "target_resulting_scopes": clean_scalar(row.get("target_resulting_scopes")),
+                "target_boundary_constraints": clean_scalar(row.get("target_boundary_constraints")),
+            })
+
+        return records
+
     
     def _llm_gen_schema_repair_plan(self, user_prompt, sys_prompt):
         """
