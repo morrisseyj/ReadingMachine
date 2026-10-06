@@ -5744,7 +5744,7 @@ class Summarize:
         """
         
         json_schema = {
-            "name": "theme_schema_repair_implementer",
+            "name": "theme_schema_change_implementer",
             "strict": True,
             "schema": {
                 "type": "object",
@@ -6175,7 +6175,7 @@ class Summarize:
         """
         # Json for structured output
         json_schema = {
-            "name": "theme_schema_optimize_implementer",
+            "name": "theme_schema_change_implementer",
             "strict": True,
             "schema": {
                 "type": "object",
