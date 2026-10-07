@@ -89,6 +89,7 @@ summary_state_prefix = {
     "mapped_theme_list": "mapped_theme_list",
     "populated_theme_list": "populated_theme_list",
     "orphan_list": "orphan_list",
+    "schema_repair_list": "schema_repair_list",
     "redundancy_list": "redundancy_list"
 }
 
