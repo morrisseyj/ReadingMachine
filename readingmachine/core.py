@@ -6022,7 +6022,7 @@ class Summarize:
                 )
                 # Get the schema history
                 schema_history_df_list = []
-                for index, df enumerate(self.summary_state.schema_repair_list):
+                for index, df in enumerate(self.summary_state.schema_repair_list):
                     df["iteration"] = index + 1
                     schema_history_df_list.append(df)
 
