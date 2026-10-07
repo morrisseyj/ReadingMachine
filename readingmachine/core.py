@@ -5414,7 +5414,8 @@ class Summarize:
 
 
     def _schema_change_plan_to_history_df(
-        plan_response,
+        self,
+        schema_change_plan,
         *,
         iteration=None,
         research_question=None,
@@ -5436,7 +5437,6 @@ class Summarize:
         
         ### \END HELPERS
 
-        schema_change_plan = plan_response.get("schema_change_plan", {})
         changed_by = schema_change_plan.get("changed_by")
 
         targets_by_ref = {
@@ -5522,7 +5522,7 @@ class Summarize:
         return pd.DataFrame(rows).reindex(columns=columns)
 
 
-    def _schema_history_to_json_string(history, *, indent = 2):
+    def _schema_history_to_json_string(self, history, *, indent = 2):
         """
         Convert a flat schema-change history dataframe, or list of dataframes,
         into compact JSON-serializable history for planner prompts.
@@ -5639,202 +5639,199 @@ class Summarize:
         """
         
         json_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "schema_change_plan_response",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "no_change": {
-                            "type": "boolean"
-                        },
-                        "schema_change_plan": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "changed_by": {
-                                    "type": "string",
-                                    "enum": ["repair_plan", "optimize_plan"]
-                                },
-                                "changed_sources": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "source_theme_id": {
-                                                "type": "integer"
-                                            },
-                                            "source_theme_label": {
-                                                "type": "string"
-                                            },
-                                            "largest_source_territories": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "rank": {
-                                                            "type": "integer"
-                                                        },
-                                                        "action": {
-                                                            "type": "string",
-                                                            "enum": ["extract", "retain"]
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "territory",
-                                                        "rank",
-                                                        "action"
-                                                    ]
-                                                }
-                                            },
-                                            "territories_removed": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "destination_ref": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "territory",
-                                                        "destination_ref"
-                                                    ]
-                                                }
-                                            },
-                                            "source_result": {
+            "name": "schema_change_plan_response",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "no_change": {
+                        "type": "boolean"
+                    },
+                    "schema_change_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "changed_by": {
+                                "type": "string",
+                                "enum": ["repair_plan", "optimize_plan"]
+                            },
+                            "changed_sources": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "source_theme_id": {
+                                            "type": "integer"
+                                        },
+                                        "source_theme_label": {
+                                            "type": "string"
+                                        },
+                                        "largest_source_territories": {
+                                            "type": "array",
+                                            "items": {
                                                 "type": "object",
                                                 "additionalProperties": False,
                                                 "properties": {
+                                                    "territory": {
+                                                        "type": "string"
+                                                    },
+                                                    "rank": {
+                                                        "type": "integer"
+                                                    },
                                                     "action": {
                                                         "type": "string",
-                                                        "enum": [
-                                                            "retain_and_narrow",
-                                                            "dissolve_and_reallocate"
-                                                        ]
-                                                    },
-                                                    "resulting_scope": {
-                                                        "type": ["string", "null"]
-                                                    },
-                                                    "boundary_constraints": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
+                                                        "enum": ["extract", "retain"]
                                                     }
                                                 },
                                                 "required": [
-                                                    "action",
-                                                    "resulting_scope",
-                                                    "boundary_constraints"
+                                                    "territory",
+                                                    "rank",
+                                                    "action"
                                                 ]
                                             }
                                         },
-                                        "required": [
-                                            "source_theme_id",
-                                            "source_theme_label",
-                                            "largest_source_territories",
-                                            "territories_removed",
-                                            "source_result"
-                                        ]
-                                    }
-                                },
-                                "changed_targets": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "target_ref": {
-                                                "type": "string"
-                                            },
-                                            "target_type": {
-                                                "type": "string",
-                                                "enum": ["new_theme", "existing_theme"]
-                                            },
-                                            "target_theme_id": {
-                                                "type": ["integer", "null"]
-                                            },
-                                            "target_theme_label": {
-                                                "type": ["string", "null"]
-                                            },
-                                            "theme_kind": {
-                                                "type": "string",
-                                                "enum": [
-                                                    "substantive",
-                                                    "conflict",
-                                                    "other"
-                                                ]
-                                            },
-                                            "received_territories": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "source_theme_id": {
-                                                            "type": "integer"
-                                                        },
-                                                        "source_theme_label": {
-                                                            "type": "string"
-                                                        }
+                                        "territories_removed": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "territory": {
+                                                        "type": "string"
                                                     },
-                                                    "required": [
-                                                        "territory",
-                                                        "source_theme_id",
-                                                        "source_theme_label"
-                                                    ]
-                                                }
-                                            },
-                                            "resulting_scope": {
-                                                "type": "string"
-                                            },
-                                            "boundary_constraints": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "string"
-                                                }
+                                                    "destination_ref": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "territory",
+                                                    "destination_ref"
+                                                ]
                                             }
                                         },
-                                        "required": [
-                                            "target_ref",
-                                            "target_type",
-                                            "target_theme_id",
-                                            "target_theme_label",
-                                            "theme_kind",
-                                            "received_territories",
-                                            "resulting_scope",
-                                            "boundary_constraints"
-                                        ]
-                                    }
+                                        "source_result": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "action": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "retain_and_narrow",
+                                                        "dissolve_and_reallocate"
+                                                    ]
+                                                },
+                                                "resulting_scope": {
+                                                    "type": ["string", "null"]
+                                                },
+                                                "boundary_constraints": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            },
+                                            "required": [
+                                                "action",
+                                                "resulting_scope",
+                                                "boundary_constraints"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "source_theme_id",
+                                        "source_theme_label",
+                                        "largest_source_territories",
+                                        "territories_removed",
+                                        "source_result"
+                                    ]
                                 }
                             },
-                            "required": [
-                                "changed_by",
-                                "changed_sources",
-                                "changed_targets"
-                            ]
-                        }
-                    },
-                    "required": [
-                        "no_change",
-                        "schema_change_plan"
-                    ]
-                }
+                            "changed_targets": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "target_ref": {
+                                            "type": "string"
+                                        },
+                                        "target_type": {
+                                            "type": "string",
+                                            "enum": ["new_theme", "existing_theme"]
+                                        },
+                                        "target_theme_id": {
+                                            "type": ["integer", "null"]
+                                        },
+                                        "target_theme_label": {
+                                            "type": ["string", "null"]
+                                        },
+                                        "theme_kind": {
+                                            "type": "string",
+                                            "enum": [
+                                                "substantive",
+                                                "conflict",
+                                                "other"
+                                            ]
+                                        },
+                                        "received_territories": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "territory": {
+                                                        "type": "string"
+                                                    },
+                                                    "source_theme_id": {
+                                                        "type": "integer"
+                                                    },
+                                                    "source_theme_label": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "territory",
+                                                    "source_theme_id",
+                                                    "source_theme_label"
+                                                ]
+                                            }
+                                        },
+                                        "resulting_scope": {
+                                            "type": "string"
+                                        },
+                                        "boundary_constraints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "target_ref",
+                                        "target_type",
+                                        "target_theme_id",
+                                        "target_theme_label",
+                                        "theme_kind",
+                                        "received_territories",
+                                        "resulting_scope",
+                                        "boundary_constraints"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "changed_by",
+                            "changed_sources",
+                            "changed_targets"
+                        ]
+                    }
+                },
+                "required": [
+                    "no_change",
+                    "schema_change_plan"
+                ]
             }
         }
 
@@ -5857,12 +5854,11 @@ class Summarize:
             )
 
 
-        repair_plan = response.get("repair_plan", {
-            "theme_repairs": [],
-            "schema_repairs": []
-        })
+        no_change = response.get("no_change")
+        change_plan = response.get("schema_change_plan")
 
-        return repair_plan
+        return(no_change, change_plan)
+
 
     def _llm_apply_schema_repair_plan(self, sys_prompt, user_prompt):
         """
@@ -5975,6 +5971,7 @@ class Summarize:
         # Build the latest schema with the populated themes, word counts etc
         latest_populated_schema_df = (
             self.summary_state.theme_schema_list[-1]
+            .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
             # merge with populated themes to summaries
             .merge( 
                 self.summary_state.populated_theme_list[-1], 
@@ -5995,25 +5992,26 @@ class Summarize:
             .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
             )
 
-        breakpoint()
-
         # Loop over the schema by question to send each question schema as a json to the repair planner
         updated_schema_list = []
+        updated_repair_plan_list = []
 
-        for row, index in self.corpus_state.questions:
-            print(f"Repairing schema for question: {row} of {len(self.corpus_state.questions)}")
+        for index, row in self.corpus_state.questions.iterrows():
+            print(f"Repairing schema for question: {index + 1} of {len(self.corpus_state.questions)}")
             # Get the current question schema
-            current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row]
+            current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row["question_id"]]
             # Check whether any of its themes need repairs
             if not (current_populated_question_schema_df["status"] == "fail").any():
                 # If none need repairs, we skip and just append this to the updated schema and continue the loop
-                updated_schema_list.append(current_populated_question_schema_df)
+                current_populated_question_schema_df_clean = current_populated_question_schema_df.drop(columns = ["thematic_summary", "status", "word_count"])
+                updated_schema_list.append(current_populated_question_schema_df_clean)
                 continue
-            
+
             else:
+                print("Generating plan...")
                 # Otherwise we send for repairs
                 # Get the sys prompt
-                plan_sys_prompt =  Prompts().gen_theme_schema_repair_instructions()
+                plan_sys_prompt =  Prompts().gen_theme_schema_repair_plan()
                 
                 # Make the user prompt: 
                 # First convert the current schema to json to send to the LLM
@@ -6028,51 +6026,71 @@ class Summarize:
                     df["iteration"] = index + 1
                     schema_history_df_list.append(df)
 
-                schema_history_df = pd.concat(schema_history_df_list)
-                # Filter so we have the schema history just for this research question
-                schema_history_df_rq = schema_history_df_list.query("rq == row") #Check that these have the same format
-
-                schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
+                # Check that there is a history if so concat
+                if len(schema_history_df_list) > 0:
+                    schema_history_df = pd.concat(schema_history_df_list)
+                    # Filter so we have the schema history just for this research question
+                    schema_history_df_rq = schema_history_df[
+                        schema_history_df["research_question"] == row["question_id"]
+                    ]
+                    schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
+                
+                # if not use empty string
+                else:
+                    schema_history_json_string = ""
 
                 plan_user_prompt = (
-                    f"RESEARCH QUESTON:\n{row}\n\n"
+                    f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
                     f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
                     f"SCHEMA HISTORY:\n{schema_history_json_string}"
-
                 )
+                
                 # Get the repair plan from the LLM
-                repair_plan_json = self._llm_gen_schema_repair_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
+                no_change, repair_plan_json = self._llm_gen_schema_repair_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
+                # Make sure no change is not true. If it is something has gone wrong.
+                if no_change:
+                    raise ValueError(
+                        "Repair planner returned no change True. This is logic error in the pipeline. Repair planning should only recieve failing themes and should never return no_change = True.\n" 
+                        "The project is in a corrupted state. Check the latest schema for errors."
+                    )
+                
                 # Convert the repair plan to a df to eventually return
                 repair_plan_for_history_df = self._schema_change_plan_to_history_df(
-                    repair_plan_json,
+                    schema_change_plan = repair_plan_json,
                     iteration = len(self.summary_state.schema_repair_list) + 1,
-                    research_question = row
+                    research_question = row["question_id"]
                     )
+                
+                updated_repair_plan_list.append(repair_plan_for_history_df)
 
                 # Pass the repair plan to the repair implementer
+                print("Implementing plan...")
                 # Gen the prompts
-                implement_sys_prompt = Prompts.implement_schema_repairs()
+                implement_sys_prompt = Prompts().implement_schema_change_plan()
                 # User prompt 
                 implement_user_prompt = (
-                    f"RESEARCH QUESTON:\n{row}\n\n"
+                    f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
                     f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
                     f"REPAIR PLAN:\n{repair_plan_json}"
                 )
 
                 # Call the LLM
-                updated_question_schema_json = self._llm_apply_schema_repair_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
+                updated_question_schema_dict = self._llm_apply_schema_repair_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
                 # Convert the output to df 
-                updated_question_schema_df = updated_question_schema_json.json_dumps()
+                updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
+                updated_question_schema_df["question_id"] = row["question_id"]
+                updated_question_schema_df["theme_id"] = [(i + 1) for i in range(updated_question_schema_df.shape[0])]
                 # Append the df to the list
                 updated_schema_list.append(updated_question_schema_df)
 
-            # Concat the list of dfs to get a single df of the schema
-            updated_schema_df = pd.concat(updated_schema_list)
-            # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
-            return(updated_schema_df, repair_plan_for_history_df)
+        # Concat the list of dfs to get a single df of the schema
+        updated_schema_df = pd.concat(updated_schema_list, ignore_index=True)
+        updated_schema_df_sorted = updated_schema_df.sort_values(by =["question_id", "theme_id"])
 
-    
-
+        updated_repair_plan_df = pd.concat(updated_repair_plan_list)
+        updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
+        # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
+        return(updated_schema_df_sorted, updated_repair_plan_df)
 
     def _llm_gen_schema_optimization_plan(
         self,
@@ -6091,202 +6109,199 @@ class Summarize:
         fall_back = None
 
         json_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "schema_change_plan_response",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "no_change": {
-                            "type": "boolean"
-                        },
-                        "schema_change_plan": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "changed_by": {
-                                    "type": "string",
-                                    "enum": ["repair_plan", "optimize_plan"]
-                                },
-                                "changed_sources": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "source_theme_id": {
-                                                "type": "integer"
-                                            },
-                                            "source_theme_label": {
-                                                "type": "string"
-                                            },
-                                            "largest_source_territories": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "rank": {
-                                                            "type": "integer"
-                                                        },
-                                                        "action": {
-                                                            "type": "string",
-                                                            "enum": ["extract", "retain"]
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "territory",
-                                                        "rank",
-                                                        "action"
-                                                    ]
-                                                }
-                                            },
-                                            "territories_removed": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "destination_ref": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "required": [
-                                                        "territory",
-                                                        "destination_ref"
-                                                    ]
-                                                }
-                                            },
-                                            "source_result": {
+            "name": "schema_change_plan_response",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "no_change": {
+                        "type": "boolean"
+                    },
+                    "schema_change_plan": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "changed_by": {
+                                "type": "string",
+                                "enum": ["repair_plan", "optimize_plan"]
+                            },
+                            "changed_sources": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "source_theme_id": {
+                                            "type": "integer"
+                                        },
+                                        "source_theme_label": {
+                                            "type": "string"
+                                        },
+                                        "largest_source_territories": {
+                                            "type": "array",
+                                            "items": {
                                                 "type": "object",
                                                 "additionalProperties": False,
                                                 "properties": {
+                                                    "territory": {
+                                                        "type": "string"
+                                                    },
+                                                    "rank": {
+                                                        "type": "integer"
+                                                    },
                                                     "action": {
                                                         "type": "string",
-                                                        "enum": [
-                                                            "retain_and_narrow",
-                                                            "dissolve_and_reallocate"
-                                                        ]
-                                                    },
-                                                    "resulting_scope": {
-                                                        "type": ["string", "null"]
-                                                    },
-                                                    "boundary_constraints": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
+                                                        "enum": ["extract", "retain"]
                                                     }
                                                 },
                                                 "required": [
-                                                    "action",
-                                                    "resulting_scope",
-                                                    "boundary_constraints"
+                                                    "territory",
+                                                    "rank",
+                                                    "action"
                                                 ]
                                             }
                                         },
-                                        "required": [
-                                            "source_theme_id",
-                                            "source_theme_label",
-                                            "largest_source_territories",
-                                            "territories_removed",
-                                            "source_result"
-                                        ]
-                                    }
-                                },
-                                "changed_targets": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "target_ref": {
-                                                "type": "string"
-                                            },
-                                            "target_type": {
-                                                "type": "string",
-                                                "enum": ["new_theme", "existing_theme"]
-                                            },
-                                            "target_theme_id": {
-                                                "type": ["integer", "null"]
-                                            },
-                                            "target_theme_label": {
-                                                "type": ["string", "null"]
-                                            },
-                                            "theme_kind": {
-                                                "type": "string",
-                                                "enum": [
-                                                    "substantive",
-                                                    "conflict",
-                                                    "other"
-                                                ]
-                                            },
-                                            "received_territories": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {
-                                                        "territory": {
-                                                            "type": "string"
-                                                        },
-                                                        "source_theme_id": {
-                                                            "type": "integer"
-                                                        },
-                                                        "source_theme_label": {
-                                                            "type": "string"
-                                                        }
+                                        "territories_removed": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "territory": {
+                                                        "type": "string"
                                                     },
-                                                    "required": [
-                                                        "territory",
-                                                        "source_theme_id",
-                                                        "source_theme_label"
-                                                    ]
-                                                }
-                                            },
-                                            "resulting_scope": {
-                                                "type": "string"
-                                            },
-                                            "boundary_constraints": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "string"
-                                                }
+                                                    "destination_ref": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "territory",
+                                                    "destination_ref"
+                                                ]
                                             }
                                         },
-                                        "required": [
-                                            "target_ref",
-                                            "target_type",
-                                            "target_theme_id",
-                                            "target_theme_label",
-                                            "theme_kind",
-                                            "received_territories",
-                                            "resulting_scope",
-                                            "boundary_constraints"
-                                        ]
-                                    }
+                                        "source_result": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "action": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "retain_and_narrow",
+                                                        "dissolve_and_reallocate"
+                                                    ]
+                                                },
+                                                "resulting_scope": {
+                                                    "type": ["string", "null"]
+                                                },
+                                                "boundary_constraints": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            },
+                                            "required": [
+                                                "action",
+                                                "resulting_scope",
+                                                "boundary_constraints"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "source_theme_id",
+                                        "source_theme_label",
+                                        "largest_source_territories",
+                                        "territories_removed",
+                                        "source_result"
+                                    ]
                                 }
                             },
-                            "required": [
-                                "changed_by",
-                                "changed_sources",
-                                "changed_targets"
-                            ]
-                        }
-                    },
-                    "required": [
-                        "no_change",
-                        "schema_change_plan"
-                    ]
-                }
+                            "changed_targets": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "target_ref": {
+                                            "type": "string"
+                                        },
+                                        "target_type": {
+                                            "type": "string",
+                                            "enum": ["new_theme", "existing_theme"]
+                                        },
+                                        "target_theme_id": {
+                                            "type": ["integer", "null"]
+                                        },
+                                        "target_theme_label": {
+                                            "type": ["string", "null"]
+                                        },
+                                        "theme_kind": {
+                                            "type": "string",
+                                            "enum": [
+                                                "substantive",
+                                                "conflict",
+                                                "other"
+                                            ]
+                                        },
+                                        "received_territories": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "territory": {
+                                                        "type": "string"
+                                                    },
+                                                    "source_theme_id": {
+                                                        "type": "integer"
+                                                    },
+                                                    "source_theme_label": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "territory",
+                                                    "source_theme_id",
+                                                    "source_theme_label"
+                                                ]
+                                            }
+                                        },
+                                        "resulting_scope": {
+                                            "type": "string"
+                                        },
+                                        "boundary_constraints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "target_ref",
+                                        "target_type",
+                                        "target_theme_id",
+                                        "target_theme_label",
+                                        "theme_kind",
+                                        "received_territories",
+                                        "resulting_scope",
+                                        "boundary_constraints"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "changed_by",
+                            "changed_sources",
+                            "changed_targets"
+                        ]
+                    }
+                },
+                "required": [
+                    "no_change",
+                    "schema_change_plan"
+                ]
             }
         }
 

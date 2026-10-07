@@ -1,12 +1,13 @@
 import importlib
 
 def reload():
-    from readingmachine import core, utils, state, render, config
+    from readingmachine import core, utils, state, render, config, prompts
 
     importlib.reload(config)
     importlib.reload(utils)
     importlib.reload(state)
     importlib.reload(core)
+    importlib.reload(prompts)
 
     return(None)
 
@@ -316,10 +317,17 @@ summarize.summarize_clusters()
 # Theme generation
 # ----------------------------------------------------------
 
-# %%
-summarize._repair_schema()
-# %%
+##------------ TESTING
 
+old_schema = summarize.summary_state.theme_schema_list[-1]
+
+new_schema, repair_plan = summarize._repair_schema()
+
+old_schema.to_dict(orient="records")
+repair_plan.to_dict(orient="records")
+new_schema.to_dict(orient="records")
+
+##------------ \END TESTING
 
 # Generate an initial theme schema
 summarize.gen_theme_schema()

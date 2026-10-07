@@ -1448,6 +1448,9 @@ class Prompts:
             "If \"schema_has_failures = True\" for the most recent iteration, every failing coverage-bearing theme must be decomposed.\n"
             "Substantive themes and Other are coverage-bearing themes. Conflict is not a coverage-bearing theme because it is a reflective category for preserving disagreement rather than a guarantee of insight coverage.\n"
             "For each failing coverage-bearing theme, identify up to the five largest independently synthesizable claim-families by representational load currently assigned to that theme, ordered from largest to smallest.\n"
+            "Every entry in largest_source_territories must be independently synthesizable; do not list a territory unless it could function as a separate bounded synthesis region or be moved to an existing bounded synthesis region.\n"
+            "The action field does not judge whether a listed territory is independently synthesizable. It records the sequential repair decision: extract this already-separable territory, or retain it because enough higher-ranked territory has already been extracted for the source to pass.\n"
+            "Retaining a failing source theme with revised wording but no removed territory does not reduce representational load and is not a valid repair.\n\n"
 
             "By \"largest\", prioritize the claim-family that:\n"
             "1. accounts for the most distinct claims in the current summary and failed batch summaries;\n"
@@ -1455,9 +1458,14 @@ class Prompts:
             "3. can plausibly function as an independent bounded synthesis region;\n"
             "4. can plausibly be synthesized within bounded output constraints of 4096 tokens / approximately 2500 words.\n\n"
 
-            "Extract that claim-family from the failed source theme by assigning it to a new theme unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
-            "If extracting only the largest claim-family is unlikely to make the residual source theme pass, extract additional independently synthesizable claim-families until the residual is expected to pass or the source theme should be dissolved entirely.\n"
-            "If removing the largest claim-family leaves no coherent bounded residual, dissolve the source theme and reallocate all remaining content.\n\n"
+            "Repair extraction is sequential and load-driven.\n"
+            "For each failing source theme, begin with the rank 1 territory. Mark it action = \"extract\" and assign it to a new theme unless an existing theme has both clear conceptual fit and spare representational capacity.\n"
+            "Then evaluate whether the residual source theme is expected to pass bounded synthesis.\n"
+            "If the residual is still likely to fail, mark the rank 2 territory action = \"extract\" and assign it to a destination.\n"
+            "Continue in rank order until the residual source theme is expected to pass or until no coherent bounded residual remains.\n"
+            "Use action = \"retain\" only for ranked territories left in the source after enough higher-ranked territories have been extracted for the residual source to pass.\n"
+            "Do not skip a higher-ranked territory and extract a lower-ranked territory instead merely because the lower-ranked territory is conceptually cleaner, easier to name, or more elegant.\n"
+            "If extracting the ranked territories needed for viability leaves no coherent bounded residual, dissolve the source theme and reallocate its full conceptual territory.\n\n"
 
             "Overloaded \"Other\" themes should be handled the same way as substantive themes: extracting the largest coherent independently synthesizable conceptual territory into a new substantive theme or an existing theme with sufficient space. Continue until the residual Other theme is bounded-synthesis viable, or dissolve Other if no residual category remains necessary. There should remain, at most, only one \"Other\" theme.\n"
             "Do not use Conflict as a destination for repair extractions; repair must preserve coverage through substantive themes or Other.\n\n"
@@ -1485,6 +1493,18 @@ class Prompts:
             "When narrowing a failed theme, the plan must reduce its conceptual territory and identify boundaries that prevent extracted material from being assigned back in later iterations.\n"
             "Specify the conceptual result, not its final schema wording. Do not generate or revise labels, descriptions, organizing propositions, INCLUDE / EXCLUDE rules, or DETECTION TRIGGERS.\n"
             "Do not leave conceptual choices to the implementer. Every extraction, destination, retained source scope, changed target scope, dissolution, and required separation must be explicit in the plan.\n"
+            "Resulting scopes must be conceptually specific enough for the implementer to write theme_description, organizing_proposition, and assignment instructions without inventing conceptual content.\n"
+            "A resulting_scope must identify the mechanism, actor system, institutional site, causal logic, policy instrument, constraint type, residual category, or argumentative pattern that unifies the source or target.\n"
+            "Every resulting_scope must be exactly two sentences.\n"
+            "The first sentence must state what claims belong in the source or target by naming the conceptual unit and its scope of assignment.\n"
+            "The second sentence must state what distinguishes this scope from neighboring themes by naming the mechanism, institutional site, causal role, actor system, policy instrument, constraint type, or argumentative logic that separates it.\n"
+            "Do not write resulting_scope as a definition of the label, a label paraphrase, or a general purpose statement. Write it as implementation guidance: what belongs in the scope, what distinguishes it from neighboring scopes, and what must remain outside it.\n"
+            "For retained sources, resulting_scope must describe the residual conceptual logic after extraction, not merely list the territories that remain.\n"
+            "Retained source scopes must account for every ranked territory marked action = \"retain\".\n"
+            "If a retained territory does not fit the residual source scope, it must be extracted or the source must be dissolved.\n"
+            "For changed targets, resulting_scope must describe the complete conceptual territory the target will occupy after the move, including what kind of claims belong there and what nearby claims remain outside it.\n"
+            "Boundary constraints must identify specific neighboring conceptual territories and where they should be routed.\n"
+            "Do not use generic boundary constraints such as \"Exclude examples not related to this theme\" or simple inverses of the included scope.\n"
             "Do not make changes for schema elegance, stylistic consistency, or improved prose. Those are outside the planning task.\n\n"
             
             "## OUTPUT CONTRACT\n"
@@ -1579,9 +1599,15 @@ class Prompts:
             "- largest_source_territories must list up to the five largest load-bearing conceptual territories in that source theme, ordered from largest to smallest.\n"
             "- rank must begin at 1 and increase by 1 within each source theme.\n"
             "- Do not list minor examples, edge cases, citation-specific details, or low-load fragments merely to fill five slots.\n"
-            "- Each failing source theme must remove territory through territories_removed. If source_result.action = \"retain_and_narrow\", at least one listed territory must have action = \"extract\". If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the full source territory regardless of listed actions.\n"
+            "- Each failing source theme must remove territory through territories_removed.\n"
+            "- The rank 1 territory in each failing source theme must have action = \"extract\".\n"
+            "- If source_result.action = \"retain_and_narrow\", extract territories sequentially by rank until the residual source is expected to pass; only lower-ranked territories left after that point may have action = \"retain\".\n"
+            "- If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the full source territory, including residual territory not listed in largest_source_territories.\n"
+            "- A source theme with territories_removed = [] is invalid in repair planning.\n"
             "- Every territory with action = \"extract\" must appear in territories_removed.\n"
             "- If source_result.action = \"retain_and_narrow\", source_result.resulting_scope must describe the complete narrowed conceptual scope remaining after extraction.\n"
+            "- If source_result.action = \"retain_and_narrow\", source_result.resulting_scope must explicitly cover every largest_source_territories entry with action = \"retain\".\n"
+            "- Do not mark a territory action = \"retain\" unless it is represented in source_result.resulting_scope.\n"
             "- If source_result.action = \"retain_and_narrow\", source_result.boundary_constraints must exclude all extracted territory and route it to the correct changed target.\n"
             "- If source_result.action = \"dissolve_and_reallocate\", source_result.resulting_scope must be null.\n"
             "- If source_result.action = \"dissolve_and_reallocate\", territories_removed must account for the source theme's full conceptual territory, including residual territory not listed in largest_source_territories.\n"
@@ -1601,6 +1627,10 @@ class Prompts:
             "- Do not create or expand Conflict during repair planning.\n"
             "- Do not output final theme labels, descriptions, organizing propositions, INCLUDE / EXCLUDE prose, or DETECTION TRIGGERS for new or changed themes.\n"
             "- The plan must define the conceptual end state for every changed source and every changed target through resulting_scope and boundary_constraints.\n"
+            "- Every resulting_scope must be exactly two sentences and specific enough to guide implementation without additional conceptual inference.\n"
+            "- In every resulting_scope, sentence 1 must state what claims belong in the source or target, and sentence 2 must state what distinguishes it from neighboring themes.\n"
+            "- Retained source scopes must cover every territory marked action = \"retain\".\n"
+            "- Boundary constraints must be specific routing instructions, not generic exclusions.\n"
             "- Output only the JSON object.\n"
         )
 
@@ -2079,7 +2109,9 @@ class Prompts:
             "- use theme_kind to determine whether the new theme is substantive, Conflict, or Other;\n"
             "- write a concise and distinctive theme_label;\n"
             "- write a precise theme_description;\n"
-            "- write an organizing_proposition when appropriate;\n"
+            "- if theme_kind = \"substantive\", write a real organizing_proposition string that expresses the target's central conceptual relationship;\n"
+            "- if theme_kind = \"conflict\" or theme_kind = \"other\", set organizing_proposition to JSON null;\n"
+            "- never output the literal string \"null\" for organizing_proposition;\n"
             "- convert boundary_constraints into operational assignment instructions;\n"
             "- do not add conceptual territory beyond resulting_scope and received_territories.\n\n"
 
@@ -2141,7 +2173,9 @@ class Prompts:
             "Do not mention repair, optimization, synthesis failure, or planning evidence.\n\n"
 
             "Preserve the organizing_proposition of unchanged themes exactly.\n"
-            "For Conflict and Other, organizing_proposition must be null.\n\n"
+            "For every substantive retained, updated, or newly created theme, organizing_proposition must be a real string, not null.\n"
+            "Only themes labelled exactly \"Conflict\" or \"Other\" may have organizing_proposition set to JSON null.\n"
+            "Never output the literal string \"null\".\n\n"
 
             "## INCLUDE / EXCLUDE RULES\n"
             "All substantive themes and Other must use this structure:\n"
@@ -2150,7 +2184,8 @@ class Prompts:
             "EXCLUDE rules must:\n"
             "- implement the supplied boundary_constraints;\n"
             "- identify neighboring conceptual territories;\n"
-            "- route neighboring material to the appropriate named themes;\n"
+            "- route neighboring material to the exact resulting theme label;\n"
+            "- name the exact destination theme label rather than using vague phrases such as \"appropriate themes\", \"respective themes\", or \"corresponding themes\";\n"
             "- maintain the schema as a mutually constraining partition.\n\n"
 
             "Do not write generic exclusions.\n"
@@ -2159,6 +2194,10 @@ class Prompts:
             "Update instructions only for themes identified as changed sources or changed targets.\n"
             "Boundary-rule updates do not authorize changes to the underlying conceptual "
             "territory beyond those specified in the plan.\n\n"
+
+            "- For every retained source theme, its instructions must explicitly implement each source_result.boundary_constraints entry.\n"
+            "- For every territories_removed entry, the retained source instructions must EXCLUDE that territory and route it to the exact resulting theme label for its destination_ref.\n"
+            "- Existing exclusions may be preserved only if they do not replace or obscure the required exclusions from the plan.\n\n"
 
             "## CONFLICT\n"
             "If a changed target has theme_kind = \"conflict\", label that theme exactly \"Conflict\".\n"
@@ -2214,6 +2253,8 @@ class Prompts:
             "- Do not output explanations.\n"
             "- Do not output markdown.\n"
             "- Output only the resulting schema JSON.\n"
+            "- When updating instructions, rewrite the full instructions field as one coherent assignment rule rather than appending boundary constraints after an existing rule.\n"
+            "- The final instructions field must preserve the structure: \"INCLUDE if ...; EXCLUDE if ...\" for substantive themes and Other.\n"
         )
        
 
