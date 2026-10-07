@@ -6030,7 +6030,7 @@ class Summarize:
                 # Filter so we have the schema history just for this research question
                 schema_history_df_rq = schema_history_df_list.query("rq == row") #Check that these have the same format
 
-                schema_history_json_string = self._schema_history_to_json_string(schema_history_df)
+                schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
 
                 plan_user_prompt = (
                     f"RESEARCH QUESTON:\n{row}\n\n"
@@ -6051,7 +6051,12 @@ class Summarize:
                 # Gen the prompts
                 implement_sys_prompt = Prompts.implement_schema_repairs()
                 # User prompt 
-                implement_user_prompt = plan_user_prompt + "\n\n" + repair_plan_json
+                implement_user_prompt = (
+                    f"RESEARCH QUESTON:\n{row}\n\n"
+                    f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
+                    f"REPAIR PLAN:\n{repair_plan_json}"
+                )
+
                 # Call the LLM
                 updated_question_schema_json = self._llm_apply_schema_repair_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
                 # Convert the output to df 
