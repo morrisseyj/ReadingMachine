@@ -5974,10 +5974,10 @@ class Summarize:
 
         # Build the latest schema with the populated themes, word counts etc
         latest_populated_schema_df = (
-            self.theme_schema_list[-1]
+            self.summary_state.theme_schema_list[-1]
             # merge with populated themes to summaries
             .merge( 
-                self.populated_theme_list[-1], 
+                self.summary_state.populated_theme_list[-1], 
                 how = "left",
                 on = ["question_id", "theme_id"]
                 )
@@ -5994,6 +5994,8 @@ class Summarize:
             # Set word count to null for failing themes as we don't yet know thier conceptual capacity
             .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
             )
+
+        breakpoint()
 
         # Loop over the schema by question to send each question schema as a json to the repair planner
         updated_schema_list = []

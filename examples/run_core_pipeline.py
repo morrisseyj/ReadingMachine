@@ -285,6 +285,10 @@ cluster.generate_clusters({
 
 # The Summarize class performs the thematic synthesis pipeline.
 
+from readingmachine import state
+latest_corpus_state = state.CorpusState.load(filepath = r'c:\Users\jmorrissey\Documents\python_projects\ReadingMachine\data\runs\09_clusters')
+summarize = core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_client, ai_model="gpt-4o", paper_output_length=10000)
+
 
 summarize = core.Summarize(
     corpus_state=cluster.corpus_state,
@@ -311,6 +315,11 @@ summarize.summarize_clusters()
 # ----------------------------------------------------------
 # Theme generation
 # ----------------------------------------------------------
+
+# %%
+summarize._repair_schema()
+# %%
+
 
 # Generate an initial theme schema
 summarize.gen_theme_schema()
