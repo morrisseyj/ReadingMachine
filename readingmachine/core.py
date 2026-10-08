@@ -6044,8 +6044,6 @@ class Summarize:
 
         return plan_user_prompt
 
-
-
     def _repair_schema(self):
         """
         Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
@@ -6130,7 +6128,7 @@ class Summarize:
         updated_repair_plan_df = pd.concat(updated_repair_plan_list)
         updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
-        return(updated_schema_df_sorted, updated_repair_plan_df)
+        return updated_schema_df_sorted, updated_repair_plan_df 
 
 
     def _optimize_schema(self):
@@ -6251,7 +6249,7 @@ class Summarize:
                 "Your latest populated theme object (var.summary_state.populated_theme_list[-1]) is valid.\n"
                 "You should proceed to pass it to the optional redundancy handling pass and then to the rendering class."
             )
-            return None
+            return None, None
 
         updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
         updated_repair_plan_df = updated_repair_plan_df.sort_values(
@@ -6303,14 +6301,9 @@ class Summarize:
         schema_from_summaries = pd.concat(out_df_list)
         schema_from_summaries = schema_from_summaries.sort_values(by = ["question_id", "theme_id"])
 
-        return schema_from_summaries
+        schema_change_history = None
 
-        
-
-
-
-
-
+        return schema_from_summaries, schema_change_history
 
     
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
@@ -6320,276 +6313,26 @@ class Summarize:
         if source not in ["cluster summaries", "populated themes"]:
             raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
         
-        # initialize the primary dataframes for the two input branches:
+        # If the source is cluster summaries - just run from that
         if source == "cluster summaries":
-            schema_from_summaries = self._schema_from_cluster_summaries()
-            
+            new_schema, schema_change_history = self._schema_from_cluster_summaries()
         
-            
-
         else:
-            # If its not cluster summaries then its from orphans so first we prepare for schema repair
-            # First identify any viable and unviable schema
-            stable_schema = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"]]
-            unstable_schema = self.summary_state.theme_schema_list[-1][~self.summary_state.theme_schema_list[-1]["stable"]]
+            # Otherwise check for failing themes. If any fail, repair
+            has_failures = (
+                self.summary_state.populated_theme_list[-1]["thematic_summary"]
+                .str.contains("--- FAILED BATCH SUMMARIES ---", na=False)
+                .any()
+            )
+            if has_failures:
+                new_schema, schema_change_history = self._repair_schema()
+            else:
+                # If nothing is failing then send for optimization
+                new_schema, schema_change_history = self._optimize_schema()
+        
+        return new_schema, schema_change_history
+
             
-            for idx, row in self.corpus_state.questions.iterrows():
-                question_id = row["question_id"]
-                question_text = row["question_text"]
-           
-                # First check whether the question is unstable - if not we can skip and add to the output df as is, if it is unstable we need to send to the LLM for revision
-                unstable_schema_rq = unstable_schema[unstable_schema["question_id"] == question_id].copy()
-                if unstable_schema_rq.empty:
-                    stable_schema_rq = stable_schema[stable_schema["question_id"] == question_id].copy()
-                    stable_output_columns = [
-                        "theme_label",
-                        "theme_description",
-                        "organizing_proposition"
-                    ]
-
-                    stable_output_columns.extend(
-                        [
-                            "instructions",
-                            "question_id",
-                            "question_text",
-                            "stable",
-                            "needs_repair",
-                            "optimized",
-                        ]
-                    )
-
-                    out_df_list.append(stable_schema_rq[stable_output_columns])
-                    continue
-
-                else:
-                    # If its not stable we generate the full history of schema iterations for this question as this will be used in the repair plan and optimization prompts, and filtered for the last iteration in implement repair plan prompt
-                    print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
-                    
-                    # Generate the full history of the theme summaries and schema rules for this question so that i can pass it to the model
-                    full_history = []
-
-                    for i, (s, p) in enumerate(zip(self.summary_state.theme_schema_list, self.summary_state.populated_theme_list)):
-                        merged_schema_pop_df = (
-                            s[s["question_id"] == question_id]
-                            .merge(p[["thematic_summary", "theme_id", "question_id"]], 
-                                    how ="left", 
-                                    on=["question_id", "theme_id"])
-                            .assign(completeness_check=lambda x: x["thematic_summary"].apply(lambda y: "fail" if pd.notna(y) and "--- FAILED BATCH SUMMARIES ---" in y else "pass"))
-                            .assign(iteration=i)
-                            .assign(word_count=lambda x: x["thematic_summary"].str.split("--- FAILED BATCH SUMMARIES ---").str[0].str.split().str.len().fillna(0).astype(int))
-                            .assign(word_count=lambda x: np.where(x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---", na=False), None, x["word_count"]))
-                            .assign(schema_has_failures=lambda x: (x["completeness_check"] == "fail").any())
-                            .assign(is_current_iteration=lambda x: x["iteration"] == len(self.summary_state.theme_schema_list) - 1)
-                        )
-                        full_history.append(merged_schema_pop_df)
-
-                    full_history_df = pd.concat(full_history, ignore_index=True)
-
-                    # Avoid invalid JSON NaN values
-                    full_history_df = full_history_df.where(pd.notna(full_history_df), None)
-
-                    # Conditonally make the json based on whether we are passing the organizing proposition or not
-                    history_theme_columns = [
-                        "theme_id",
-                        "theme_label",
-                        "theme_description",
-                        "organizing_proposition"
-
-                    ]
-
-                    history_theme_columns.extend(
-                        [
-                            "instructions",
-                            "completeness_check",
-                            "word_count",
-                            "thematic_summary",
-                        ]
-                    )
-
-                    full_history_by_iteration_dict = {
-                        str(iteration): {
-                            "iteration": int(iteration),
-                            "is_current_iteration": bool(group["is_current_iteration"].iloc[0]),
-                            "schema_has_failures": bool(group["schema_has_failures"].iloc[0]),
-                            "themes": group[history_theme_columns].to_dict(orient="records"),
-                        }
-                        for iteration, group in full_history_df.sort_values(
-                            ["iteration", "theme_id"]
-                        ).groupby("iteration", sort=True)
-                    }
-
-                    # Now we route
-                    # 1. if the question needs repair it goes to the schema repair process
-                    # 2. if the question does not need repairs it goes to optimization
-
-                    # First check is the schema is stable for this question, if so move to next question
-                    needs_repair = unstable_schema_rq["needs_repair"].fillna(False).astype(bool).any()
-                    if needs_repair:
-                        print("Schema for this question has been marked as needing repairs based on the completeness check and word count signals. Running repair process...")
-
-                        # Generate the content for the repair plan prompt
-                        # Turn full history into json for the prompt
-                        full_history_json = json.dumps(
-                                full_history_by_iteration_dict,
-                                ensure_ascii=False,
-                                indent=2,
-                                allow_nan=False,
-                            )
-                            
-                        # generate the repair instructions for this schema
-                        user_prompt_gen_repair = (
-                            f"RESEARCH QUESTION: {question_text}\n\n"
-                            "-------------------------------------------------------------\n\n"
-                            "HISTORIC EFFORTS AT SCHEMA DEVELOPMENT:\n"
-                            f"{full_history_json}\n\n"
-                            "-------------------------------------------------------------\n\n"
-                        )
-
-                        sys_prompt_gen_repair = Prompts().gen_theme_schema_repair_instructions()
-
-                        # Get the repair plan
-                        repair_plan = self._llm_gen_schema_repair_plan(user_prompt_gen_repair, sys_prompt_gen_repair)
-
-                        if repair_plan.get("theme_repairs") == [] and repair_plan.get("schema_repairs") == []:
-                            print("LLM did not propose any repairs for this question. Reusing old schema and marking as unstable, not optimized and needs repair.")
-                            themes_df = unstable_schema_rq.copy()
-                            themes_df["stable"] = False # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable now
-                            themes_df["needs_repair"] = True # Assuming error so repair did not happen therefor needs repair stays True
-                            themes_df["optimized"] = False # If there are no repairs then they have not been optimized 
-                            themes_df["schema_produced_by"] = "repair"
-                            themes_df["question_id"] = question_id
-                            themes_df["question_text"] = question_text
-                            # Append to the out_df_list
-                            out_df_list.append(themes_df)
-                            continue
-
-                        # Assign the repair plans as attributes so that i can see what they are proposing for debugging
-                        theme_repairs = repair_plan.get("theme_repairs", [])
-                        schema_repairs = repair_plan.get("schema_repairs", [])
-                        theme_repairs_df = pd.DataFrame(theme_repairs)
-                        schema_repairs_df = pd.DataFrame(schema_repairs)
-                        theme_repairs_df["question_id"] = question_id
-                        schema_repairs_df["question_id"] = question_id
-                        self.last_schema_repair_theme_repairs.append(theme_repairs_df)
-                        self.last_schema_repair_schema_repairs.append(schema_repairs_df)
-
-                        # Now implement the plan
-                        print("Implementing repair plan...")
-                        # get the repair plan as json for the LLM
-                        repair_plan_json = json.dumps(repair_plan, indent=2, ensure_ascii=False)
-
-                        # We send the implement repair prompt the latest schema iteraton with all the information so get the last iteration
-                        last_iteration = full_history_df["iteration"].max()
-                        full_history_last_iteration = full_history_by_iteration_dict[str(last_iteration)]
-                        # Convert full_history_last_iteration to json for the prompt
-                        full_history_last_iteration_json = json.dumps(
-                            full_history_last_iteration,
-                                ensure_ascii=False,
-                                indent=2,
-                                allow_nan=False,
-                        )
-
-                        # Create all the prompts
-                        user_prompt = (
-                            f"RESEARCH QUESTION: {question_text}\n\n"
-                            "-------------------------------------------------------------\n\n"
-                            "CURRENT UNSTABLE SCHEMA:\n"
-                            f"{full_history_last_iteration_json}\n\n"
-                            "-------------------------------------------------------------\n\n"
-                            "REPAIR PLAN:\n"
-                            f"{repair_plan_json}\n\n"
-                        )
-                        # Then the sys prompt
-                        sys_prompt = Prompts().implement_schema_repairs()
-
-                        # Get the repaired themes from the LLM
-                        theme_list = self._llm_apply_schema_repair_plan(
-                            unstable_schema_rq=unstable_schema_rq, 
-                            sys_prompt=sys_prompt, 
-                            user_prompt=user_prompt
-                            )
-                        # Convert the repaired theme list to a dataframe
-                        themes_df = pd.DataFrame(theme_list)
-                        # Set the needs_repair flag to false for all themes in this question as the model has undertaken repairs and therefore they are not viable yet - vability will be set for this update after orphan insertion
-                        themes_df["needs_repair"] = pd.NA # We dont know whether they are viable or not until we test them so set to NA for now
-                        themes_df["optimized"] = False # If there are repairs then they have not been optimized 
-                        themes_df["stable"] = False # If they are not optimized they are not stable
-
-                        # Now add the metadata back in for the themes for this question - covering both now stable and unstable themes
-                        themes_df["question_id"] = question_id
-                        themes_df["question_text"] = question_text
-                        themes_df["schema_produced_by"] = "repair"
-                        
-                        # Append to the final list
-                        out_df_list.append(themes_df)
-
-                    else: # now checking if it does not need repairs, and it was not stable it must need optimizing
-                        print("Schema for this question does not need repairs, sending for optimization...")
-                        # generate the user prompt for schema optimization
-                        # First get the full history
-                        full_history_json = json.dumps(
-                                full_history_by_iteration_dict,
-                                ensure_ascii=False,
-                                indent=2,
-                                allow_nan=False,
-                            )
-                        
-                        user_prompt = (
-                            f"RESEARCH QUESTION: {question_text}\n\n"
-                            f"SCHEMA HISTORY: {full_history_json}\n\n"
-                        )
-
-                        sys_prompt = Prompts().gen_theme_schema_optimize()
-
-                        optimized_schema = self._llm_apply_schema_optimization(sys_prompt=sys_prompt, user_prompt=user_prompt)
-
-                        if optimized_schema == "no change": # If we get back no change we need to set to stable, and use the existing schema for this question
-                            print("No changes proposed by optimizer. Marking schema as stable for this question.")
-                            themes_df = unstable_schema_rq.copy()
-                            themes_df["stable"] = True # Set the stable flag to true for all themes in this question as the model has indicated that there is no need to change the schema and therefore they are stable now
-                            themes_df["optimized"] = True # If there is no change then they are optimized and therefore stable
-                            themes_df["schema_produced_by"] = "optimizer_no_change"
-                            themes_df["question_id"] = question_id
-                            themes_df["question_text"] = question_text
-                            # Append to the out_df_list
-                            out_df_list.append(themes_df)
-                            # Increment the no change count
-                            no_change_count += 1
-                            # Check if no change count equals the total number of research questions, if so end the stabilization iterations
-                            if no_change_count == self.corpus_state.questions.shape[0]:
-                                print(
-                                    "This iteration has not made any changes to the schema for any of the research questions.\n"
-                                    "This means there are no errors in your populated themes and no obvious optimiaztion options for the schema to improve the mapping of insights to themes.\n"
-                                    "You should consider iterations done.\n"
-                                    "The final populated theme list is available in `self.summary_state.populated_theme_list[-1]`.\n"
-                                    "You should move to redundancy handling/rendering."
-                                )
-                                return(None)
-                        else:
-                            themes = optimized_schema
-                            themes_df = pd.DataFrame(themes)
-                            themes_df["optimized"] = False # Set the optimized flag to false for all themes in this question as the model has undertaken optimizations and these need to be tested
-                            themes_df["stable"] = False # Set the stable flag to false for all themes in this question as the model has undertaken optimizations and therefore we need to test wh
-                            themes_df["needs_repair"] = pd.NA # We dont know whether they need repairs or not until we test them so set to NA for now
-                            themes_df["schema_produced_by"] = "optimizer_change"
-                            themes_df["question_id"] = question_id
-                            themes_df["question_text"] = question_text
-                            # Append to the out_df_list
-                            out_df_list.append(themes_df)
-
-        # Now we have to concat the repaired/optimized/stable themes 
-        # Concat all the questions
-        output = pd.concat(out_df_list, ignore_index=True, sort=False)
-        # We want to sort the themes by questions and the order they came in. So first we add a theme id
-        output["theme_id"] = [i + 1 for i in range(len(output))]
-        # Sort the output
-        output = output.sort_values(by=["question_id", "theme_id"], ignore_index=True)
-        # Then we re-sort so that they run from theme 1 up, and are global
-        # NOTE THIS IS A CENTRAL CONDITION. FOR THIS REASON THERE IS A FLAGGING FUNCTION AT LOAD AND SAVE WHICH COMPLAINS TO THE USER IF SOME CHANGE TO THE CODE HAS RESULTED IN theme_id NOT BEING AN INT.       
-        output["theme_id"] = [i + 1 for i in range(len(output))]
-        #Drop the columns that i added to schema for the LLM to use but don't want otherwise subsequent processing will generate column name conflicts _y, and _x
-        output = output.drop(columns=["thematic_summary", "completeness_check", "word_count"], errors="ignore")
-        return(output)
 
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
         """
