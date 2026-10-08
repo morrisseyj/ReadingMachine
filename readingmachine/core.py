@@ -5874,7 +5874,7 @@ class Summarize:
         return(no_change, schema_change_plan)
 
 
-    def _llm_apply_schema_repair_plan(self, sys_prompt, user_prompt):
+    def _llm_apply_schema_change_plan(self, sys_prompt, user_prompt):
         """
         Apply a schema-repair plan to an unstable question-specific schema.
 
@@ -6089,7 +6089,7 @@ class Summarize:
                 )
 
                 # Call the LLM
-                updated_question_schema_dict = self._llm_apply_schema_repair_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
+                updated_question_schema_dict = self._llm_apply_schema_change_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
                 # Convert the output to df 
                 updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
                 updated_question_schema_df["question_id"] = row["question_id"]
@@ -6107,82 +6107,32 @@ class Summarize:
         return(updated_schema_df_sorted, updated_repair_plan_df)
 
 
-    def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
-        """
-        Apply a validated optimization plan to a repaired theme schema.
-
-        Returns the complete rewritten theme schema without performing additional
-        optimization analysis.
-        """
-        # Json for structured output
-        json_schema = {
-            "name": "theme_schema_change_implementer",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "themes": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "theme_label": {
-                                    "type": "string"
-                                },
-                                "theme_description": {
-                                    "type": "string"
-                                },
-                                "organizing_proposition": {
-                                    "type": ["string", "null"]
-                                },
-                                "instructions": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "theme_label",
-                                "theme_description",
-                                "organizing_proposition",
-                                "instructions"
-                            ],
-                            "additionalProperties": False
-                        }
-                    }
-                },
-                "required": [
-                    "themes"
-                ],
-                "additionalProperties": False
-            }
-        }
-
-        # Call the response
-        response, error = utils.call_chat_completion(
-            sys_prompt=sys_prompt,
-            user_prompt=user_prompt,
-            llm_client=self.llm_client,
-            ai_model=self.ai_model,
-            fall_back=None,
-            return_json=True,
-            json_schema=json_schema,
-            return_with_error=True,
-        )
-
-        if response is None: # i.e. is fall_back
-            raise ValueError(
-                "Schema optimization implementation returned an empty response. "
-                f"Error: {error}"
-            )
-
-        optimized_schema = response["themes"]
-
-        return optimized_schema
-
-
     def _optimize_schema(self):
         """
         """
+        # Build the latest schema with the populated themes, word counts etc
+        latest_populated_schema_df = (
+            self.summary_state.theme_schema_list[-1]
+            .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
+            # merge with populated themes to summaries
+            .merge( 
+                self.summary_state.populated_theme_list[-1], 
+                how = "left",
+                on = ["question_id", "theme_id"]
+                )
+            .assign(
+                # Identify pass/fail themes based on failed batch summaries
+                status = lambda x: np.where(
+                    x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---"),
+                    "fail", 
+                    "pass"
+                    )
+                )
+            # Calculate word count for all summaries
+            .assign(word_count = lambda x: x["thematic_summary"].str.split().str.len().fillna(0).astype(int))
+            # Set word count to null for failing themes as we don't yet know thier conceptual capacity
+            .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
+            )
 
 
 
