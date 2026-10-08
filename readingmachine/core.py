@@ -6133,331 +6133,199 @@ class Summarize:
         return(updated_schema_df_sorted, updated_repair_plan_df)
 
 
-
     def _optimize_schema(self):
         """
         docstring
         """
+
         # Build the latest schema with the populated themes, word counts etc
         latest_populated_schema_df = self._build_populated_schema_for_planning()
 
-        # Loop over the schema by question to send each question schema as a json to the repair planner
         updated_schema_list = []
         updated_optimize_plan_list = []
 
         for index, row in self.corpus_state.questions.iterrows():
             print(f"Optimizing schema for question: {index + 1} of {len(self.corpus_state.questions)}")
-            # Get the current question schema
-            current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row["question_id"]]
-            
-            # Generate the plan
-            print("Generating plan...")
-            # Get the sys prompt
-            plan_sys_prompt =  Prompts().gen_theme_schema_optimize_plan()
 
-            # Make the user prompt
-            plan_user_prompt = self._gen_user_prompt_for_schema_change_planning(current_populated_question_schema_df, index, row)
-            
-            # Get the optimize plan from the LLM
-            no_change, optimize_plan_json = self._llm_gen_schema_change_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
-            # If no_change exit the optmize process and print a message for the user letting them know to proceed
+            question_id = row["question_id"]
+
+            # Get the current question schema
+            current_populated_question_schema_df = latest_populated_schema_df[
+                latest_populated_schema_df["question_id"] == question_id
+            ]
+
+            # Strip populated-summary fields before appending anything back to schema state
+            current_question_schema_df = (
+                current_populated_question_schema_df
+                .drop(columns=["thematic_summary", "status", "word_count"], errors="ignore")
+                .copy()
+            )
+
+            # Optimizer clearance is question-schema level. If already cleared, carry forward unchanged.
+            optimizer_clear = (
+                "optimizer_clear" in current_question_schema_df.columns
+                and current_question_schema_df["optimizer_clear"].fillna(False).astype(bool).any()
+            )
+
+            if optimizer_clear:
+                updated_schema_list.append(current_question_schema_df)
+                continue
+
+            # Otherwise the question is repair-passing but not optimizer-cleared, so optimize.
+            print("Generating plan...")
+
+            plan_sys_prompt = Prompts().gen_theme_schema_optimize_plan()
+
+            plan_user_prompt = self._gen_user_prompt_for_schema_change_planning(
+                current_populated_question_schema_df,
+                index,
+                row,
+            )
+
+            no_change, optimize_plan_json = self._llm_gen_schema_change_plan(
+                sys_prompt=plan_sys_prompt,
+                user_prompt=plan_user_prompt,
+            )
+
             if no_change:
-                print(
-                    "The optimizer returned that the latest schema does not offer obvious opportunities for improvement.\n\n"
-                    "Your last populated theme produced by orphan reinsertion (.summary_state.populated_theme_list[-1]) is your valid thematic output.\n\n"
-                    "Proceed to optional redundancy removal and then to rendering."
-                )
-                return
-            
-            # Convert the optimize plan to a df to eventually return 
+                current_question_schema_df["optimizer_clear"] = True
+                updated_schema_list.append(current_question_schema_df)
+                continue
+
+            # Otherwise, scrape the plan to store it in state and implement it.
             optimize_plan_for_history_df = self._schema_change_plan_to_history_df(
-                schema_change_plan = optimize_plan_json,
-                iteration = len(self.summary_state.schema_repair_list) + 1,
-                research_question = row["question_id"]
-                )
-            
+                schema_change_plan=optimize_plan_json,
+                iteration=len(self.summary_state.schema_repair_list) + 1,
+                research_question=question_id,
+            )
+
             updated_optimize_plan_list.append(optimize_plan_for_history_df)
 
-            # Pass the optimize plan to the change implementer
             print("Implementing plan...")
-            # Gen the prompts
+
             implement_sys_prompt = Prompts().implement_schema_change_plan()
-            # User prompt 
-            # Generate the json of the latest schema and summaries
+
             current_populated_question_schema_json = current_populated_question_schema_df.to_json(
-                    orient="records",
-                    force_ascii=False,
-                    indent=2,
-                )
+                orient="records",
+                force_ascii=False,
+                indent=2,
+            )
+
             implement_user_prompt = (
                 f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
                 f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
-                f"REPAIR PLAN:\n{optimize_plan_json}"
+                f"SCHEMA CHANGE PLAN:\n{optimize_plan_json}"
             )
 
-            # Call the LLM
-            updated_question_schema_dict = self._llm_apply_schema_change_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
-            # Convert the output to df 
+            updated_question_schema_dict = self._llm_apply_schema_change_plan(
+                sys_prompt=implement_sys_prompt,
+                user_prompt=implement_user_prompt,
+            )
+
             updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
-            updated_question_schema_df["question_id"] = row["question_id"]
-            updated_question_schema_df["theme_id"] = [(i + 1) for i in range(updated_question_schema_df.shape[0])]
-            # Append the df to the list
+            updated_question_schema_df["question_id"] = question_id
+            updated_question_schema_df["question_text"] = row["question_text"]
+            updated_question_schema_df["theme_id"] = [
+                i + 1 for i in range(updated_question_schema_df.shape[0])
+            ]
+            updated_question_schema_df["optimizer_clear"] = False
+
             updated_schema_list.append(updated_question_schema_df)
 
-        # Concat the list of dfs to get a single df of the schema
         updated_schema_df = pd.concat(updated_schema_list, ignore_index=True)
-        updated_schema_df_sorted = updated_schema_df.sort_values(by =["question_id", "theme_id"])
+        updated_schema_df_sorted = updated_schema_df.sort_values(
+            by=["question_id", "theme_id"]
+        )
+
+        all_optimizer_clear = (
+            updated_schema_df_sorted
+            .groupby("question_id")["optimizer_clear"]
+            .any()
+            .reindex(self.corpus_state.questions["question_id"], fill_value=False)
+            .all()
+        )
+
+        if all_optimizer_clear:
+            print(
+                "The optimizer has indicated that the schemas for all research questions do not contain obvious opportunities for improvement.\n"
+                "Your latest populated theme object (var.summary_state.populated_theme_list[-1]) is valid.\n"
+                "You should proceed to pass it to the optional redundancy handling pass and then to the rendering class."
+            )
+            return None
 
         updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
-        updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
-        # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
+        updated_repair_plan_df = updated_repair_plan_df.sort_values(
+            by=["research_question", "source_theme_id"]
+        )
+
         return updated_schema_df_sorted, updated_repair_plan_df
 
 
-    def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
+    def _schema_from_cluster_summaries(self):
         """
-        Generate, repair, optimize, and stabilize a thematic schema.
-
-        This method is the central schema-generation and schema-refinement
-        orchestrator within the ReadingMachine synthesis workflow. It is used both
-        for initial theme-schema generation and for subsequent schema revisions
-        triggered by theme-population diagnostics.
-
-        Two operating modes are supported:
-
-            "cluster summaries"
-                Generates an initial theme schema from the cluster-summary
-                narrative produced during cluster summarization.
-
-            "populated themes"
-                Revises an existing schema using evidence generated during
-                theme population, completeness checking, orphan handling,
-                and schema evaluation.
-
-        Initial Schema Generation
-        -------------------------
-        When operating on cluster summaries, the method generates an initial
-        theme schema independently for each research question.
-
-        For each question:
-
-            cluster summaries
-                ↓
-            LLM schema generation
-                ↓
-            initial theme schema
-
-        The generated schema consists of:
-
-            - theme labels
-            - theme descriptions
-            - mapping instructions
-
-        All generated themes are marked as:
-
-            stable = False
-            optimized = False
-            needs_repair = True
-
-        because they have not yet undergone empirical testing through the
-        mapping and population stages.
-
-        Schema Refinement
-        -----------------
-        When operating on populated themes, the method performs iterative
-        schema stabilization.
-
-        Questions are divided into:
-
-            stable schemas
-            unstable schemas
-
-        Stable schemas are carried forward unchanged.
-
-        Only unstable schemas are processed further.
-
-        For each unstable question, one of two pathways is followed:
-
-        1. Schema Repair
-        ----------------
-        If the schema has been flagged as requiring repair
-        (`needs_repair == True`):
-
-            schema history
-                ↓
-            repair-plan generation
-                ↓
-            repair-plan implementation
-                ↓
-            revised schema
-
-        The repair workflow uses:
-
-            - previous schema iterations
-            - completeness-check failures
-            - failed summary batches
-            - representational overload signals
-
-        to identify concepts that should be:
-
-            - extracted into new themes
-            - reassigned to existing themes
-            - used to redefine theme boundaries
-
-        2. Schema Optimization
-        ----------------------
-        If the schema does not require repair:
-
-            schema history
-                ↓
-            optimization review
-                ↓
-            optimized schema
-
-        The optimizer may either:
-
-            - propose schema improvements
-            - indicate that no further changes are required
-
-        Schemas receiving a "no change" decision are marked as stable and are
-        excluded from future refinement iterations.
-
-        Convergence Logic
-        -----------------
-        Schema stabilization is tracked at the research-question level.
-
-        A question is considered converged when the optimizer indicates that no
-        further modifications are necessary.
-
-        When all research questions are stable, the method terminates and returns
-        `None`, signalling that schema development has converged and that
-        downstream synthesis can proceed directly to redundancy handling and
-        rendering.
-
-        Parameters
-        ----------
-        source : str
-            Source representation used to generate or refine the schema.
-
-            Must be one of:
-
-            - `"cluster summaries"`
-            - `"populated themes"`
-
-        Returns
-        -------
-        pd.DataFrame or None
-            Updated theme schema containing:
-
-            - `theme_id`
-            - `theme_label`
-            - `theme_description`
-            - `instructions`
-            - `question_id`
-            - `question_text`
-            - `needs_repair`
-            - `optimized`
-            - `stable`
-            - `schema_produced_by`
-
-            Returns `None` when all research questions have reached schema
-            stability.
-
-        Side Effects
-        ------------
-        Mutates:
-
-        - `self.last_schema_repair_theme_repairs`
-        - `self.last_schema_repair_schema_repairs`
-
-        Reads from:
-
-        - `self.summary_state.cluster_summary_list`
-        - `self.summary_state.theme_schema_list`
-        - `self.summary_state.populated_theme_list`
-
-        Uses and updates schema-state metadata including:
-
-        - `stable`
-        - `optimized`
-        - `needs_repair`
-
-        Notes
-        -----
-        Theme IDs are regenerated on every schema iteration to maintain a
-        contiguous global numbering scheme.
-
-        Schema repair and schema optimization are intentionally separated into
-        distinct LLM operations. Repair addresses representational failures and
-        coverage problems, while optimization focuses on improving thematic
-        coherence once representational adequacy has been established.
-
-        This method does not persist the generated schema directly. Persistence
-        is handled by the higher-level schema-generation workflow that appends
-        the resulting DataFrame to `SummaryState.theme_schema_list`.
-
-        The method assumes that stability is evaluated at the research-question
-        level and that all themes belonging to a question share the same
-        stability status during a given iteration.
+        doc string
         """
-        if source not in ["cluster summaries", "populated themes"]:
-            raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
         
-        #update the theme_schema_list with values from populated themes so that they are avialble here for conditional flow
-        if source == "populated themes" and self.summary_state.populated_theme_list:
-            status_cols = ["needs_repair", "optimized", "stable"]
-
-            self.summary_state.theme_schema_list[-1] = (
-                self.summary_state.theme_schema_list[-1]
-                .drop(columns=status_cols, errors="ignore") # Drop these in case they were created in a partial pass previously and will result in name dediup x_, y_ upon merge
-                .merge(
-                    self.summary_state.populated_theme_list[-1][
-                        ["theme_label", "question_id"] + status_cols
-                    ],
-                    how="left",
-                    on=["question_id", "theme_label"]
-                )
-            )
-
         out_df_list = []
-        self.last_schema_repair_theme_repairs = []
-        self.last_schema_repair_schema_repairs = [] 
-        no_change_count = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].nunique() if self.summary_state.theme_schema_list else 0
-        
-        # initialize the primary dataframes for the two input branches:
-        if source == "cluster summaries":
-            # Grab data from summaries
-            source_df = self.summary_state.cluster_summary_list[0].copy()
-            stable_schema = None
-            for idx, row in self.corpus_state.questions.iterrows():
-                print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
-                question_id = row["question_id"]
-                question_text = row["question_text"]
 
-                # Use source df and get the clusters for this rq
-                rq_df = source_df[source_df["question_id"] == question_id].copy()
-                summary = "\n\n".join(rq_df["summary"].tolist())
+        # Simply iterate over the clusters by question and pass the summaries to the LLM
+        for idx, row in self.corpus_state.questions.iterrows():
+            print(f"Generating theme schema for question {row['question_id']} (total: {idx + 1} of {len(self.corpus_state.questions)})...")
+            question_id = row["question_id"]
+            question_text = row["question_text"]
 
-                # Generate user and sys prompt
-                user_prompt = (
+            # Access the cluster summaries
+            cluster_summary_rq_df = self.summary_state.cluster_summary_list[0][self.summary_state.cluster_summary_list[0]["question_id"] == question_id].copy()
+            summary = "\n\n".join(cluster_summary_rq_df["summary"].tolist())
+
+            # Create the user prompt
+            user_prompt = (
                     f"Research Question: {question_text}\n"
                     "TEXT TO ANALYZE:\n"
                     f"{summary}\n"
                 )
-                sys_prompt = Prompts().gen_theme_schema_cluster_source()
-                # Get the initial schema for this question from the LLM
-
-                theme_list = self._llm_gen_initial_schema(user_prompt, sys_prompt)
-                themes_df = pd.DataFrame(theme_list)
+            # Load the sys prompt
+            sys_prompt = Prompts().gen_theme_schema_cluster_source()
             
-                # Add the metadata back to the results
-                themes_df["needs_repair"] = True
-                themes_df[["optimized", "stable"]] = False # These are generated from the cluster summaries so that need to be checked for repairs and are not optimized or stable yet           
-                themes_df["question_id"] = question_id
-                themes_df["question_text"] = question_text
-                themes_df["schema_produced_by"] = "initial_cluster_schema"
+            # Get the initial schema for this question from the LLM
+            theme_list = self._llm_gen_initial_schema(user_prompt, sys_prompt)
+            themes_df = pd.DataFrame(theme_list)
+            
+            # Add metadata back in
+            themes_df["question_id"] = question_id
+            themes_df["question_text"] = question_text
+            themes_df["theme_id"] = [i + 1 for i in range(themes_df.shape[0])]
+            themes_df["optimizer_clear"] = False # This is false because optimizaition only happens on the second pass
+            themes_df["schema_produced_by"] = "initial_cluster_schema"
 
-                out_df_list.append(themes_df)
+            out_df_list.append(themes_df)
+        
+        schema_from_summaries = pd.concat(out_df_list)
+        schema_from_summaries = schema_from_summaries.sort_values(by = ["question_id", "theme_id"])
+
+        return schema_from_summaries
+
+        
+
+
+
+
+
+
+    
+    def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
+        """
+        doctring
+        """
+        if source not in ["cluster summaries", "populated themes"]:
+            raise ValueError("Invalid source for theme schema generation. Source must be either 'cluster summaries' or 'populated themes'.")
+        
+        # initialize the primary dataframes for the two input branches:
+        if source == "cluster summaries":
+            schema_from_summaries = self._schema_from_cluster_summaries()
+            
+        
+            
 
         else:
             # If its not cluster summaries then its from orphans so first we prepare for schema repair
