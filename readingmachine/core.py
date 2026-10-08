@@ -5977,12 +5977,10 @@ class Summarize:
         return themes
 
 
-    def _repair_schema(self):
+    def _build_populated_schema_for_planning(self):
         """
-        Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
         """
 
-        # Build the latest schema with the populated themes, word counts etc
         latest_populated_schema_df = (
             self.summary_state.theme_schema_list[-1]
             .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
@@ -6006,6 +6004,56 @@ class Summarize:
             .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
             )
 
+        return(latest_populated_schema_df)
+
+    def _gen_user_prompt_for_schema_change_planning(self, current_populated_question_schema_df, index, row):
+        """
+        docstring
+        """
+
+        # First convert the current schema to json to send to the LLM
+        current_populated_question_schema_json = current_populated_question_schema_df.to_json(
+            orient="records",
+            force_ascii=False,
+            indent=2,
+        )
+        # Get the schema history
+        schema_history_df_list = []
+        for ix, df in enumerate(self.summary_state.schema_repair_list):
+            df["iteration"] = ix + 1
+            schema_history_df_list.append(df)
+
+        # Check that there is a history if so concat
+        if len(schema_history_df_list) > 0:
+            schema_history_df = pd.concat(schema_history_df_list)
+            # Filter so we have the schema history just for this research question
+            schema_history_df_rq = schema_history_df[
+                schema_history_df["research_question"] == row["question_id"]
+            ]
+            schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
+        
+        # if not use empty string
+        else:
+            schema_history_json_string = ""
+
+        plan_user_prompt = (
+            f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
+            f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
+            f"SCHEMA HISTORY:\n{schema_history_json_string}"
+        )
+
+        return plan_user_prompt
+
+
+
+    def _repair_schema(self):
+        """
+        Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
+        """
+
+        # Build the latest schema with the populated themes, word counts etc
+        latest_populated_schema_df = self._build_populated_schema_for_planning()
+        
         # Loop over the schema by question to send each question schema as a json to the repair planner
         updated_schema_list = []
         updated_repair_plan_list = []
@@ -6028,37 +6076,8 @@ class Summarize:
                 plan_sys_prompt =  Prompts().gen_theme_schema_repair_plan()
                 
                 # Make the user prompt: 
-                # First convert the current schema to json to send to the LLM
-                current_populated_question_schema_json = current_populated_question_schema_df.to_json(
-                    orient="records",
-                    force_ascii=False,
-                    indent=2,
-                )
-                # Get the schema history
-                schema_history_df_list = []
-                for index, df in enumerate(self.summary_state.schema_repair_list):
-                    df["iteration"] = index + 1
-                    schema_history_df_list.append(df)
+                plan_user_prompt = self._gen_user_prompt_for_schema_change_planning(current_populated_question_schema_df, index, row)
 
-                # Check that there is a history if so concat
-                if len(schema_history_df_list) > 0:
-                    schema_history_df = pd.concat(schema_history_df_list)
-                    # Filter so we have the schema history just for this research question
-                    schema_history_df_rq = schema_history_df[
-                        schema_history_df["research_question"] == row["question_id"]
-                    ]
-                    schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
-                
-                # if not use empty string
-                else:
-                    schema_history_json_string = ""
-
-                plan_user_prompt = (
-                    f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
-                    f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
-                    f"SCHEMA HISTORY:\n{schema_history_json_string}"
-                )
-                
                 # Get the repair plan from the LLM
                 no_change, repair_plan_json = self._llm_gen_schema_change_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
                 # Make sure no change is not true. If it is something has gone wrong.
@@ -6082,6 +6101,13 @@ class Summarize:
                 # Gen the prompts
                 implement_sys_prompt = Prompts().implement_schema_change_plan()
                 # User prompt 
+                # Generate the json of the latest schema and summaries
+                current_populated_question_schema_json = current_populated_question_schema_df.to_json(
+                    orient="records",
+                    force_ascii=False,
+                    indent=2,
+                    )
+
                 implement_user_prompt = (
                     f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
                     f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
@@ -6107,33 +6133,85 @@ class Summarize:
         return(updated_schema_df_sorted, updated_repair_plan_df)
 
 
+
     def _optimize_schema(self):
         """
+        docstring
         """
         # Build the latest schema with the populated themes, word counts etc
-        latest_populated_schema_df = (
-            self.summary_state.theme_schema_list[-1]
-            .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
-            # merge with populated themes to summaries
-            .merge( 
-                self.summary_state.populated_theme_list[-1], 
-                how = "left",
-                on = ["question_id", "theme_id"]
+        latest_populated_schema_df = self._build_populated_schema_for_planning()
+
+        # Loop over the schema by question to send each question schema as a json to the repair planner
+        updated_schema_list = []
+        updated_optimize_plan_list = []
+
+        for index, row in self.corpus_state.questions.iterrows():
+            print(f"Optimizing schema for question: {index + 1} of {len(self.corpus_state.questions)}")
+            # Get the current question schema
+            current_populated_question_schema_df = latest_populated_schema_df[latest_populated_schema_df["question_id"] == row["question_id"]]
+            
+            # Generate the plan
+            print("Generating plan...")
+            # Get the sys prompt
+            plan_sys_prompt =  Prompts().gen_theme_schema_optimize_plan()
+
+            # Make the user prompt
+            plan_user_prompt = self._gen_user_prompt_for_schema_change_planning(current_populated_question_schema_df, index, row)
+            
+            # Get the optimize plan from the LLM
+            no_change, optimize_plan_json = self._llm_gen_schema_change_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
+            # If no_change exit the optmize process and print a message for the user letting them know to proceed
+            if no_change:
+                print(
+                    "The optimizer returned that the latest schema does not offer obvious opportunities for improvement.\n\n"
+                    "Your last populated theme produced by orphan reinsertion (.summary_state.populated_theme_list[-1]) is your valid thematic output.\n\n"
+                    "Proceed to optional redundancy removal and then to rendering."
                 )
-            .assign(
-                # Identify pass/fail themes based on failed batch summaries
-                status = lambda x: np.where(
-                    x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---"),
-                    "fail", 
-                    "pass"
-                    )
+                return
+            
+            # Convert the optimize plan to a df to eventually return 
+            optimize_plan_for_history_df = self._schema_change_plan_to_history_df(
+                schema_change_plan = optimize_plan_json,
+                iteration = len(self.summary_state.schema_repair_list) + 1,
+                research_question = row["question_id"]
                 )
-            # Calculate word count for all summaries
-            .assign(word_count = lambda x: x["thematic_summary"].str.split().str.len().fillna(0).astype(int))
-            # Set word count to null for failing themes as we don't yet know thier conceptual capacity
-            .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
+            
+            updated_optimize_plan_list.append(optimize_plan_for_history_df)
+
+            # Pass the optimize plan to the change implementer
+            print("Implementing plan...")
+            # Gen the prompts
+            implement_sys_prompt = Prompts().implement_schema_change_plan()
+            # User prompt 
+            # Generate the json of the latest schema and summaries
+            current_populated_question_schema_json = current_populated_question_schema_df.to_json(
+                    orient="records",
+                    force_ascii=False,
+                    indent=2,
+                )
+            implement_user_prompt = (
+                f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
+                f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
+                f"REPAIR PLAN:\n{optimize_plan_json}"
             )
 
+            # Call the LLM
+            updated_question_schema_dict = self._llm_apply_schema_change_plan(sys_prompt = implement_sys_prompt, user_prompt = implement_user_prompt)
+            # Convert the output to df 
+            updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
+            updated_question_schema_df["question_id"] = row["question_id"]
+            updated_question_schema_df["theme_id"] = [(i + 1) for i in range(updated_question_schema_df.shape[0])]
+            # Append the df to the list
+            updated_schema_list.append(updated_question_schema_df)
+
+        # Concat the list of dfs to get a single df of the schema
+        updated_schema_df = pd.concat(updated_schema_list, ignore_index=True)
+        updated_schema_df_sorted = updated_schema_df.sort_values(by =["question_id", "theme_id"])
+
+        updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
+        updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
+        # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
+        return updated_schema_df_sorted, updated_repair_plan_df
 
 
     def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
