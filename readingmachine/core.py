@@ -5574,7 +5574,7 @@ class Summarize:
         return json.dumps(records, indent=indent, ensure_ascii=False)
 
     
-    def _llm_gen_schema_repair_plan(self, user_prompt, sys_prompt):
+    def _llm_gen_schema_change_plan(self, user_prompt, sys_prompt):
         """
         Generate a structured repair plan for an overloaded or incomplete theme schema.
 
@@ -5855,9 +5855,23 @@ class Summarize:
 
 
         no_change = response.get("no_change")
-        change_plan = response.get("schema_change_plan")
+        schema_change_plan = response.get("schema_change_plan")
 
-        return(no_change, change_plan)
+        # Check the response is valid - i.e. the plan has not returned no change and proposed changes
+        includes_plan = (
+            bool(schema_change_plan.get("changed_sources"))
+            or bool(schema_change_plan.get("changed_targets"))
+        )
+
+        # Riase error if reponse malformed - no changes and plan for changes
+        if (no_change and includes_plan) or (not no_change and not includes_plan):
+            raise ValueError(
+                "Schema change planner either returned no change as true and a populated change plan "
+                "or returned a no_change as false and an empty change plan.\n"
+                "Both are invalid states of the system."
+            )
+
+        return(no_change, schema_change_plan)
 
 
     def _llm_apply_schema_repair_plan(self, sys_prompt, user_prompt):
@@ -6046,7 +6060,7 @@ class Summarize:
                 )
                 
                 # Get the repair plan from the LLM
-                no_change, repair_plan_json = self._llm_gen_schema_repair_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
+                no_change, repair_plan_json = self._llm_gen_schema_change_plan(sys_prompt=plan_sys_prompt, user_prompt=plan_user_prompt)
                 # Make sure no change is not true. If it is something has gone wrong.
                 if no_change:
                     raise ValueError(
@@ -6091,261 +6105,6 @@ class Summarize:
         updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
         return(updated_schema_df_sorted, updated_repair_plan_df)
-
-    def _llm_gen_schema_optimization_plan(
-        self,
-        stable_schema,
-        sys_prompt,
-        user_prompt,
-    ):
-        """
-        Generate a schema-optimization plan.
-
-        Returns a response containing:
-        - no_change: whether optimization has converged
-        - optimize_plan: proposed theme and schema changes
-        """
-
-        fall_back = None
-
-        json_schema = {
-            "name": "schema_change_plan_response",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "no_change": {
-                        "type": "boolean"
-                    },
-                    "schema_change_plan": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "changed_by": {
-                                "type": "string",
-                                "enum": ["repair_plan", "optimize_plan"]
-                            },
-                            "changed_sources": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "source_theme_id": {
-                                            "type": "integer"
-                                        },
-                                        "source_theme_label": {
-                                            "type": "string"
-                                        },
-                                        "largest_source_territories": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "additionalProperties": False,
-                                                "properties": {
-                                                    "territory": {
-                                                        "type": "string"
-                                                    },
-                                                    "rank": {
-                                                        "type": "integer"
-                                                    },
-                                                    "action": {
-                                                        "type": "string",
-                                                        "enum": ["extract", "retain"]
-                                                    }
-                                                },
-                                                "required": [
-                                                    "territory",
-                                                    "rank",
-                                                    "action"
-                                                ]
-                                            }
-                                        },
-                                        "territories_removed": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "additionalProperties": False,
-                                                "properties": {
-                                                    "territory": {
-                                                        "type": "string"
-                                                    },
-                                                    "destination_ref": {
-                                                        "type": "string"
-                                                    }
-                                                },
-                                                "required": [
-                                                    "territory",
-                                                    "destination_ref"
-                                                ]
-                                            }
-                                        },
-                                        "source_result": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "properties": {
-                                                "action": {
-                                                    "type": "string",
-                                                    "enum": [
-                                                        "retain_and_narrow",
-                                                        "dissolve_and_reallocate"
-                                                    ]
-                                                },
-                                                "resulting_scope": {
-                                                    "type": ["string", "null"]
-                                                },
-                                                "boundary_constraints": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "string"
-                                                    }
-                                                }
-                                            },
-                                            "required": [
-                                                "action",
-                                                "resulting_scope",
-                                                "boundary_constraints"
-                                            ]
-                                        }
-                                    },
-                                    "required": [
-                                        "source_theme_id",
-                                        "source_theme_label",
-                                        "largest_source_territories",
-                                        "territories_removed",
-                                        "source_result"
-                                    ]
-                                }
-                            },
-                            "changed_targets": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "target_ref": {
-                                            "type": "string"
-                                        },
-                                        "target_type": {
-                                            "type": "string",
-                                            "enum": ["new_theme", "existing_theme"]
-                                        },
-                                        "target_theme_id": {
-                                            "type": ["integer", "null"]
-                                        },
-                                        "target_theme_label": {
-                                            "type": ["string", "null"]
-                                        },
-                                        "theme_kind": {
-                                            "type": "string",
-                                            "enum": [
-                                                "substantive",
-                                                "conflict",
-                                                "other"
-                                            ]
-                                        },
-                                        "received_territories": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "additionalProperties": False,
-                                                "properties": {
-                                                    "territory": {
-                                                        "type": "string"
-                                                    },
-                                                    "source_theme_id": {
-                                                        "type": "integer"
-                                                    },
-                                                    "source_theme_label": {
-                                                        "type": "string"
-                                                    }
-                                                },
-                                                "required": [
-                                                    "territory",
-                                                    "source_theme_id",
-                                                    "source_theme_label"
-                                                ]
-                                            }
-                                        },
-                                        "resulting_scope": {
-                                            "type": "string"
-                                        },
-                                        "boundary_constraints": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        }
-                                    },
-                                    "required": [
-                                        "target_ref",
-                                        "target_type",
-                                        "target_theme_id",
-                                        "target_theme_label",
-                                        "theme_kind",
-                                        "received_territories",
-                                        "resulting_scope",
-                                        "boundary_constraints"
-                                    ]
-                                }
-                            }
-                        },
-                        "required": [
-                            "changed_by",
-                            "changed_sources",
-                            "changed_targets"
-                        ]
-                    }
-                },
-                "required": [
-                    "no_change",
-                    "schema_change_plan"
-                ]
-            }
-        }
-
-        response, error = utils.call_chat_completion(
-            sys_prompt=sys_prompt,
-            user_prompt=user_prompt,
-            llm_client=self.llm_client,
-            ai_model=self.ai_model,
-            fall_back=fall_back,
-            return_json=True,
-            json_schema=json_schema,
-            return_with_error=True
-        )
-
-        # Check if fall back used
-        if response is None:
-            raise ValueError(
-                f"Schema optmizer returned empty response. Error: {error}"
-            )
-
-        # Get no change and plan to make sure no_change does not have a plan
-        no_change = response["no_change"]
-        optimize_plan = response["optimize_plan"]
-
-        # Check if changes proposed
-        has_changes = bool( # bool on an empty list return false
-            optimize_plan["theme_changes"]
-            or optimize_plan["schema_optimizations"]
-        )
-
-        # Riase error if reponse malformed - no changes and plan for changes
-        if no_change and has_changes:
-            raise ValueError(
-                "Optimization planner returned no_change=True with a non-empty plan."
-            )
-
-        # Check the inverse
-        if not no_change and not has_changes:
-            raise ValueError(
-                "Optimization planner returned no_change=False with an empty plan."
-            )
-
-        # Return the plan
-        return response
 
 
     def _llm_apply_schema_optimization(self, sys_prompt, user_prompt):
