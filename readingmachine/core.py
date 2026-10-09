@@ -6333,7 +6333,6 @@ class Summarize:
         return new_schema, schema_change_history
 
             
-
     def gen_theme_schema(self, force: bool = False) -> pd.DataFrame:
         """
         Generate, reload, append, or regenerate a theme-schema pass.
@@ -6452,8 +6451,9 @@ class Summarize:
         # Experimental mode where force is True and guardrails are skipped
         if force:
             print("WARNING: Force flag is True: Skipping validation and sequencing checks and generating new schema pass from cluster summaries. This may cause the state to become unstable. This mode should be used for testing purposes only.")
-            new_schema = self._run_llm_schema_gen(source="cluster summaries")
+            new_schema, repair_plan = self._run_llm_schema_gen(source="cluster summaries")
             self.summary_state.theme_schema_list.append(new_schema)
+            self.summary_state.schema_repair_list.append(repair_plan)
             self.summary_state.save()
             return new_schema
         #####
@@ -6469,6 +6469,7 @@ class Summarize:
             source_name = "cluster summaries"
             new_schema = self._run_llm_schema_gen(source=source_name)
             self.summary_state.theme_schema_list.append(new_schema)
+            self.summary_state.schema_repair_list.append(repair_plan)
             self.summary_state.save()
             return new_schema  
 
@@ -6504,11 +6505,12 @@ class Summarize:
                 )
 
             source_name = "populated themes"
-            new_schema = self._run_llm_schema_gen(source=source_name)
+            new_schema, repair_plan = self._run_llm_schema_gen(source=source_name)
             if new_schema is None:
                 # This means the LLM has indicated that there are no changes to the schema worth making, which likely means we have reached the optimal schema for the current state of populated themes and orphans. In this case we should not add a new schema pass as it is identical to the last one, so we return None to indicate no new schema was generated.
                 return None
             self.summary_state.theme_schema_list.append(new_schema)
+            self.summary_state.schema_repair_list.append(repair_plan)
 
             self.summary_state.save()
             return new_schema
@@ -6528,7 +6530,7 @@ class Summarize:
             else:
                 source_name = "populated themes"
 
-            new_schema = self._run_llm_schema_gen(source=source_name)
+            new_schema, repair_plan = self._run_llm_schema_gen(source=source_name)
             if new_schema is None:
                 # This means the LLM has indicated that there are no changes to the schema worth making,
                 # which likely means we have reached the optimal schema for the current state of
@@ -6539,6 +6541,7 @@ class Summarize:
 
             # Replace last schema pass
             self.summary_state.theme_schema_list[-1] = new_schema
+            self.summary_state.schema_repair_list[-1] = repair_plan
 
             self.summary_state.save()
             return new_schema
