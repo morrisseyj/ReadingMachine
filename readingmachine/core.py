@@ -8323,7 +8323,7 @@ class Summarize:
         checked_insights_df = pd.DataFrame(columns=["question_id", "theme_id", "insight_id", "found"]) if checked_insights_df is None else checked_insights_df
 
         # Get the stable questions so that i can avoid re running the orphan check on stable questions
-        stable_questions = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].tolist()
+        stable_questions = self._check_stable_questions()
         if len(stable_questions) > 0:
             # Get the orphans for the stable questions
             stable_orphans_df = self.summary_state.orphan_list[-1][self.summary_state.orphan_list[-1]["question_id"].isin(stable_questions)].copy() 
@@ -8367,7 +8367,7 @@ class Summarize:
                     "SOURCE INSIGHTS:\n"
                     f"{insight_str}\n\n"
                 )
-                fall_back = {"mentioned_insight_ids": []}
+
                 json_schema = {
                     "name": "mention_audit",
                     "strict": True,
@@ -8387,16 +8387,23 @@ class Summarize:
                         }
                     }
 
-                response = utils.call_chat_completion(
+                response, error = utils.call_chat_completion(
                     sys_prompt=sys_prompt,
                     user_prompt=user_prompt,
                     llm_client=self.llm_client,
                     ai_model=self.ai_model,
-                    fall_back=fall_back,
+                    fall_back=None,
                     return_json=True,
                     max_tokens=4096,
-                    json_schema=json_schema
+                    json_schema=json_schema, 
+                    return_with_error=True
                 )
+
+                if response is None:
+                    raise ValueError(
+                        f"Orphan identification pass returned None. Error: {error}"
+                    )
+
                 # get all the found insights as sets for subtraction to get missed insights (i.e. orphans)
                 insights_found = response.get("mentioned_insight_ids", [])
                 insights_found_set = set(insights_found)
@@ -8507,18 +8514,22 @@ class Summarize:
             }
         }
 
-        fall_back = {"summary": "No summary available."}
-
-        response = utils.call_chat_completion(
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
-            fall_back=fall_back,
+            fall_back=None,
             return_json=True,
             json_schema=json_schema, 
-            max_tokens = 4096
+            max_tokens = 4096, 
+            return_with_error=True
         )
+
+        if response is None:
+            raise ValueError(
+                f"Failed orphan batch summarization failed. Error {error}"
+            )
 
         response_summary = response["summary"]
 
@@ -8701,20 +8712,22 @@ class Summarize:
             }
         }
 
-        fall_back = {
-            "patches": []
-        }
-
-        response = utils.call_chat_completion(
+        response, error = utils.call_chat_completion(
             sys_prompt=sys_prompt,
             user_prompt=user_prompt,
             llm_client=self.llm_client,
             ai_model=self.ai_model,
-            fall_back=fall_back,
+            fall_back=None,
             return_json=True,
             json_schema=json_schema,
-            max_tokens=4096
+            max_tokens=4096, 
+            return_with_error=True
         )
+
+        if response is None:
+            raise ValueError(
+                f"Citation repair returned nothing. Error: {error}"
+            )
 
         for patch in response["patches"]:
             # Check whether the sentences got returned correctly
@@ -8992,9 +9005,17 @@ class Summarize:
         # Prepare output holder for updated theme summaries
         updated_summary_df_lst = []
 
-        #Get the stable themes so that I can add them back in at the end without modification, as these should not be changed and we want to preserve the summaries for these themes as they are.  
-        stable_populated_themes = self.summary_state.populated_theme_list[-1][self.summary_state.populated_theme_list[-1]["stable"] == True].copy() 
-        unstable_populated_themes = self.summary_state.populated_theme_list[-1][self.summary_state.populated_theme_list[-1]["stable"] == False].copy()
+        #Get the stable themes so that I can add them back in at the end without modification, as these should not be changed and we want to preserve the summaries for these themes as they are.
+        stable_questions = self._check_stable_questions()
+        current_populated_themes = self.summary_state.populated_theme_list[-1]
+        stable_populated_themes = current_populated_themes[
+            current_populated_themes["question_id"]
+            .isin(stable_questions)
+            ].copy() 
+        unstable_populated_themes = current_populated_themes[
+            ~current_populated_themes["question_id"]
+            .isin(stable_questions)
+            ].copy()
 
         total_themes = len(unstable_populated_themes)
         count = 1
@@ -9022,9 +9043,7 @@ class Summarize:
             theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             question_id = row["question_id"]
-            optimized = row.get("optimized", False)
-            stable = row.get("stable", False)
-            
+
             # Retrieve research question text for prompt context
             question_text = self.corpus_state.questions[
                 self.corpus_state.questions["question_id"] == question_id
@@ -9106,10 +9125,7 @@ class Summarize:
                         f"{batch_citations_str}\n\n"
                         "ORPHAN INSIGHTS:\n"
                         f"{batch_insights_str}\n\n"
-                    )
-
-                    # Fallback ensures no regression if model fails
-                    fall_back = {"updated_summary": updated_summary}
+                    )                  
 
                     # Enforce strict structured output
                     json_schema = {
@@ -9131,7 +9147,7 @@ class Summarize:
                         user_prompt=user_prompt,
                         llm_client=self.llm_client,
                         ai_model=self.ai_model,
-                        fall_back=fall_back,
+                        fall_back=None,
                         return_json=True,
                         json_schema=json_schema, 
                         max_tokens=4096, 
@@ -9253,9 +9269,6 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
-                    "stable": stable,
-                    "needs_repair": True if failed_batch_summaries else False,
-                    "optimized": optimized
                 }])
 
             else:
@@ -9268,16 +9281,16 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
-                    "stable": stable, 
-                    "needs_repair": False,
-                    "optimized": optimized
                 }])
 
             updated_summary_df_lst.append(updated_row)
             count += 1
 
         # Reassemble full dataframe and restore canonical ordering
-        theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
+        if updated_summary_df_lst:
+            theme_no_orphans = pd.concat(updated_summary_df_lst, ignore_index=True)
+        else:
+            theme_no_orphans = pd.DataFrame()
 
         # Add back the stable themes
         if not stable_populated_themes.empty:
@@ -9287,10 +9300,8 @@ class Summarize:
                 "theme_id",
                 "theme_label",
                 "theme_description",
-                "question_text",
-                "stable",
-                "needs_repair",
-                "optimized"]].copy()
+                "question_text"
+                ]].copy()
             theme_no_orphans = pd.concat([theme_no_orphans, stable_populated_themes], ignore_index=True)
 
         # Sort for outputing in the correct order - before this make sure the theme_id is int to prevent sorting issues
