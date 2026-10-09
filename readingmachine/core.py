@@ -6615,6 +6615,109 @@ class Summarize:
         return df
     
 
+    def _check_stable_questions(self):
+        """
+        Return question_ids whose current mappings can be reused.
+
+        A question is stable here only in the mapping sense: the current schema for
+        that question does not require remapping before the next population pass.
+        """
+
+        stable_questions = []
+        current_schema_df = self.summary_state.theme_schema_list[-1]
+
+        for _, row in self.corpus_state.questions.iterrows():
+            question_id = row["question_id"]
+
+            schema_rq_df = current_schema_df[
+                current_schema_df["question_id"] == question_id
+            ].copy()
+
+            if schema_rq_df.empty:
+                raise ValueError(
+                    f"No schema rows found for question_id={question_id}."
+                )
+
+            schema_sources = schema_rq_df["schema_produced_by"].dropna().unique()
+
+            if len(schema_sources) != 1:
+                raise ValueError(
+                    f"Expected exactly one schema_produced_by value for question_id={question_id}, "
+                    f"but found {schema_sources.tolist()}."
+                )
+
+            schema_produced_by = schema_sources[0]
+
+            # Cluster schemas have never been mapped/populated, so no previous
+            # mapping can be reused.
+            if schema_produced_by == "initial_cluster_schema":
+                continue
+
+            # Repair-produced schemas can reuse mappings only after the latest
+            # population pass shows that the repaired question has no failed themes.
+            if schema_produced_by == "repair_plan":
+                if not self.summary_state.populated_theme_list:
+                    raise ValueError(
+                        "Cannot check repair-produced schema stability because no populated themes exist."
+                    )
+
+                latest_populated_df = self.summary_state.populated_theme_list[-1]
+
+                populated_theme_rq_df = latest_populated_df[
+                    latest_populated_df["question_id"] == question_id
+                ].copy()
+
+                if populated_theme_rq_df.empty:
+                    raise ValueError(
+                        f"No populated theme rows found for question_id={question_id}."
+                    )
+
+                has_failures = (
+                    populated_theme_rq_df["thematic_summary"]
+                    .str.contains("--- FAILED BATCH SUMMARIES ---", na=False)
+                    .any()
+                )
+
+                if not has_failures:
+                    stable_questions.append(question_id)
+
+                continue
+
+            # Optimizer-produced schemas are reusable only when the optimizer
+            # explicitly cleared the current question schema by returning no_change.
+            if schema_produced_by == "optimize_plan":
+                if "optimizer_clear" not in schema_rq_df.columns:
+                    raise ValueError(
+                        f"Schema for question_id={question_id} was produced by optimize_plan "
+                        "but has no optimizer_clear column."
+                    )
+
+                optimizer_clear_values = (
+                    schema_rq_df["optimizer_clear"]
+                    .dropna()
+                    .astype(bool)
+                    .unique()
+                )
+
+                if len(optimizer_clear_values) != 1:
+                    raise ValueError(
+                        f"Expected exactly one optimizer_clear value for question_id={question_id}, "
+                        f"but found {optimizer_clear_values.tolist()}."
+                    )
+
+                if bool(optimizer_clear_values[0]):
+                    stable_questions.append(question_id)
+
+                continue
+
+            raise ValueError(
+                f"Unknown schema_produced_by value for question_id={question_id}: "
+                f"{schema_produced_by!r}."
+            )
+
+        return stable_questions
+
+
     def _map_insights_via_llm(
         self, 
         batch_size,
@@ -6761,21 +6864,20 @@ class Summarize:
             raise ValueError("Invalid mode. Mode must be either 'force' or 'normal'.")
 
         # Check if there are any stable questions in the current schema and exclude those from remapping
-        if any(self.summary_state.theme_schema_list[-1]["stable"].to_list()):
-            # Get the queston ids of the stable questions
-            stable_questions = self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["stable"] == True]["question_id"].unique().tolist()
+        stable_questions = self._check_stable_questions()
+        if len(stable_questions) > 0:
             # Use the stable questions to get the mappings from the last run which was stable
             stable_mapping = self.summary_state.mapped_theme_list[-1][self.summary_state.mapped_theme_list[-1]["question_id"].isin(stable_questions)].copy()
             if not stable_mapping.empty:
                 # use these "stable mappings" to seed the mapped insights and mapped insight ids 
                 # mapped_insights_df_list is a list of dfs so we need to concat, drop duplicates and then convert back to a list to add to the mapped insights list so that progress, resume etc all still work
                 mapped_insights_df_list.append(stable_mapping)
-                mapped_insighs_df = (
+                mapped_insights_df = (
                     pd.concat(mapped_insights_df_list, ignore_index=True, sort=False)
                     .drop_duplicates(subset=["insight_id", "theme_id"])
                 )
                 # Back to list
-                mapped_insights_df_list = [mapped_insighs_df]
+                mapped_insights_df_list = [mapped_insights_df]
                 # Already mapped insight ids is a list so i just extend and set to drop duplicates
                 already_mapped_insight_ids.extend(stable_mapping["insight_id"].tolist())
                 # Drop duplicates to avoid multiple seeding if i resume
