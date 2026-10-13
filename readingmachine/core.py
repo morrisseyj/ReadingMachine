@@ -5980,32 +5980,53 @@ class Summarize:
 
     def _build_populated_schema_for_planning(self):
         """
+        Build the latest schema joined to populated-theme summaries for repair/optimize planning.
         """
 
-        latest_populated_schema_df = (
-            self.summary_state.theme_schema_list[-1]
-            .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
-            # merge with populated themes to summaries
-            .merge( 
-                self.summary_state.populated_theme_list[-1], 
-                how = "left",
-                on = ["question_id", "theme_id"]
-                )
-            .assign(
-                # Identify pass/fail themes based on failed batch summaries
-                status = lambda x: np.where(
-                    x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---"),
-                    "fail", 
-                    "pass"
-                    )
-                )
-            # Calculate word count for all summaries
-            .assign(word_count = lambda x: x["thematic_summary"].str.split().str.len().fillna(0).astype(int))
-            # Set word count to null for failing themes as we don't yet know thier conceptual capacity
-            .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
-            )
+        schema_df = self.summary_state.theme_schema_list[-1]
+        populated_df = self.summary_state.populated_theme_list[-1]
 
-        return(latest_populated_schema_df)
+        schema_merge_df = schema_df.drop(
+            columns=[
+                "theme_label",
+                "theme_description",
+                "organizing_proposition",
+                "question_text",
+            ]
+        )
+
+        latest_populated_schema_df = (
+            schema_merge_df
+            .merge(
+                populated_df,
+                how="left",
+                on=["question_id", "theme_id"],
+            )
+            .assign(
+                status=lambda x: np.where(
+                    x["thematic_summary"].str.contains(
+                        "--- FAILED BATCH SUMMARIES ---",
+                        na=False,
+                    ),
+                    "fail",
+                    "pass",
+                )
+            )
+            .assign(
+                word_count=lambda x: (
+                    x["thematic_summary"]
+                    .fillna("")
+                    .str.split()
+                    .str.len()
+                    .astype(int)
+                )
+            )
+            .assign(
+                word_count=lambda x: x["word_count"].where(x["status"].eq("pass"))
+            )
+        )
+
+        return latest_populated_schema_df
 
     def _gen_user_prompt_for_schema_change_planning(self, current_populated_question_schema_df, index, row):
         """
@@ -6021,6 +6042,10 @@ class Summarize:
         # Get the schema history
         schema_history_df_list = []
         for ix, df in enumerate(self.summary_state.schema_repair_list):
+            if df.empty: # Schema repair hisory is empty in cases like from clusters
+                continue
+
+            df = df.copy()
             df["iteration"] = ix + 1
             schema_history_df_list.append(df)
 
@@ -6029,7 +6054,7 @@ class Summarize:
             schema_history_df = pd.concat(schema_history_df_list)
             # Filter so we have the schema history just for this research question
             schema_history_df_rq = schema_history_df[
-                schema_history_df["research_question"] == row["question_id"]
+                schema_history_df["question_id"] == row["question_id"]
             ]
             schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
         
@@ -6038,7 +6063,7 @@ class Summarize:
             schema_history_json_string = ""
 
         plan_user_prompt = (
-            f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
+            f"RESEARCH QUESTION:\n{row['question_text']}\n\n"
             f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
             f"SCHEMA HISTORY:\n{schema_history_json_string}"
         )
