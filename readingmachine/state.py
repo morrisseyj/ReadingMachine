@@ -1315,31 +1315,32 @@ class SummaryState:
 
         if target_depth == 0:  # schema
             self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.schema_repair_list = self.schema_repair_list[:index + 1]
             self.mapped_theme_list = self.mapped_theme_list[:index]
             self.populated_theme_list = self.populated_theme_list[:index]
             self.orphan_list = self.orphan_list[:index]
 
         elif target_depth == 1:  # mapping
             self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.schema_repair_list = self.schema_repair_list[:index + 1]
             self.mapped_theme_list = self.mapped_theme_list[:index + 1]
             self.populated_theme_list = self.populated_theme_list[:index]
             self.orphan_list = self.orphan_list[:index]
 
         elif target_depth == 2:  # populate
             self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.schema_repair_list = self.schema_repair_list[:index + 1]
             self.mapped_theme_list = self.mapped_theme_list[:index + 1]
             self.populated_theme_list = self.populated_theme_list[:index + 1]
             self.orphan_list = self.orphan_list[:index]
 
         else:  # orphan
             self.theme_schema_list = self.theme_schema_list[:index + 1]
+            self.schema_repair_list = self.schema_repair_list[:index + 1]
             self.mapped_theme_list = self.mapped_theme_list[:index + 1]
             self.populated_theme_list = self.populated_theme_list[:index + 1]
             self.orphan_list = self.orphan_list[:index + 1]
 
-        # Plan i creates schema i + 1. Retaining schemas through `index`
-        # therefore requires plans 0 through index - 1.
-        self.schema_repair_list = self.schema_repair_list[:index]
 
         # Redundancy reduction is valid only for the final synthesis state.
         self.redundancy_list = []
