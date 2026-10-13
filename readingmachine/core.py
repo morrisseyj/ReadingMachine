@@ -6045,7 +6045,7 @@ class Summarize:
 
         return plan_user_prompt
 
-    def _repair_schema(self):
+    def _repair_schema(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
         """
@@ -6125,14 +6125,16 @@ class Summarize:
         # Concat the list of dfs to get a single df of the schema
         updated_schema_df = pd.concat(updated_schema_list, ignore_index=True)
         updated_schema_df_sorted = updated_schema_df.sort_values(by =["question_id", "theme_id"])
+        updated_schema_df_sorted["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         updated_repair_plan_df = pd.concat(updated_repair_plan_list)
         updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
+        updated_repair_plan_df["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
         return updated_schema_df_sorted, updated_repair_plan_df 
 
 
-    def _optimize_schema(self):
+    def _optimize_schema(self) -> tuple[pd.DataFrame | None, pd.DataFrame]:
         """
         docstring
         """
@@ -6235,6 +6237,7 @@ class Summarize:
         updated_schema_df_sorted = updated_schema_df.sort_values(
             by=["question_id", "theme_id"]
         )
+        updated_schema_df_sorted["theme_id"] = [i + 1 for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         all_optimizer_clear = (
             updated_schema_df_sorted
@@ -6250,17 +6253,18 @@ class Summarize:
                 "Your latest populated theme object (var.summary_state.populated_theme_list[-1]) is valid.\n"
                 "You should proceed to pass it to the optional redundancy handling pass and then to the rendering class."
             )
-            return None, None
+            return None, pd.DataFrame()
 
         updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
         updated_repair_plan_df = updated_repair_plan_df.sort_values(
             by=["research_question", "source_theme_id"]
         )
+        updated_repair_plan_df["theme_id"] = [i + 1 for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         return updated_schema_df_sorted, updated_repair_plan_df
 
 
-    def _schema_from_cluster_summaries(self):
+    def _schema_from_cluster_summaries(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         doc string
         """
@@ -6301,13 +6305,14 @@ class Summarize:
         
         schema_from_summaries = pd.concat(out_df_list)
         schema_from_summaries = schema_from_summaries.sort_values(by = ["question_id", "theme_id"])
+        schema_from_summaries["theme_id"] = [i + 1 for i in range(schema_from_summaries.shape[0])] # Make theme_id global
 
-        schema_change_history = None
+        schema_change_history = pd.DataFrame()
 
         return schema_from_summaries, schema_change_history
 
     
-    def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
+    def _run_llm_schema_gen(self, source: str) -> tuple[pd.DataFrame | None, pd.DataFrame]:
         """
         doctring
         """
@@ -6468,9 +6473,9 @@ class Summarize:
         # --- CASE 1: First schema pass, build from clusters
         if schema_len == 0:
             source_name = "cluster summaries"
-            new_schema = self._run_llm_schema_gen(source=source_name)
+            new_schema, schema_change_plan = self._run_llm_schema_gen(source=source_name)
             self.summary_state.theme_schema_list.append(new_schema)
-            self.summary_state.schema_repair_list.append(repair_plan)
+            self.summary_state.schema_repair_list.append(schema_change_plan)
             self.summary_state.save()
             return new_schema  
 
@@ -7483,292 +7488,94 @@ class Summarize:
 
         return theme_counts[["theme_id", "allocated_length"]]
 
-
-    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float, max_model_output_words: int = 2800) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Split populated themes by length-pressure status.
-
-        Flags themes whose generated summaries are approaching or exceeding a
-        specified proportion of their allocated word budget. This diagnostic is
-        used during theme population to identify summaries that may require
-        expansion, repartitioning, or repair because the theme may contain more
-        mapped insight content than can be represented within its current target
-        length.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Populated-theme DataFrame containing at least:
-
-            - `allocated_length`
-            - `current_length`
-            - `stable`
-
-        max_prop : float
-            Proportion of `allocated_length` above which a theme is flagged.
-
-        max_model_output_words : int, default=2800
-            Hard maximum summary length. Themes already allocated this maximum are
-            not flagged.
-
-        Returns
-        -------
-        tuple[pd.DataFrame, pd.DataFrame]
-            Tuple containing:
-
-            - `df_len_ok`: themes not flagged for length pressure
-            - `df_len_flagged`: themes flagged for length pressure
-
-        Notes
-        -----
-        A theme is not flagged when:
-
-        - `current_length` is missing or zero
-        - `allocated_length` equals `max_model_output_words`
-        - `stable` is True
-        - `current_length <= allocated_length * max_prop`
-
-        The method adds a `length_flag` column to the input DataFrame before
-        splitting it into flagged and unflagged subsets.
-
-        Length pressure is a heuristic signal. It does not prove that a summary is
-        incomplete, but it can indicate that the theme is carrying too much
-        representational load or that assigned insights may need to be redistributed
-        during schema repair.
-        """
-
-        MAX_THEME_WORDS = max_model_output_words
-
-        def flag_row(row):
-            # Treat missing summaries as not flagged
-            if pd.isna(row["current_length"]) or row["current_length"] == 0:
-                return 0
-
-            # Do not flag if theme is already at hard ceiling
-            if row["allocated_length"] == MAX_THEME_WORDS:
-                return 0
-
-            # If the theme is marked as stable we should not flag - we don't want to re-write.
-            if row["stable"] == True:
-                return 0
-            
-            # Standard proportional check
-            if row["current_length"] <= row["allocated_length"] * max_prop:
-                return 0
-            else:
-                return 1
-
-        df["length_flag"] = df.apply(flag_row, axis=1)
-
-        df_len_ok = df[df["length_flag"] == 0]
-        df_len_flagged = df[df["length_flag"] == 1]
-
-        return df_len_ok, df_len_flagged
     
     def _run_theme_pop(
         self,
         schema_df: pd.DataFrame,
         mapped_themes_df: pd.DataFrame,
-        paper_len: int = 8000
+        paper_len: int = 8000,
     ) -> pd.DataFrame:
         """
-        Populate themes by synthesizing mapped insights into thematic narratives.
+        Populate unstable themes by synthesizing mapped insights into thematic summaries.
 
-        Generates theme-level summaries from the insight-to-theme mappings
-        produced during the mapping stage. Each theme is synthesized
-        independently and becomes the primary analytical representation used for
-        completeness auditing, orphan detection, schema repair, and subsequent
-        thematic refinement.
-
-        The theme-population workflow proceeds as follows:
-
-            mapped insights
-                ↓
-            length allocation
-                ↓
-            theme-level synthesis
-                ↓
-            populated themes
-                ↓
-            completeness auditing
-
-        Stable Theme Reuse
-        ------------------
-        Themes belonging to research questions whose schemas have already been
-        marked as stable are not regenerated.
-
-        Instead, populated themes from the most recent population pass are
-        reused and carried forward unchanged. Only themes associated with
-        unstable schemas are submitted to the LLM for regeneration.
-
-        Length Allocation
-        -----------------
-        Before synthesis, each theme receives an allocated word budget derived
-        from the relative number of mapped insights assigned to that theme.
-
-        These allocations are used to guide summary generation and to later
-        evaluate whether themes may be experiencing representational overload.
-
-        Theme Types
-        -----------
-        Different prompting strategies are used depending on theme type:
-
-        - general themes
-        - conflict themes
-        - other themes
-
-        This allows conflict-oriented and residual categories to be synthesized
-        differently from standard thematic categories.
-
-        Fallback and Sampling
-        ---------------------
-        If theme population fails or produces an empty summary, the method
-        retries synthesis using a sampled subset of insights constrained by a
-        maximum word budget.
-
-        Sampling is treated as a temporary context-management strategy rather
-        than a coverage decision. Any omitted information is expected to be
-        recovered later through completeness checking, orphan detection,
-        reintegration, and schema refinement.
-
-        Parameters
-        ----------
-        schema_df : pd.DataFrame
-            Active theme schema containing theme definitions and synthesis-state
-            metadata.
-
-            Expected columns include:
-
-            - `theme_id`
-            - `theme_label`
-            - `theme_description`
-            - `question_id`
-            - `question_text`
-            - `stable`
-
-        mapped_themes_df : pd.DataFrame
-            Insight-to-theme mapping table containing at least:
-
-            - `insight_id`
-            - `theme_id`
-            - `question_id`
-
-        paper_len : int, default=8000
-            Approximate target length of the synthesized output. Used when
-            allocating theme-level word budgets.
-
-        Returns
-        -------
-        pd.DataFrame
-            Populated theme table containing:
-
-            - `thematic_summary`
-            - `question_id`
-            - `theme_id`
-            - `theme_label`
-            - `theme_description`
-            - `allocated_length`
-            - `current_length`
-            - `perc_of_max_length`
-            - `needs_repair`
-            - `optimized`
-            - `stable`
-
-        Notes
-        -----
-        Themes with no mapped insights are retained and returned with empty
-        summaries. This preserves schema stability and allows structural
-        categories such as "Other" and "Conflict" to remain present even when
-        they are temporarily unused.
-
-        Summary length diagnostics are calculated for every generated theme.
-        These diagnostics are later used to identify themes that may require
-        schema repair, decomposition, or redistribution of representational
-        load.
-
-        This method performs synthesis only. It does not evaluate completeness,
-        detect orphaned insights, modify the schema, or persist outputs to
-        SummaryState.
+        Questions whose current mappings/populated themes are stable are carried
+        forward unchanged. Length diagnostics are recorded as passive metadata only.
         """
-        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
-        # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
-        # Normalise the id columsn as they come back from the LLM so could be str
-        # Copy the df because this could be called on a corpus_state object
-        
-        # Get the allocated lenghts
+
         schema_df = schema_df.copy()
         schema_df["theme_id"] = schema_df["theme_id"].astype(int)
+
         if "allocated_length" not in schema_df.columns:
             schema_df = schema_df.merge(
-            self._estimate_theme_lengths(paper_len),
-            on="theme_id",
-            how="left"
-        )
-        
-        # Get the populated themese for the stable schema 
+                self._estimate_theme_lengths(paper_len),
+                on="theme_id",
+                how="left",
+            )
+
         stable_questions = self._check_stable_questions()
-        # Get the stable populated themes
-        if len(stable_questions) > 0:
+
+        if stable_questions:
             stable_populated_themes = self.summary_state.populated_theme_list[-1][
-                self.summary_state.populated_theme_list[-1]["question_id"]
-                .isin(stable_questions)
-                ].copy()
+                self.summary_state.populated_theme_list[-1]["question_id"].isin(stable_questions)
+            ].copy()
         else:
             stable_populated_themes = pd.DataFrame()
 
-        # Get the unstable schema
         unstable_questions = [
             q for q in self.corpus_state.questions["question_id"].tolist()
             if q not in stable_questions
         ]
+
         unstable_schema = schema_df[
             schema_df["question_id"].isin(unstable_questions)
         ].copy()
 
-        # Iterate over the themes from the unstable schema to get the data for the LLM call
         populated_themes = []
+
         for idx, row in unstable_schema.iterrows():
             print(f"Populating theme {idx + 1} of {unstable_schema.shape[0]}...")
+
             rq_id = row["question_id"]
             rq_text = row["question_text"]
-            theme_id = row["theme_id"]
+            theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             theme_description = row["theme_description"]
             organizing_proposition = row.get("organizing_proposition")
             allocated_length = row["allocated_length"]
 
-            # Get the insight ids for the specific question and theme
             insight_ids = mapped_themes_df[
                 (mapped_themes_df["question_id"] == rq_id)
                 & (mapped_themes_df["theme_id"] == theme_id)
             ]["insight_id"].tolist()
-            # Get the insight text from those insight ids
 
             insights_df = self.corpus_state.insights[
                 self.corpus_state.insights["insight_id"].isin(insight_ids)
             ].copy()
-            
-            # Add in the citations
-            insights = (insights_df["insight"] + " (" + insights_df["in_text_citation"] + ")").tolist()
-            
-            # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so throw an error. This is a broken schema is nothing is getting mapped to the theme
+
+            insights = (
+                insights_df["insight"] + " (" + insights_df["in_text_citation"] + ")"
+            ).tolist()
+
             if len(insights) == 0:
                 raise ValueError(
-                    "A theme was not allocated any insights during mapping. This suggests a catastophic failure of the schema rules. Check your schema."
+                    "A theme was not allocated any insights during mapping. "
+                    "This suggests a catastrophic failure of the schema rules. "
+                    "Check your schema."
                 )
-            
+
             insights_str = "\n".join(insights)
 
-            # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
             if theme_label.strip().lower() == "conflict":
                 theme_type = "conflicts"
             elif theme_label.strip().lower() == "other":
                 theme_type = "other"
             else:
                 theme_type = "general"
-                
-            # Build the prompt
-            sys_prompt = Prompts().populate_themes(theme_len=allocated_length, theme_type=theme_type)
+
+            sys_prompt = Prompts().populate_themes(
+                theme_len=allocated_length,
+                theme_type=theme_type,
+            )
 
             user_prompt = (
                 f"RESEARCH QUESTION: {rq_text}\n"
@@ -7785,13 +7592,13 @@ class Summarize:
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "thematic_summary": {"type": "string"}
+                        "thematic_summary": {"type": "string"},
                     },
                     "required": ["thematic_summary"],
-                    "additionalProperties": False
-                }
+                    "additionalProperties": False,
+                },
             }
-            # Call the LLM
+
             response, error = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
@@ -7799,45 +7606,45 @@ class Summarize:
                 ai_model=self.ai_model,
                 fall_back=None,
                 return_json=True,
-                json_schema=json_schema, 
-                return_with_error=True
+                json_schema=json_schema,
+                return_with_error=True,
             )
-            
-            # Test for fall back
+
             if response is None:
                 raise ValueError(
                     f"Theme population for theme: {theme_label}; returned None.\n"
                     f"Error: {error}"
                 )
 
-            # Get the summary from the response and tag with metadata in a dataframe
             summary_text = response.get("thematic_summary", "")
 
-            if not summary_text.strip(): # This checks for an empty string, not None
-                print(f"Empty summary generated for theme_id {theme_id}. Error: {error}. Resubmitting for summary on sampled insights")
-                # --- sample when words in insights exceeds 70000 step ---
-                MAX_WORDS = 70000           
+            if not summary_text.strip():
+                print(
+                    f"Empty summary generated for theme_id {theme_id}. "
+                    f"Error: {error}. Resubmitting for summary on sampled insights"
+                )
 
-                # if total number of words in the insights exceeds the max, then sample
-                
+                MAX_WORDS = 70000
+
                 insights = utils.sample_to_word_limit(
                     insights,
                     max_words=MAX_WORDS,
-                    seed=config.seed
+                    seed=config.seed,
                 )
 
                 print(
                     f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
                 )
+
                 insights_str = "\n".join(insights)
 
                 user_prompt = (
-                f"RESEARCH QUESTION: {rq_text}\n"
-                f"THEME LABEL: {theme_label}\n"
-                f"THEME DESCRIPTION: {theme_description}\n"
-                f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
-                f"INSIGHTS TO SYNTHESIZE:\n"
-                f"{insights_str}\n\n"
+                    f"RESEARCH QUESTION: {rq_text}\n"
+                    f"THEME LABEL: {theme_label}\n"
+                    f"THEME DESCRIPTION: {theme_description}\n"
+                    f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
+                    f"INSIGHTS TO SYNTHESIZE:\n"
+                    f"{insights_str}\n\n"
                 )
 
                 response, error = utils.call_chat_completion(
@@ -7848,7 +7655,7 @@ class Summarize:
                     fall_back=None,
                     return_json=True,
                     json_schema=json_schema,
-                    return_with_error=True
+                    return_with_error=True,
                 )
 
                 if response is None:
@@ -7856,43 +7663,59 @@ class Summarize:
                         "Population of sampled insight set failed on return from LLM.\n"
                         f"Error: {error}"
                     )
-                
-                else:
-                    summary_text = response.get("thematic_summary")
 
-            # Put the summary into a dataframe        
-            thematic_summary = pd.DataFrame([summary_text], columns=["thematic_summary"])
-            # Now populate the rest of the populated summary text
-            thematic_summary["question_id"] = rq_id
-            thematic_summary["theme_id"] = int(theme_id)
-            thematic_summary["theme_label"] = theme_label
-            thematic_summary["theme_description"] = theme_description
-            thematic_summary["organizing_proposition"] = organizing_proposition
-            thematic_summary["allocated_length"] = allocated_length
-            
-            # Get the length of the summary in words and calculate the percentage of the allocated length that this summary represents
-            thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
-            thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
-            
-            # Append the result to the list of dfs the loop is producing, which will be concatenated at the end
+                summary_text = response.get("thematic_summary", "")
+
+                if not summary_text.strip():
+                    raise ValueError(
+                        f"Population of sampled insight set returned an empty summary "
+                        f"for theme_id {theme_id}."
+                    )
+
+            thematic_summary = pd.DataFrame(
+                [{
+                    "thematic_summary": summary_text,
+                    "question_id": rq_id,
+                    "theme_id": theme_id,
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "organizing_proposition": organizing_proposition,
+                    "allocated_length": allocated_length,
+                }]
+            )
+
+            thematic_summary["current_length"] = len(summary_text.split())
+            thematic_summary["perc_of_max_length"] = (
+                thematic_summary["current_length"] / allocated_length
+                if allocated_length > 0
+                else None
+            )
+
             populated_themes.append(thematic_summary)
 
-        # Concat the final list of dfs and return
-        # First check its not empty
         if not populated_themes:
             raise ValueError(
-                "All the themes were already marked as stable. Repopulation should not be attemped. Use your prior populated themes for redundancy/rendering"
+                "All themes were already stable. Repopulation should not be attempted. "
+                "Use the prior populated themes for redundancy/rendering."
             )
-        populated_themes_df = pd.concat(populated_themes, ignore_index=True)
-        # Add back the stable questions and themes with thier populated summaries
-        if stable_populated_themes is not None and not stable_populated_themes.empty:
-            populated_themes_df = pd.concat([populated_themes_df, stable_populated_themes], ignore_index=True)
 
-        # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative
-        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
-        populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-        
-        return(populated_themes_df)
+        populated_themes_df = pd.concat(populated_themes, ignore_index=True)
+
+        if not stable_populated_themes.empty:
+            populated_themes_df = pd.concat(
+                [populated_themes_df, stable_populated_themes],
+                ignore_index=True,
+            )
+
+        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int)
+
+        populated_themes_df = (
+            populated_themes_df
+            .sort_values(by=["question_id", "theme_id"])
+            .reset_index(drop=True)
+        )
+
+        return populated_themes_df
 
     def _iterative_length_check_and_expand_loop(
         self,
