@@ -9219,48 +9219,48 @@ class Summarize:
             if resume == "1":
                 with open(self.orphan_pickle_resume_path, "rb") as f:
                     checked_insights_df_meta_state = pickle.load(f)
-                    # Check that the pickled state matches the current state
-                    pickled_state = checked_insights_df_meta_state["state_meta"]
-                    current_state = {
-                        "corpus_hash": self.corpus_state.fingerprint(),
-                        "summary_hash": self.summary_state.fingerprint()
-                    }
-                    if pickled_state != current_state:
-                        raise ValueError(
-                            "The corpus state or summary state has changed between resume. Resume invalid"
-                            "Either choose a fresh start or if you know what you are doing use force = True" 
-                            )
-                    # Load the checked insights data frame from the pickle to resume the process
-                    checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
-                    mode = checked_insights_df_meta_state["mode"]
+                # Check that the pickled state matches the current state
+                pickled_state = checked_insights_df_meta_state["state_meta"]
+                current_state = {
+                    "corpus_hash": self.corpus_state.fingerprint(),
+                    "summary_hash": self.summary_state.fingerprint()
+                }
+                if pickled_state != current_state:
+                    raise ValueError(
+                        "The corpus state or summary state has changed between resume. Resume invalid"
+                        "Either choose a fresh start or if you know what you are doing use force = True" 
+                        )
+                # Load the checked insights data frame from the pickle to resume the process
+                checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
+                mode = checked_insights_df_meta_state["mode"]
 
-                    print("Resuming orphan identification process from last saved point...")
-                    orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
-                    self.summary_state.populated_theme_list[-1] = updated_summary_df
-                    if mode == "replace":
-                        self.summary_state.orphan_list[-1] = orphans_df
-                    elif mode == "append":
-                        self.summary_state.orphan_list.append(orphans_df)
-                    
-                    # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
-                    # Have to wrap in this try - except as windows keeps hold of the file for reasons that are not clear.
-                    try:
-                        os.remove(self.orphan_pickle_resume_path)
-                    except PermissionError:
-                        while True:
-                            confirm = input(
-                                "\nCould not automatically delete resume file.\n"
-                                "This is a known Windows file system issue.\n\n"
-                                f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
-                                "This file will trigger resume mode on the next run if not removed.\n\n"
-                                "Enter 'c' to continue:\n"
-                            ).lower().strip()
+                print("Resuming orphan identification process from last saved point...")
+                orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
+                self.summary_state.populated_theme_list[-1] = updated_summary_df
+                if mode == "replace":
+                    self.summary_state.orphan_list[-1] = orphans_df
+                elif mode == "append":
+                    self.summary_state.orphan_list.append(orphans_df)
+                
+                # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
+                # Have to wrap in this try - except as windows keeps hold of the file for reasons that are not clear.
+                try:
+                    os.remove(self.orphan_pickle_resume_path)
+                except PermissionError:
+                    while True:
+                        confirm = input(
+                            "\nCould not automatically delete resume file.\n"
+                            "This is a known Windows file system issue.\n\n"
+                            f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
+                            "This file will trigger resume mode on the next run if not removed.\n\n"
+                            "Enter 'c' to continue:\n"
+                        ).lower().strip()
 
-                            if confirm == "c":
-                                break
+                        if confirm == "c":
+                            break
 
-                    self.summary_state.save()
-                    return(self.summary_state.orphan_list[-1])
+                self.summary_state.save()
+                return(self.summary_state.orphan_list[-1])
  
             else:
                 print("Starting new orphan identification process and deleting the in progress pickle...")
