@@ -177,162 +177,249 @@ def validate_format(
             "OR both 'questions' and 'injected_value'."
         )
     
+# def call_chat_completion(
+#     llm_client,
+#     ai_model: str,
+#     sys_prompt: str,
+#     user_prompt: str,
+#     fall_back: Dict[str, Any],
+#     return_json: bool,
+#     json_schema: Optional[dict] = None,
+#     max_tokens: Optional[int] = None,
+#     return_with_error: bool = False
+#     ) -> Union[
+#     str,
+#     Dict[str, Any],
+#     Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]
+#     ]:
+#     """
+#     Call a chat-completion model with standardized prompt, JSON, and error handling.
+
+#     Builds a two-message chat-completion request from a system prompt and a
+#     user prompt, sends it to the supplied LLM client, and returns either raw
+#     text or parsed JSON. The helper optionally requests JSON-mode or
+#     schema-constrained JSON responses and can return structured error
+#     metadata alongside the result.
+
+#     Parameters
+#     ----------
+#     llm_client : Any
+#         Client object exposing `chat.completions.create()`.
+
+#     ai_model : str
+#         Model identifier passed to the chat-completion API.
+
+#     sys_prompt : str
+#         System prompt used as the first message.
+
+#     user_prompt : str
+#         User prompt used as the second message.
+
+#     fall_back : dict[str, Any]
+#         Value returned when `return_json=True` and the API call fails or the
+#         response cannot be parsed as JSON.
+
+#     return_json : bool
+#         If True, request a JSON response and parse the returned content with
+#         `json.loads()`. If False, return the response content as text.
+
+#     json_schema : dict, optional
+#         Optional schema passed as `response_format={"type": "json_schema",
+#         "json_schema": json_schema}` when `return_json=True`. If omitted and
+#         `return_json=True`, JSON object mode is requested instead.
+
+#     max_tokens : int, optional
+#         Maximum number of output tokens to request. If omitted, no
+#         `max_tokens` argument is passed.
+
+#     return_with_error : bool, default=False
+#         If True, return `(result, error)`. If False, return only `result`.
+
+#     Returns
+#     -------
+#     str or dict[str, Any] or tuple[str | dict[str, Any], dict[str, str] | None]
+#         If `return_with_error=False`, returns either response text
+#         (`return_json=False`) or parsed JSON / fallback (`return_json=True`).
+
+#         If `return_with_error=True`, returns a tuple containing the result
+#         and an error dictionary, or `None` if no error occurred.
+
+#     Raises
+#     ------
+#     None
+#         API and JSON parsing failures are caught internally. Failures are
+#         represented through fallback return values and, when requested,
+#         structured error metadata.
+
+#     Notes
+#     -----
+#     The request is sent with `temperature=0`.
+
+#     If `return_json=True`, JSON parsing failures return `fall_back` and
+#     record a `"parse_error"` when `return_with_error=True`.
+
+#     If the API call fails or returns empty content, the function returns
+#     `fall_back` for JSON mode and an empty string for text mode. In this
+#     case the recorded error type is `"api_error"`.
+
+#     This wrapper does not validate returned JSON against `json_schema`
+#     locally; it only passes the schema to the model API through
+#     `response_format`.
+#     """
+#     # create the messages
+#     messages = [
+#         {"role": "system", "content": sys_prompt},
+#         {"role": "user", "content": user_prompt}
+#     ]
+
+#     # Allocate the variabls for the API call to kwargs for cleaner handling of optional parameters
+#     kwargs = {
+#         "model": ai_model,
+#         "messages": messages,
+#         "temperature": 0
+#     }
+
+#     # Conditionally add response format to kwargs based on return_json and json_schema
+#     if return_json:
+#         if json_schema is not None:
+#             kwargs["response_format"] = {
+#                 "type": "json_schema",
+#                 "json_schema": json_schema
+#             }
+#         else:
+#             kwargs["response_format"] = {"type": "json_object"}
+    
+#     # Conditionally add max_tokens to kwargs if provided
+#     if max_tokens is not None:
+#         kwargs["max_tokens"] = max_tokens
+
+#     # Set both values to none and compute later
+#     result: Union[str, Dict[str, Any], None] = None
+#     error: Optional[Dict[str, str]] = None
+
+#     # Pass api the kwargs
+#     try:
+#         response = llm_client.chat.completions.create(**kwargs)
+#         content = response.choices[0].message.content
+
+#         # Check if call worked:
+#         # LLM returned something
+#         if content is None:
+#             raise ValueError("Empty response content")
+
+#         # LLM returned valid JSON (if expected)
+#         if return_json:
+#             try:
+#                 result = json.loads(content.strip())
+#             except Exception as e:
+#                 result = fall_back
+#                 error = {
+#                     "type": "parse_error",
+#                     "message": f"Failed to parse JSON: {e}"
+#                 }
+#         else:
+#             result = content
+
+#     # Api call failed and error was returned
+#     except Exception as e:
+#         result = fall_back if return_json else ""
+#         error = {
+#             "type": "api_error",
+#             "message": str(e)
+#         }
+
+#     # Conditionally retrn output or output with error based on return_with_error flag
+#     if return_with_error:
+#         return result, error
+
+#     return result
+
+
 def call_chat_completion(
     llm_client,
     ai_model: str,
     sys_prompt: str,
     user_prompt: str,
-    fall_back: Dict[str, Any],
+    fall_back,
     return_json: bool,
-    json_schema: Optional[dict] = None,
-    max_tokens: Optional[int] = None,
-    return_with_error: bool = False
-    ) -> Union[
-    str,
-    Dict[str, Any],
-    Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]
-    ]:
+    json_schema=None,
+    max_tokens=None,
+    return_with_error: bool = False,
+):
     """
-    Call a chat-completion model with standardized prompt, JSON, and error handling.
+    Call Chat Completions with JSON and error handling.
 
-    Builds a two-message chat-completion request from a system prompt and a
-    user prompt, sends it to the supplied LLM client, and returns either raw
-    text or parsed JSON. The helper optionally requests JSON-mode or
-    schema-constrained JSON responses and can return structured error
-    metadata alongside the result.
-
-    Parameters
-    ----------
-    llm_client : Any
-        Client object exposing `chat.completions.create()`.
-
-    ai_model : str
-        Model identifier passed to the chat-completion API.
-
-    sys_prompt : str
-        System prompt used as the first message.
-
-    user_prompt : str
-        User prompt used as the second message.
-
-    fall_back : dict[str, Any]
-        Value returned when `return_json=True` and the API call fails or the
-        response cannot be parsed as JSON.
-
-    return_json : bool
-        If True, request a JSON response and parse the returned content with
-        `json.loads()`. If False, return the response content as text.
-
-    json_schema : dict, optional
-        Optional schema passed as `response_format={"type": "json_schema",
-        "json_schema": json_schema}` when `return_json=True`. If omitted and
-        `return_json=True`, JSON object mode is requested instead.
-
-    max_tokens : int, optional
-        Maximum number of output tokens to request. If omitted, no
-        `max_tokens` argument is passed.
-
-    return_with_error : bool, default=False
-        If True, return `(result, error)`. If False, return only `result`.
-
-    Returns
-    -------
-    str or dict[str, Any] or tuple[str | dict[str, Any], dict[str, str] | None]
-        If `return_with_error=False`, returns either response text
-        (`return_json=False`) or parsed JSON / fallback (`return_json=True`).
-
-        If `return_with_error=True`, returns a tuple containing the result
-        and an error dictionary, or `None` if no error occurred.
-
-    Raises
-    ------
-    None
-        API and JSON parsing failures are caught internally. Failures are
-        represented through fallback return values and, when requested,
-        structured error metadata.
-
-    Notes
-    -----
-    The request is sent with `temperature=0`.
-
-    If `return_json=True`, JSON parsing failures return `fall_back` and
-    record a `"parse_error"` when `return_with_error=True`.
-
-    If the API call fails or returns empty content, the function returns
-    `fall_back` for JSON mode and an empty string for text mode. In this
-    case the recorded error type is `"api_error"`.
-
-    This wrapper does not validate returned JSON against `json_schema`
-    locally; it only passes the schema to the model API through
-    `response_format`.
+    Reports finish_reason="length" as a truncation error so the
+    planning helper and coordinator can split the affected batch.
     """
-    # create the messages
+    import json
+
     messages = [
         {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": user_prompt}
+        {"role": "user", "content": user_prompt},
     ]
 
-    # Allocate the variabls for the API call to kwargs for cleaner handling of optional parameters
     kwargs = {
         "model": ai_model,
         "messages": messages,
-        "temperature": 0
+        "temperature": 0,
     }
 
-    # Conditionally add response format to kwargs based on return_json and json_schema
     if return_json:
         if json_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
-                "json_schema": json_schema
+                "json_schema": json_schema,
             }
         else:
             kwargs["response_format"] = {"type": "json_object"}
-    
-    # Conditionally add max_tokens to kwargs if provided
+
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
-    # Set both values to none and compute later
-    result: Union[str, Dict[str, Any], None] = None
-    error: Optional[Dict[str, str]] = None
+    result = None
+    error = None
 
-    # Pass api the kwargs
     try:
         response = llm_client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
+        choice = response.choices[0]
+        content = choice.message.content
 
-        # Check if call worked:
-        # LLM returned something
-        if content is None:
+        # Detect truncation before attempting to parse incomplete JSON.
+        if choice.finish_reason == "length":
+            result = fall_back if return_json else ""
+            error = {
+                "type": "truncation",
+                "message": "Completion stopped at a length limit.",
+            }
+
+        elif content is None:
             raise ValueError("Empty response content")
 
-        # LLM returned valid JSON (if expected)
-        if return_json:
+        elif return_json:
             try:
                 result = json.loads(content.strip())
-            except Exception as e:
+            except Exception as exc:
                 result = fall_back
                 error = {
                     "type": "parse_error",
-                    "message": f"Failed to parse JSON: {e}"
+                    "message": f"Failed to parse JSON: {exc}",
                 }
         else:
             result = content
 
-    # Api call failed and error was returned
-    except Exception as e:
+    except Exception as exc:
         result = fall_back if return_json else ""
         error = {
             "type": "api_error",
-            "message": str(e)
+            "message": str(exc),
         }
 
-    # Conditionally retrn output or output with error based on return_with_error flag
     if return_with_error:
         return result, error
 
     return result
+
 
 def call_reasoning_model(
     prompt: str,

@@ -4731,6 +4731,7 @@ class Summarize:
                  llm_client: Any,
                  ai_model: str,
                  paper_output_length: int,  # Approximate total paper length in words
+                 analytical_framework: str,
                  summary_save_location: str = config.SUMMARY_SAVE_LOCATION, 
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
@@ -4863,6 +4864,7 @@ class Summarize:
 
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
+        self.analytical_framework: str = analytical_framework
         self.paper_output_length: int = paper_output_length
         self.summary_save_location = summary_save_location
         self.pickle_save_location = pickle_save_location
@@ -8227,6 +8229,9 @@ class Summarize:
 
         return response_summary
 
+#### -------------------- CODE UPDATE--------------------
+
+
     def _identify_missing_citations(self, summary: str, required_citations: list) -> list:
         """
         Identify citations missing from a synthesized summary.
@@ -8281,127 +8286,231 @@ class Summarize:
         return missing_citations
 
     
-    def _address_missing_citations(
+    # def _address_missing_citations(
+    #     self,
+    #     summary: str,
+    #     missing_citations_df: pd.DataFrame
+    # ) -> str:
+    #     """
+    #     Repair citation omissions in a synthesized thematic summary.
+
+    #     Uses the insights associated with missing citations to generate targeted
+    #     sentence-level patches for a thematic summary. The method asks the LLM to
+    #     propose either revisions to existing sentences or new sentences anchored
+    #     after existing text, then applies those patches deterministically.
+
+    #     Parameters
+    #     ----------
+    #     summary : str
+    #         Thematic summary text to repair.
+
+    #     missing_citations_df : pd.DataFrame
+    #         DataFrame containing omitted citation evidence. Expected columns are:
+
+    #         - `in_text_citation`
+    #         - `insight`
+
+    #     Returns
+    #     -------
+    #     str
+    #         Summary text after applying any valid citation-repair patches. If no
+    #         missing citations are supplied, returns the original summary unchanged.
+
+    #     Notes
+    #     -----
+    #     Missing citations are grouped by `in_text_citation` before being passed to
+    #     the LLM, along with the associated insight texts. The LLM returns structured
+    #     patch instructions rather than a fully rewritten summary.
+
+    #     Patches are applied only when their target sentence is found exactly in the
+    #     current summary. This prevents uncontrolled rewrites and keeps the repair
+    #     process deterministic.
+
+    #     Two patch types are supported:
+
+    #     - revise an existing sentence
+    #     - insert a new sentence after an anchor sentence
+
+    #     This method repairs citation presence, not full evidentiary accuracy. It
+    #     does not verify that citations are attached to the most appropriate claims
+    #     beyond the LLM-generated patch instructions.
+
+    #     The method may print missing-citation inputs, prompts, and proposed patches
+    #     for debugging.
+    #     """
+
+    #     if missing_citations_df.empty:
+    #         return summary
+
+    #     missing_citations_grouped = (
+    #         missing_citations_df
+    #         .groupby("in_text_citation")["insight"]
+    #         .apply(list)
+    #         .reset_index()
+    #         .to_dict(orient="records")
+    #     )
+
+    #     missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
+
+    #     user_prompt = (
+    #         f"THEMATIC SUMMARY:\n{summary}\n\n"
+    #         f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
+    #     )
+
+    #     sys_prompt = Prompts().repair_citation_provenance()
+
+    #     json_schema = {
+    #         "name": "repair_citation_provenance",
+    #         "strict": True,
+    #         "schema": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "patches": {
+    #                     "type": "array",
+    #                     "items": {
+    #                         "type": "object",
+    #                         "properties": {
+    #                             "missing_citations": {
+    #                                 "type": "array",
+    #                                 "items": {
+    #                                     "type": "string"
+    #                                 }
+    #                             },
+    #                             "revise": {
+    #                                 "type": "boolean"
+    #                             },
+    #                             "original_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "revised_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "anchor_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "new_sentence": {
+    #                                 "type": "string"
+    #                             }
+    #                         },
+    #                         "required": [
+    #                             "missing_citations",
+    #                             "revise",
+    #                             "original_sentence",
+    #                             "revised_sentence",
+    #                             "anchor_sentence",
+    #                             "new_sentence"
+    #                         ],
+    #                         "additionalProperties": False
+    #                     }
+    #                 }
+    #             },
+    #             "required": ["patches"],
+    #             "additionalProperties": False
+    #         }
+    #     }
+
+    #     response, error = utils.call_chat_completion(
+    #         sys_prompt=sys_prompt,
+    #         user_prompt=user_prompt,
+    #         llm_client=self.llm_client,
+    #         ai_model=self.ai_model,
+    #         fall_back=None,
+    #         return_json=True,
+    #         json_schema=json_schema,
+    #         max_tokens=4096, 
+    #         return_with_error=True
+    #     )
+
+    #     if response is None:
+    #         raise ValueError(
+    #             f"Citation repair returned nothing. Error: {error}"
+    #         )
+
+    #     for patch in response["patches"]:
+    #         # Check whether the sentences got returned correctly
+    #         if patch["revise"]:
+
+    #             if patch["original_sentence"] not in summary:
+    #                 print("WARNING: original sentence not found")
+    #                 continue
+
+    #         else:
+
+    #             if patch["anchor_sentence"] not in summary:
+    #                 print("WARNING: anchor sentence not found")
+    #                 continue
+
+    #         # Then deterministically insert the revised sentences
+    #         if patch["revise"]:
+
+    #             summary = summary.replace(
+    #                 patch["original_sentence"],
+    #                 patch["revised_sentence"],
+    #                 1
+    #             )
+
+    #         else:
+
+    #             summary = summary.replace(
+    #                 patch["anchor_sentence"],
+    #                 patch["anchor_sentence"] + " " + patch["new_sentence"],
+    #                 1
+    #             )
+
+    #     return summary
+
+
+    def _plan_citation_placements(
         self,
-        summary: str,
-        missing_citations_df: pd.DataFrame
-    ) -> str:
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
         """
-        Repair citation omissions in a synthesized thematic summary.
+        Return source-first citation placements.
 
-        Uses the insights associated with missing citations to generate targeted
-        sentence-level patches for a thematic summary. The method asks the LLM to
-        propose either revisions to existing sentences or new sentences anchored
-        after existing text, then applies those patches deterministically.
-
-        Parameters
-        ----------
-        summary : str
-            Thematic summary text to repair.
-
-        missing_citations_df : pd.DataFrame
-            DataFrame containing omitted citation evidence. Expected columns are:
-
-            - `in_text_citation`
-            - `insight`
-
-        Returns
-        -------
-        str
-            Summary text after applying any valid citation-repair patches. If no
-            missing citations are supplied, returns the original summary unchanged.
-
-        Notes
-        -----
-        Missing citations are grouped by `in_text_citation` before being passed to
-        the LLM, along with the associated insight texts. The LLM returns structured
-        patch instructions rather than a fully rewritten summary.
-
-        Patches are applied only when their target sentence is found exactly in the
-        current summary. This prevents uncontrolled rewrites and keeps the repair
-        process deterministic.
-
-        Two patch types are supported:
-
-        - revise an existing sentence
-        - insert a new sentence after an anchor sentence
-
-        This method repairs citation presence, not full evidentiary accuracy. It
-        does not verify that citations are attached to the most appropriate claims
-        beyond the LLM-generated patch instructions.
-
-        The method may print missing-citation inputs, prompts, and proposed patches
-        for debugging.
+        Raises OverflowError only for confirmed output truncation, allowing
+        the coordinator to split the request. Other failures raise ValueError.
         """
-
-        if missing_citations_df.empty:
-            return summary
-
-        missing_citations_grouped = (
-            missing_citations_df
-            .groupby("in_text_citation")["insight"]
-            .apply(list)
-            .reset_index()
-            .to_dict(orient="records")
-        )
-
-        missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
-
-        user_prompt = (
-            f"THEMATIC SUMMARY:\n{summary}\n\n"
-            f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
-        )
-
-        sys_prompt = Prompts().repair_citation_provenance()
-
         json_schema = {
-            "name": "repair_citation_provenance",
+            "name": "plan_citation_provenance",
             "strict": True,
             "schema": {
                 "type": "object",
                 "properties": {
-                    "patches": {
+                    "placements": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "missing_citations": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
+                                "citation": {"type": "string"},
+                                "insight_id": {"type": "string"},
+                                "existing_summary_claim": {
+                                    "type": ["string", "null"],
                                 },
-                                "revise": {
-                                    "type": "boolean"
+                                "best_matching_existing_sentence": {
+                                    "type": "string",
                                 },
-                                "original_sentence": {
-                                    "type": "string"
+                                "action": {
+                                    "type": "string",
+                                    "enum": ["unchanged", "amend", "add"],
                                 },
-                                "revised_sentence": {
-                                    "type": "string"
-                                },
-                                "anchor_sentence": {
-                                    "type": "string"
-                                },
-                                "new_sentence": {
-                                    "type": "string"
-                                }
+                                "justification": {"type": "string"},
                             },
                             "required": [
-                                "missing_citations",
-                                "revise",
-                                "original_sentence",
-                                "revised_sentence",
-                                "anchor_sentence",
-                                "new_sentence"
+                                "citation",
+                                "insight_id",
+                                "existing_summary_claim",
+                                "best_matching_existing_sentence",
+                                "action",
+                                "justification",
                             ],
-                            "additionalProperties": False
-                        }
-                    }
+                            "additionalProperties": False,
+                        },
+                    },
                 },
-                "required": ["patches"],
-                "additionalProperties": False
-            }
+                "required": ["placements"],
+                "additionalProperties": False,
+            },
         }
 
         response, error = utils.call_chat_completion(
@@ -8412,47 +8521,1380 @@ class Summarize:
             fall_back=None,
             return_json=True,
             json_schema=json_schema,
-            max_tokens=4096, 
-            return_with_error=True
+            max_tokens=4096,
+            return_with_error=True,
         )
 
-        if response is None:
-            raise ValueError(
-                f"Citation repair returned nothing. Error: {error}"
+        if error is not None and error.get("type") == "truncation":
+            raise OverflowError(
+                f"Citation planning output truncated. Error: {error}"
             )
 
-        for patch in response["patches"]:
-            # Check whether the sentences got returned correctly
-            if patch["revise"]:
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation planning failed. Error: {error}"
+            )
 
-                if patch["original_sentence"] not in summary:
-                    print("WARNING: original sentence not found")
-                    continue
+        return response
 
-            else:
 
-                if patch["anchor_sentence"] not in summary:
-                    print("WARNING: anchor sentence not found")
-                    continue
+    def _rewrite_citation_sentences(
+        self,
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
+        json_schema = {
+            "name": "rewrite_citation_provenance",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "sentences": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "insight_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "existing_citations": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "text",
+                                "insight_ids",
+                                "existing_citations",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "unresolved_insight_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "sentences",
+                    "unresolved_insight_ids",
+                ],
+                "additionalProperties": False,
+            },
+        }
 
-            # Then deterministically insert the revised sentences
-            if patch["revise"]:
+        response, error = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=None,
+            return_json=True,
+            json_schema=json_schema,
+            max_tokens=4096,
+            return_with_error=True,
+        )
 
-                summary = summary.replace(
-                    patch["original_sentence"],
-                    patch["revised_sentence"],
-                    1
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation sentence rewrite failed. Error: {error}"
+            )
+
+        return response
+
+
+    def _recover_citation_target(
+        self,
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
+        json_schema = {
+            "name": "recover_citation_target_sentence",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["matched", "no_match", "ambiguous"],
+                    },
+                    "original_sentence": {"type": "string"},
+                    "containing_paragraph": {"type": "string"},
+                },
+                "required": [
+                    "status",
+                    "original_sentence",
+                    "containing_paragraph",
+                ],
+                "additionalProperties": False,
+            },
+        }
+
+        response, error = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=None,
+            return_json=True,
+            json_schema=json_schema,
+            max_tokens=4096,
+            return_with_error=True,
+        )
+
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation target recovery failed. Error: {error}"
+            )
+
+        return response
+
+    def _resolve_citation_plan(
+        self,
+        plan: dict,
+        summary: str,
+        missing_citations_df: pd.DataFrame,
+    ) -> list:
+        """
+        Validate and resolve source-first citation placements.
+
+        Returns records containing:
+            original_sentence, start, end, assignments
+
+        Each assignment retains:
+            citation, insight_id, existing_summary_claim,
+            action, justification, needs_update
+
+        Offsets refer to the unchanged input summary.
+        """
+        import json
+        from collections import Counter
+
+        evidence = missing_citations_df[
+            ["insight_id", "in_text_citation", "insight"]
+        ].copy()
+
+        if evidence.isna().any().any():
+            raise ValueError("Citation evidence contains missing values.")
+
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+
+        for insight_id, rows in evidence.groupby("insight_id"):
+            if (
+                rows["in_text_citation"].nunique() != 1
+                or rows["insight"].nunique() != 1
+            ):
+                raise ValueError(
+                    f"Conflicting evidence for insight ID {insight_id}."
                 )
 
-            else:
+        lookup = (
+            evidence.drop_duplicates("insight_id")
+            .set_index("insight_id")
+            .to_dict(orient="index")
+        )
 
-                summary = summary.replace(
-                    patch["anchor_sentence"],
-                    patch["anchor_sentence"] + " " + patch["new_sentence"],
-                    1
+        required_sources = set(evidence["in_text_citation"])
+
+        if (
+            not isinstance(plan, dict)
+            or not isinstance(plan.get("placements"), list)
+        ):
+            raise ValueError("Citation plan must contain a placements list.")
+
+        placements = plan["placements"]
+        expected_fields = {
+            "citation",
+            "insight_id",
+            "existing_summary_claim",
+            "best_matching_existing_sentence",
+            "action",
+            "justification",
+        }
+
+        source_counts = Counter()
+
+        # Validate the complete plan before making target-recovery calls.
+        for placement in placements:
+            if (
+                not isinstance(placement, dict)
+                or set(placement) != expected_fields
+            ):
+                raise ValueError("Citation placement contains invalid fields.")
+
+            for field in (
+                "citation",
+                "insight_id",
+                "best_matching_existing_sentence",
+                "action",
+                "justification",
+            ):
+                if (
+                    not isinstance(placement[field], str)
+                    or not placement[field].strip()
+                ):
+                    raise ValueError(
+                        f"Placement field {field!r} must be a nonempty string."
+                    )
+
+            citation = placement["citation"]
+            insight_id = placement["insight_id"]
+            action = placement["action"]
+            claim = placement["existing_summary_claim"]
+
+            if action not in {"unchanged", "amend", "add"}:
+                raise ValueError(f"Invalid citation action: {action!r}")
+
+            if claim is not None and (
+                not isinstance(claim, str) or not claim.strip()
+            ):
+                raise ValueError(
+                    "existing_summary_claim must be nonempty text or null."
                 )
 
-        return summary
+            if action in {"unchanged", "amend"} and claim is None:
+                raise ValueError(
+                    f"Action {action!r} requires an existing summary claim."
+                )
+
+            if citation not in required_sources:
+                raise ValueError(
+                    f"Planner returned an unexpected citation: {citation!r}"
+                )
+
+            if insight_id not in lookup:
+                raise ValueError(
+                    f"Planner returned unknown insight ID: {insight_id!r}"
+                )
+
+            expected_citation = lookup[insight_id]["in_text_citation"]
+            if citation != expected_citation:
+                raise ValueError(
+                    f"Insight {insight_id} belongs to "
+                    f"{expected_citation!r}, not {citation!r}."
+                )
+
+            source_counts[citation] += 1
+
+        omitted_sources = required_sources - set(source_counts)
+        repeated_sources = [
+            citation
+            for citation, count in source_counts.items()
+            if count > 1
+        ]
+
+        if omitted_sources or repeated_sources:
+            raise ValueError(
+                "Citation plan has incomplete or duplicate source coverage. "
+                f"Omitted: {sorted(omitted_sources)}. "
+                f"Repeated: {sorted(repeated_sources)}."
+            )
+
+        resolved = {}
+
+        # Reuse recovery results when multiple sources return the same target.
+        recovered_locations = {}
+
+        for placement in placements:
+            proposed_target = placement["best_matching_existing_sentence"]
+            target = proposed_target
+
+            if target in recovered_locations:
+                target, start = recovered_locations[target]
+
+            elif summary.count(target) == 1:
+                start = summary.index(target)
+
+            else:
+                insight_id = placement["insight_id"]
+
+                recovery = self._recover_citation_target(
+                    sys_prompt=Prompts().recover_citation_target_sentence(),
+                    user_prompt=json.dumps(
+                        {
+                            "THEMATIC SUMMARY": summary,
+                            "PROPOSED TARGET SENTENCE": proposed_target,
+                            "SELECTED INSIGHTS": [
+                                {
+                                    "insight_id": insight_id,
+                                    **lookup[insight_id],
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                )
+
+                if recovery["status"] != "matched":
+                    raise ValueError(
+                        f"Target recovery returned {recovery['status']} "
+                        f"for {placement['citation']!r}: "
+                        f"{proposed_target!r}"
+                    )
+
+                target = recovery["original_sentence"]
+                paragraph = recovery["containing_paragraph"]
+
+                if (
+                    not isinstance(target, str)
+                    or not target.strip()
+                    or not isinstance(paragraph, str)
+                    or not paragraph.strip()
+                    or summary.count(paragraph) != 1
+                    or paragraph.count(target) != 1
+                ):
+                    raise ValueError(
+                        "Recovered sentence and context are not uniquely exact."
+                    )
+
+                start = summary.index(paragraph) + paragraph.index(target)
+                recovered_locations[proposed_target] = (target, start)
+
+            end = start + len(target)
+
+            if summary[start:end] != target:
+                raise ValueError("Resolved target does not match the summary.")
+
+            location = (start, end)
+            record = resolved.setdefault(
+                location,
+                {
+                    "original_sentence": target,
+                    "start": start,
+                    "end": end,
+                    "assignments": [],
+                },
+            )
+
+            record["assignments"].append({
+                "citation": placement["citation"],
+                "insight_id": placement["insight_id"],
+                "existing_summary_claim": placement["existing_summary_claim"],
+                "action": placement["action"],
+                "justification": placement["justification"],
+                "needs_update": placement["action"] != "unchanged",
+            })
+
+        results = sorted(
+            resolved.values(),
+            key=lambda record: record["start"],
+        )
+
+        for previous, current in zip(results, results[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError(
+                    "Resolved target sentences overlap: "
+                    f"{previous['original_sentence']!r} and "
+                    f"{current['original_sentence']!r}"
+                )
+
+        return results
+
+    def _extract_existing_citations(
+        self,
+        text: str,
+        known_citations: list,
+    ) -> list:
+        """
+        Extract exact known citation strings from parenthetical citation lists.
+
+        Assumes citation lists use semicolon-separated corpus citation strings.
+        Ordinary parenthetical text is ignored.
+        """
+        import re
+
+        known = set(known_citations)
+        found = []
+
+        for match in re.finditer(r"\([^()]*\)", text):
+            members = [
+                value.strip()
+                for value in match.group()[1:-1].split(";")
+            ]
+
+            if members and all(value in known for value in members):
+                found.extend(members)
+
+        return list(dict.fromkeys(found))
+
+
+    def _insert_sentence_citations(
+        self,
+        sentence: str,
+        citations: list,
+        known_citations: list,
+    ) -> str:
+        """
+        Add citations before terminal punctuation.
+
+        Extends an existing terminal citation list when recognizable;
+        otherwise adds a separate parenthetical citation list.
+        """
+        import re
+
+        citations = list(dict.fromkeys(citations))
+        if not citations:
+            return sentence
+
+        # Preserve terminal punctuation and closing quotation marks.
+        ending = re.search(r"""([.!?]?["'”’]*)$""", sentence)
+        suffix = ending.group()
+        body = sentence[:ending.start()].rstrip()
+
+        terminal_group = re.search(r"\(([^()]*)\)$", body)
+        known = set(known_citations)
+
+        if terminal_group:
+            existing = [
+                value.strip()
+                for value in terminal_group.group(1).split(";")
+            ]
+
+            if existing and all(value in known for value in existing):
+                combined = list(dict.fromkeys(existing + citations))
+                return (
+                    body[:terminal_group.start()]
+                    + "(" + "; ".join(combined) + ")"
+                    + suffix
+                )
+
+        return body + " (" + "; ".join(citations) + ")" + suffix
+
+
+    def _implement_citation_plan(
+        self,
+        summary: str,
+        resolved_plan: list,
+        missing_citations_df: pd.DataFrame,
+        research_question: str,
+        analytical_frame: str,
+    ) -> str:
+        """
+        Implement resolved citation placements using original text offsets.
+
+        Adjacent targets within a paragraph are rewritten together when
+        any assignment requires changes.
+
+        Silent omissions of selected insight IDs produce warnings.
+        Invalid references, lost existing citations, and explicit unresolved
+        results remain errors.
+        """
+        import json
+        import re
+
+        # Full evidence lookup for the insights selected during planning.
+        evidence = missing_citations_df.copy()
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+
+        lookup = (
+            evidence.drop_duplicates("insight_id")
+            .set_index("insight_id")
+            .to_dict(orient="index")
+        )
+
+        known_citations = list(dict.fromkeys(
+            str(value).strip()
+            for value in self.corpus_state.insights[
+                "in_text_citation"
+            ].dropna()
+            if str(value).strip()
+        ))
+        known_citations = list(dict.fromkeys(
+            known_citations + evidence["in_text_citation"].tolist()
+        ))
+
+        # Locate paragraphs without changing the original summary.
+        paragraph_spans = []
+        start = 0
+
+        for separator in re.finditer(r"\r?\n[ \t]*\r?\n", summary):
+            if separator.start() > start:
+                paragraph_spans.append((start, separator.start()))
+            start = separator.end()
+
+        if start < len(summary):
+            paragraph_spans.append((start, len(summary)))
+
+        # Validate resolved targets and their source associations.
+        targets = []
+
+        for record in resolved_plan:
+            left, right = record["start"], record["end"]
+
+            if (
+                not 0 <= left < right <= len(summary)
+                or summary[left:right] != record["original_sentence"]
+            ):
+                raise ValueError(
+                    "Resolved target no longer matches the input summary."
+                )
+
+            paragraph_index = next(
+                (
+                    index
+                    for index, (p_start, p_end)
+                    in enumerate(paragraph_spans)
+                    if p_start <= left and right <= p_end
+                ),
+                None,
+            )
+            if paragraph_index is None:
+                raise ValueError(
+                    "Target sentence crosses paragraph boundaries."
+                )
+
+            if not record["assignments"]:
+                raise ValueError("Resolved target contains no assignments.")
+
+            for assignment in record["assignments"]:
+                insight_id = assignment["insight_id"]
+
+                if insight_id not in lookup:
+                    raise ValueError(
+                        f"Unknown resolved insight ID: {insight_id!r}"
+                    )
+
+                if assignment["citation"] != lookup[insight_id]["in_text_citation"]:
+                    raise ValueError(
+                        f"Citation mismatch for insight {insight_id!r}."
+                    )
+
+                if assignment["action"] not in {"unchanged", "amend", "add"}:
+                    raise ValueError(
+                        f"Invalid resolved action: {assignment['action']!r}"
+                    )
+
+            targets.append({
+                **record,
+                "paragraph_index": paragraph_index,
+            })
+
+        targets.sort(key=lambda item: item["start"])
+
+        for previous, current in zip(targets, targets[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError("Resolved targets overlap.")
+
+        # Group adjacent targets to maintain coherence during rewriting.
+        groups = []
+
+        for target in targets:
+            if groups:
+                previous = groups[-1][-1]
+                gap = summary[previous["end"]:target["start"]]
+
+                if (
+                    previous["paragraph_index"] == target["paragraph_index"]
+                    and not gap.strip()
+                ):
+                    groups[-1].append(target)
+                    continue
+
+            groups.append([target])
+
+        replacements = []
+
+        for group in groups:
+            needs_rewrite = any(
+                assignment["action"] != "unchanged"
+                for target in group
+                for assignment in target["assignments"]
+            )
+
+            # Citation-only groups bypass the model.
+            if not needs_rewrite:
+                for target in group:
+                    citations = list(dict.fromkeys(
+                        lookup[assignment["insight_id"]]["in_text_citation"]
+                        for assignment in target["assignments"]
+                    ))
+
+                    existing = self._extract_existing_citations(
+                        target["original_sentence"],
+                        known_citations,
+                    )
+                    additions = [
+                        citation
+                        for citation in citations
+                        if citation not in existing
+                    ]
+
+                    replacement = self._insert_sentence_citations(
+                        target["original_sentence"],
+                        additions,
+                        known_citations,
+                    )
+
+                    replacements.append((
+                        target["start"],
+                        target["end"],
+                        replacement,
+                    ))
+
+                continue
+
+            # Prepare a localized rewrite against the original summary.
+            left = group[0]["start"]
+            right = group[-1]["end"]
+            original_text = summary[left:right]
+
+            p_start, p_end = paragraph_spans[
+                group[0]["paragraph_index"]
+            ]
+
+            selected_ids = list(dict.fromkeys(
+                assignment["insight_id"]
+                for target in group
+                for assignment in target["assignments"]
+            ))
+
+            existing_citations = self._extract_existing_citations(
+                original_text,
+                known_citations,
+            )
+
+            unparsed = [
+                citation
+                for citation in known_citations
+                if citation in original_text
+                and citation not in existing_citations
+            ]
+            if unparsed:
+                raise ValueError(
+                    "Existing citations could not be parsed safely: "
+                    f"{unparsed}"
+                )
+
+            response = self._rewrite_citation_sentences(
+                sys_prompt=Prompts().rewrite_citation_provenance(),
+                user_prompt=json.dumps(
+                    {
+                        "RESEARCH QUESTION": research_question,
+                        "ANALYTICAL FRAME": analytical_frame,
+                        "CONTEXT PARAGRAPH": summary[p_start:p_end],
+                        "SELECTED TEXT": original_text,
+                        "EXISTING CITATIONS": existing_citations,
+                        "SELECTED INSIGHTS": [
+                            {
+                                "insight_id": insight_id,
+                                "insight": lookup[insight_id]["insight"],
+                            }
+                            for insight_id in selected_ids
+                        ],
+                        "PLANNED ASSIGNMENTS": [
+                            {
+                                "original_sentence": target["original_sentence"],
+                                "assignments": [
+                                    {
+                                        "citation": assignment["citation"],
+                                        "insight_id": assignment["insight_id"],
+                                        "existing_summary_claim": assignment[
+                                            "existing_summary_claim"
+                                        ],
+                                        "action": assignment["action"],
+                                        "justification": assignment["justification"],
+                                    }
+                                    for assignment in target["assignments"]
+                                ],
+                            }
+                            for target in group
+                        ],
+                        "IMPLEMENTATION GUIDANCE": (
+                            "Assess selected insights against the context "
+                            "paragraph, including claims expressed across "
+                            "sentences. Do not add detail merely because "
+                            "it is more specific. For amend, make a minimal "
+                            "revision; if that cannot preserve the original "
+                            "claim, retain it and add supported sentences "
+                            "instead. For add, include supported additional "
+                            "text. Every selected insight ID must appear "
+                            "in the returned sentence associations; do not "
+                            "omit or defer any. Preserve original claims "
+                            "and their citations. For unchanged assignments "
+                            "included alongside neighboring edits, retain "
+                            "their supported claims and associate their "
+                            "insight IDs appropriately. Return replacements "
+                            "only for SELECTED TEXT; do not repeat surrounding "
+                            "paragraph text. Return sentence-level evidence "
+                            "associations using the required output schema."
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+
+            # Explicit unresolved results still stop processing.
+            unresolved = response["unresolved_insight_ids"]
+            if unresolved:
+                raise ValueError(
+                    f"Rewrite left unresolved insight IDs: {unresolved}"
+                )
+
+            if not response["sentences"]:
+                raise ValueError("Rewrite returned no sentences.")
+
+            allowed_ids = set(selected_ids)
+            allowed_existing = set(existing_citations)
+            used_ids = set()
+            retained_existing = set()
+            rendered_sentences = []
+
+            for sentence in response["sentences"]:
+                text = sentence["text"].strip()
+                insight_ids = sentence["insight_ids"]
+                original_citations = sentence["existing_citations"]
+
+                if not text:
+                    raise ValueError("Rewrite returned empty sentence text.")
+
+                unknown_ids = set(insight_ids) - allowed_ids
+                if unknown_ids:
+                    raise ValueError(
+                        f"Rewrite returned unknown insight IDs: {unknown_ids}"
+                    )
+
+                unknown_citations = (
+                    set(original_citations) - allowed_existing
+                )
+                if unknown_citations:
+                    raise ValueError(
+                        "Rewrite returned unknown existing citations: "
+                        f"{unknown_citations}"
+                    )
+
+                # Remove citation markers copied into prose only when those
+                # citations are also declared for this returned sentence.
+                embedded = self._extract_existing_citations(
+                    text,
+                    known_citations,
+                )
+                declared = set(original_citations) | {
+                    lookup[insight_id]["in_text_citation"]
+                    for insight_id in insight_ids
+                }
+
+                if set(embedded) - declared:
+                    raise ValueError(
+                        "Rewrite included undeclared citations in prose: "
+                        f"{sorted(set(embedded) - declared)}"
+                    )
+
+                if embedded:
+                    def remove_citation_group(match):
+                        members = [
+                            value.strip()
+                            for value in match.group()[1:-1].split(";")
+                        ]
+                        if members and all(
+                            value in declared for value in members
+                        ):
+                            return ""
+                        return match.group()
+
+                    text = re.sub(
+                        r"\([^()]*\)",
+                        remove_citation_group,
+                        text,
+                    )
+                    text = re.sub(
+                        r"[ \t]+([.,;:!?])",
+                        r"\1",
+                        text,
+                    ).strip()
+
+                used_ids.update(insight_ids)
+                retained_existing.update(original_citations)
+
+                citations = list(dict.fromkeys(
+                    original_citations
+                    + [
+                        lookup[insight_id]["in_text_citation"]
+                        for insight_id in insight_ids
+                    ]
+                ))
+
+                rendered_sentences.append(
+                    self._insert_sentence_citations(
+                        text,
+                        citations,
+                        known_citations,
+                    )
+                )
+
+            # Accept partial coverage with an explicit diagnostic warning.
+            # Do not attach omitted sources to unsupported sentences.
+            missing_ids = allowed_ids - used_ids
+
+            if missing_ids:
+                assignments_by_id = {
+                    assignment["insight_id"]: assignment
+                    for target in group
+                    for assignment in target["assignments"]
+                }
+
+                omission_details = [
+                    {
+                        "insight_id": insight_id,
+                        "citation": lookup[insight_id]["in_text_citation"],
+                        "action": assignments_by_id[insight_id]["action"],
+                    }
+                    for insight_id in sorted(missing_ids)
+                ]
+
+                print(
+                    "WARNING: Accepting a partial citation rewrite. "
+                    "Selected insights were omitted:\n"
+                    + json.dumps(
+                        {
+                            "research_question": research_question,
+                            "original_text": original_text,
+                            "omitted_insights": omission_details,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    flush=True,
+                )
+
+            # Existing citations must still be preserved.
+            if retained_existing != allowed_existing:
+                raise ValueError(
+                    "Rewrite omitted existing citations: "
+                    f"{sorted(allowed_existing - retained_existing)}"
+                )
+
+            replacements.append((
+                left,
+                right,
+                " ".join(rendered_sentences),
+            ))
+
+        # Apply right to left so earlier original offsets remain valid.
+        replacements.sort(key=lambda item: item[0])
+
+        for previous, current in zip(replacements, replacements[1:]):
+            if previous[1] > current[0]:
+                raise ValueError("Replacement spans overlap.")
+
+        updated = summary
+        for left, right, replacement in reversed(replacements):
+            updated = updated[:left] + replacement + updated[right:]
+
+        return updated
+
+
+    def _address_missing_citations(
+        self,
+        summary: str,
+        missing_citations_df: pd.DataFrame,
+        research_question: str,
+        analytical_frame: str,
+    ) -> str:
+        """
+        Coordinate citation repairs.
+
+        - Sample up to five insights per source.
+        - Start planning with twenty sources per batch.
+        - Split only batches whose output truncates.
+        - Retain successful source placements across three planning rounds.
+        - Resolve all sources before applying edits.
+        - Warn about final missing citations; still reject lost old citations.
+        """
+        import json
+        from collections import Counter
+
+        if missing_citations_df.empty:
+            return summary
+
+        # ---- Validate full theme-specific evidence. ----
+        columns = ["insight_id", "in_text_citation", "insight"]
+        missing_columns = set(columns) - set(missing_citations_df.columns)
+        if missing_columns:
+            raise ValueError(
+                f"Missing citation evidence columns: {sorted(missing_columns)}"
+            )
+
+        evidence = missing_citations_df[columns].copy()
+
+        if evidence.isna().any().any():
+            raise ValueError("Citation evidence contains missing values.")
+
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+        evidence["insight"] = evidence["insight"].astype(str)
+
+        if any(
+            evidence[column].str.strip().eq("").any()
+            for column in columns
+        ):
+            raise ValueError("Citation evidence contains empty values.")
+
+        for insight_id, rows in evidence.groupby("insight_id"):
+            if (
+                rows["in_text_citation"].nunique() != 1
+                or rows["insight"].nunique() != 1
+            ):
+                raise ValueError(
+                    f"Conflicting evidence for insight ID {insight_id}."
+                )
+
+        evidence = evidence.drop_duplicates("insight_id")
+
+        missing_citations = self._identify_missing_citations(
+            summary,
+            list(dict.fromkeys(evidence["in_text_citation"])),
+        )
+        if not missing_citations:
+            return summary
+
+        evidence = evidence[
+            evidence["in_text_citation"].isin(missing_citations)
+        ].copy()
+
+        evidence_by_source = {
+            citation: rows.copy()
+            for citation, rows in evidence.groupby(
+                "in_text_citation",
+                sort=False,
+            )
+        }
+
+        # Sample once so retries use the same source evidence.
+        # Full evidence remains available downstream.
+        source_lookup = {
+            citation: {
+                "in_text_citation": citation,
+                "insights": rows.sample(
+                    n=min(len(rows), 5),
+                    random_state=config.seed,
+                )[["insight_id", "insight"]].to_dict("records"),
+            }
+            for citation, rows in evidence_by_source.items()
+        }
+
+        citation_by_insight = evidence.set_index(
+            "insight_id"
+        )["in_text_citation"].to_dict()
+
+        expected_fields = {
+            "citation",
+            "insight_id",
+            "existing_summary_claim",
+            "best_matching_existing_sentence",
+            "action",
+            "justification",
+        }
+
+        def validate_record(record):
+            """Structural failures remain fatal rather than being retried."""
+            if (
+                not isinstance(record, dict)
+                or set(record) != expected_fields
+            ):
+                raise ValueError("Citation planner returned invalid fields.")
+
+            for field in expected_fields - {"existing_summary_claim"}:
+                if (
+                    not isinstance(record[field], str)
+                    or not record[field].strip()
+                ):
+                    raise ValueError(
+                        f"Planning field {field!r} must be a nonempty string."
+                    )
+
+            claim = record["existing_summary_claim"]
+            if claim is not None and (
+                not isinstance(claim, str) or not claim.strip()
+            ):
+                raise ValueError(
+                    "existing_summary_claim must be nonempty text or null."
+                )
+
+            if record["action"] not in {"unchanged", "amend", "add"}:
+                raise ValueError(
+                    f"Invalid planning action: {record['action']!r}"
+                )
+
+            if record["action"] in {"unchanged", "amend"} and claim is None:
+                raise ValueError(
+                    "Unchanged/amend placements require an existing claim."
+                )
+
+        # Accepted placements survive later source failures in this call.
+        pending = list(missing_citations)
+        accepted = {}
+        failures = {}
+
+        batch_size = 20
+        max_rounds = 3
+        sys_prompt = Prompts().plan_citation_provenance()
+
+        def plan_batch_with_splitting(citations):
+            """
+            Split confirmed truncation recursively.
+
+            Successful responses are returned normally. Other errors propagate.
+            A truncated single-source request cannot be split further.
+            """
+            sources = [
+                source_lookup[citation]
+                for citation in citations
+            ]
+
+            user_prompt = (
+                "TEXT_TO_EDIT\n\n"
+                f"{summary}\n\n"
+                "END TEXT_TO_EDIT\n\n"
+
+                "MISSING CITATIONS\n\n"
+                f"{json.dumps(citations, ensure_ascii=False, indent=2)}\n\n"
+
+                "RESEARCH QUESTION\n\n"
+                f"{research_question}\n\n"
+
+                "ANALYTICAL FRAME\n\n"
+                f"{analytical_frame}\n\n"
+
+                "SOURCE_INSIGHTS\n\n"
+                f"{json.dumps(sources, ensure_ascii=False, indent=2)}\n\n"
+                "END SOURCE_INSIGHTS"
+            )
+
+            feedback = {
+                citation: failures[citation]
+                for citation in citations
+                if citation in failures
+            }
+            if feedback:
+                user_prompt += (
+                    "\n\nPREVIOUS REFERENCE ERRORS\n\n"
+                    + json.dumps(feedback, ensure_ascii=False, indent=2)
+                    + "\n\nReturn corrected placements for every source "
+                    "in MISSING CITATIONS. Use only its supplied insight "
+                    "IDs and exact sentences from TEXT_TO_EDIT."
+                )
+
+            try:
+                response_plan = self._plan_citation_placements(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                )
+            except OverflowError:
+                if len(citations) == 1:
+                    raise OverflowError(
+                        "Citation planning output still truncates for "
+                        f"a single source: {citations[0]!r}"
+                    ) from None
+
+                midpoint = len(citations) // 2
+                left_citations = citations[:midpoint]
+                right_citations = citations[midpoint:]
+
+                print(
+                    f"Planning output truncated for {len(citations)} "
+                    f"sources. Retrying as {len(left_citations)} and "
+                    f"{len(right_citations)} sources...",
+                    flush=True,
+                )
+
+                left_plan = plan_batch_with_splitting(left_citations)
+                right_plan = plan_batch_with_splitting(right_citations)
+
+                return {
+                    "placements": (
+                        left_plan["placements"]
+                        + right_plan["placements"]
+                    )
+                }
+
+            if (
+                not isinstance(response_plan, dict)
+                or not isinstance(response_plan.get("placements"), list)
+            ):
+                raise ValueError("Planner returned no placements list.")
+
+            return response_plan
+
+        # ---- Retry only sources whose references have not passed. ----
+        for round_number in range(1, max_rounds + 1):
+            if not pending:
+                break
+
+            round_sources = list(pending)
+            total_batches = (
+                len(round_sources) + batch_size - 1
+            ) // batch_size
+
+            print(
+                f"Citation planning round {round_number}/{max_rounds}: "
+                f"{len(round_sources)} pending sources..."
+            )
+
+            for batch_number, start in enumerate(
+                range(0, len(round_sources), batch_size),
+                start=1,
+            ):
+                batch_citations = round_sources[start:start + batch_size]
+                batch_set = set(batch_citations)
+
+                insight_count = sum(
+                    len(source_lookup[citation]["insights"])
+                    for citation in batch_citations
+                )
+
+                print(
+                    f"Planning batch {batch_number}/{total_batches}: "
+                    f"{len(batch_citations)} sources, "
+                    f"{insight_count} sampled insights..."
+                )
+
+                batch_plan = plan_batch_with_splitting(batch_citations)
+                placements = batch_plan["placements"]
+
+                for record in placements:
+                    validate_record(record)
+
+                unexpected = {
+                    record["citation"]
+                    for record in placements
+                    if record["citation"] not in batch_set
+                }
+                if unexpected:
+                    print(
+                        "Ignoring unexpected source labels: "
+                        f"{sorted(unexpected)}"
+                    )
+
+                counts = Counter(
+                    record["citation"]
+                    for record in placements
+                )
+                records_by_source = {
+                    record["citation"]: record
+                    for record in placements
+                    if record["citation"] in batch_set
+                }
+
+                for citation in batch_citations:
+                    if counts[citation] != 1:
+                        failures[citation] = (
+                            "Expected exactly one placement for this source; "
+                            f"received {counts[citation]}."
+                        )
+                        continue
+
+                    record = records_by_source[citation]
+                    insight_id = record["insight_id"]
+
+                    supplied_ids = {
+                        item["insight_id"]
+                        for item in source_lookup[citation]["insights"]
+                    }
+
+                    # Recover only unknown chunk/meta prefix swaps.
+                    if insight_id not in citation_by_insight:
+                        alternate_id = None
+
+                        for prefix, alternate_prefix in (
+                            ("chunk_insight_", "meta_insight_"),
+                            ("meta_insight_", "chunk_insight_"),
+                        ):
+                            if insight_id.startswith(prefix):
+                                suffix = insight_id[len(prefix):]
+                                if suffix.isascii() and suffix.isdigit():
+                                    alternate_id = alternate_prefix + suffix
+                                break
+
+                        if (
+                            alternate_id is not None
+                            and alternate_id in supplied_ids
+                        ):
+                            print(
+                                f"Correcting ID for {citation!r}: "
+                                f"{insight_id!r} -> {alternate_id!r}"
+                            )
+                            insight_id = alternate_id
+                            record["insight_id"] = alternate_id
+                        else:
+                            failures[citation] = (
+                                f"Unknown insight ID {insight_id!r}. "
+                                "Choose an exact ID supplied for this source."
+                            )
+                            continue
+
+                    if citation_by_insight[insight_id] != citation:
+                        failures[citation] = (
+                            f"Insight {insight_id!r} belongs to another source. "
+                            "Choose evidence supplied under this citation."
+                        )
+                        continue
+
+                    if insight_id not in supplied_ids:
+                        failures[citation] = (
+                            f"Insight {insight_id!r} was not in this source's "
+                            "supplied sample. Choose an ID from that sample."
+                        )
+                        continue
+
+                    # Resolve independently so one bad target does not
+                    # discard the other sources' accepted placements.
+                    try:
+                        resolved = self._resolve_citation_plan(
+                            plan={"placements": [record]},
+                            summary=summary,
+                            missing_citations_df=evidence_by_source[citation],
+                        )
+                    except ValueError as exc:
+                        message = str(exc)
+
+                        if (
+                            message.startswith("Target recovery returned ")
+                            or message
+                            == "Recovered sentence and context are not uniquely exact."
+                        ):
+                            failures[citation] = (
+                                f"{message} Copy a complete existing sentence "
+                                "from TEXT_TO_EDIT. Neither SOURCE_INSIGHTS, "
+                                "the analytical frame, nor this feedback "
+                                "supplies candidate target text. If new text "
+                                "is needed, choose an existing sentence as "
+                                "the edit location."
+                            )
+                            continue
+
+                        # Unexpected failures remain fatal.
+                        raise
+
+                    if len(resolved) != 1:
+                        raise ValueError(
+                            "Single-source resolution returned an "
+                            "unexpected number of targets."
+                        )
+
+                    accepted[citation] = resolved[0]
+                    failures.pop(citation, None)
+
+            pending = [
+                citation
+                for citation in missing_citations
+                if citation not in accepted
+            ]
+
+            print(
+                f"Citation planning: {len(accepted)}/{len(missing_citations)} "
+                f"sources resolved; {len(pending)} pending."
+            )
+
+        if pending:
+            details = {
+                citation: failures.get(
+                    citation,
+                    "No accepted placement.",
+                )
+                for citation in pending
+            }
+            raise ValueError(
+                f"Citation planning incomplete after {max_rounds} rounds: "
+                f"{details}"
+            )
+
+        # ---- Group accepted sources sharing the same target span. ----
+        grouped = {}
+
+        for citation in missing_citations:
+            target = accepted[citation]
+            location = (target["start"], target["end"])
+
+            combined = grouped.setdefault(
+                location,
+                {
+                    "original_sentence": target["original_sentence"],
+                    "start": target["start"],
+                    "end": target["end"],
+                    "assignments": [],
+                },
+            )
+            combined["assignments"].extend(target["assignments"])
+
+        resolved_plan = sorted(
+            grouped.values(),
+            key=lambda target: target["start"],
+        )
+
+        for previous, current in zip(resolved_plan, resolved_plan[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError("Resolved target sentences overlap.")
+
+        print(
+            f"Implementing repairs at {len(resolved_plan)} target sentences..."
+        )
+
+        updated_summary = self._implement_citation_plan(
+            summary=summary,
+            resolved_plan=resolved_plan,
+            missing_citations_df=evidence,
+            research_question=research_question,
+            analytical_frame=analytical_frame,
+        )
+
+        # Partial rewrite coverage is allowed, but reported explicitly.
+        unresolved = self._identify_missing_citations(
+            updated_summary,
+            missing_citations,
+        )
+        if unresolved:
+            print(
+                "WARNING: Citation repair completed with missing sources:\n"
+                + json.dumps(
+                    {
+                        "research_question": research_question,
+                        "missing_citations": unresolved,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                flush=True,
+            )
+
+        # Losing previously present citations remains fatal.
+        known_citations = list(dict.fromkeys(
+            str(value).strip()
+            for value in self.corpus_state.insights[
+                "in_text_citation"
+            ].dropna()
+            if str(value).strip()
+        ))
+
+        originally_present = [
+            citation
+            for citation in known_citations
+            if citation in summary
+        ]
+        lost = self._identify_missing_citations(
+            updated_summary,
+            originally_present,
+        )
+        if lost:
+            raise ValueError(
+                f"Citation repair removed existing citations: {lost}"
+            )
+
+        return updated_summary
+
+
+    #### --------------------\END NEW CODE--------------------
 
 
     def _load_failed_themes(self, remove_latest_iteration: bool = False) -> defaultdict:
@@ -8951,7 +10393,12 @@ class Summarize:
                         )
 
                         # Have the LLM repair the summary to add in missing citations
-                        updated_summary = self._address_missing_citations(updated_summary, theme_missing_citations_df)
+                        updated_summary = self._address_missing_citations(
+                            summary=updated_summary,
+                            missing_citations_df=theme_missing_citations_df,
+                            research_question=question_text,
+                            analytical_frame=self.analytical_framework
+                            )
 
                 # Store final fully integrated summary for this theme
                 updated_row = pd.DataFrame([{

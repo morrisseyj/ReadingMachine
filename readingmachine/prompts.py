@@ -2726,127 +2726,591 @@ class Prompts:
             "- Do not provide explanations or commentary."
         )
 
-    def repair_citation_provenance(self) -> str:
+    # def repair_citation_provenance(self) -> str:
+    #     """
+    #     Construct the prompt for citation-provenance repair.
+
+    #     Creates a prompt instructing a language model to generate minimal
+    #     sentence-level patches that add missing citation strings to a thematic
+    #     summary without rewriting the full summary.
+
+    #     Returns
+    #     -------
+    #     str
+    #         Prompt instructing the model to return citation-repair patches as
+    #         strict JSON.
+
+    #     Notes
+    #     -----
+    #     This prompt is used after citation auditing identifies required citations
+    #     that are missing from a synthesized theme summary.
+
+    #     The prompt asks the model to determine whether each missing citation
+    #     supports a point already represented in the summary. When possible, the
+    #     citation is added by minimally revising an existing sentence. A new
+    #     sentence is proposed only when the missing citation supports a distinct
+    #     point not already represented.
+
+    #     The expected response is a JSON object containing:
+
+    #     - `patches`
+
+    #     Each patch specifies:
+
+    #     - `missing_citations`
+    #     - `revise`
+    #     - `original_sentence`
+    #     - `revised_sentence`
+    #     - `anchor_sentence`
+    #     - `new_sentence`
+
+    #     The returned patches are intended to be applied deterministically by the
+    #     caller. This keeps citation repair bounded, auditable, and separate from
+    #     full-summary rewriting.
+
+    #     This prompt repairs citation presence and provenance. It does not perform
+    #     a full coverage audit or regenerate the thematic synthesis.
+    #     """
+    #     return (
+    #         "You are a research editor repairing citation provenance in a thematic summary.\n\n"
+
+    #         "YOU WILL RECEIVE:\n"
+    #         "1. A THEMATIC SUMMARY.\n"
+    #         "2. A JSON array of missing in-text citations, each accompanied by insights from that source relevant to the thematic summary.\n\n"
+
+    #         "TASK\n"
+    #         "Create minimal sentence-level patches that add every missing in-text citation exactly as provided, without rewriting the full summary.\n\n"
+
+    #         "CORE REQUIREMENTS\n"
+    #         "- Do NOT return a rewritten full summary.\n"
+    #         "- Preserve all existing claims, structure, wording, and citations unless a minimal sentence-level edit is necessary.\n"
+    #         "- Preserve every citation already present in the original summary.\n"
+    #         "- Add each missing citation exactly as provided.\n"
+    #         "- Do not rewrite, normalize, abbreviate, expand, or correct citation strings.\n"
+    #         "- Do not fully integrate every provided insight.\n"
+    #         "- Do not add a separate sentence for every missing citation unless necessary.\n"
+    #         "- Use the provided insights only to determine appropriate citation placement.\n"
+    #         "- Do not create repeated claims with different citations.\n\n"
+
+    #         "PATCH PLANNING\n"
+    #         "- First determine appropriate citation placements using the PATCH DECISION RULE below.\n"
+    #         "- Then group all proposed edits by the existing sentence they target, whether as original_sentence or anchor_sentence.\n"
+    #         "- Return at most ONE patch targeting any given existing sentence across the entire response.\n"
+    #         "- If multiple missing citations support the same existing sentence, return one revision patch adding all those citations together.\n"
+    #         "- If multiple genuinely new sentences belong after the same anchor_sentence, return one insertion patch containing all those sentences together in new_sentence. This field may contain multiple sentences.\n"
+    #         "- If an existing sentence needs both citation additions and new text after it, return ONE revision patch: revised_sentence must contain the minimally revised original sentence followed by the new sentences. Set anchor_sentence and new_sentence to empty strings.\n"
+    #         "- Do not attach citations to an anchor sentence merely because new text is inserted after it. Each citation must support the claim to which it is attached.\n"
+    #         "- Before returning JSON, verify that no existing sentence is targeted by more than one patch, including across revision and insertion patches.\n\n"
+            
+    #         "PATCH DECISION RULE\n"
+    #         "- For each missing citation, first determine whether the underlying point, argument, mechanism, or empirical observation from its provided insights is already represented anywhere in the thematic summary at a reasonable level of abstraction.\n"
+    #         "- If the underlying point is already represented, attach the missing citation to the most appropriate existing sentence and set revise=true.\n"
+    #         "- A missing citation does not require a new sentence merely because its provided insights are more specific than the existing summary.\n"
+    #         "- Human literature reviews often cite multiple sources for a broader synthesized claim; follow that practice here.\n"
+    #         "- Set revise=false only when the missing citation contributes a genuinely distinct point that is not already represented in the thematic summary, even at a reasonable level of abstraction.\n"
+    #         "- Prefer revise=true whenever possible.\n\n"
+
+    #         "REVISE = TRUE RULES\n"
+    #         "- original_sentence must be copied exactly from the thematic summary.\n"
+    #         "- revised_sentence must preserve the original sentence's meaning and wording as much as possible.\n"
+    #         "- The preferred change is adding one or more missing citations to the existing citation list.\n"
+    #         "- If the original sentence already has citations, add the missing citation using the same citation-list style.\n"
+    #         "- Return at most one revision patch per original_sentence. If multiple missing citations belong on the same sentence, combine them into a single revised_sentence and list them all in missing_citations.\n"
+    #         "- anchor_sentence and new_sentence must be empty strings.\n\n"
+
+    #         "REVISE = FALSE RULES\n"
+    #         "- Use only if no existing sentence can plausibly support the missing citation.\n"
+    #         "- anchor_sentence must exist in the thematic summary exactly as written. Copy it verbatim. Do not invent or reconstruct sentences.\n"
+    #         "- new_sentence must contain concise text substantively grounded in the provided insights. It may contain multiple sentences when combining additions after the same anchor.\n"
+    #         "- new_sentence must include the relevant missing citation exactly as provided.\n"
+    #         "- original_sentence and revised_sentence must be empty strings.\n\n"
+
+    #         "BOUNDED OUTPUT / COMPRESSION RULES\n"
+    #         "- If additions would exceed the maximum output length, prefer citation-dense patches rather than many separate patches.\n"
+    #         "- Do not solve output-length pressure by omitting required missing citations.\n"
+    #         "- Do not propose removing existing citations.\n"
+    #         "- Do not propose dropping distinct claims unless they are genuinely duplicative of another retained claim.\n\n"
+
+    #         "OUTPUT PROTOCOL\n"
+    #         "- Return ONLY a JSON object in the form:\n"
+    #         "{\n"
+    #         '  "patches": [\n'
+    #         "    {\n"
+    #         '      "missing_citations": ["Citation 1", "Citation 2"],\n'
+    #         '      "revise": true,\n'
+    #         '      "original_sentence": "<sentence copied exactly from the thematic summary>",\n'
+    #         '      "revised_sentence": "<same sentence minimally revised to include the missing citations>",\n'
+    #         '      "anchor_sentence": "",\n'
+    #         '      "new_sentence": ""\n'
+    #         "    },\n"
+    #         "    {\n"
+    #         '      "missing_citations": ["Citation 3"],\n'
+    #         '      "revise": false,\n'
+    #         '      "original_sentence": "",\n'
+    #         '      "revised_sentence": "",\n'
+    #         '      "anchor_sentence": "<sentence copied exactly from the thematic summary>",\n'
+    #         '      "new_sentence": "<new concise sentence including the missing citation>"\n'
+    #         "    }\n"
+    #         "  ]\n"
+    #         "}\n"
+    #         "- Every missing citation should appear in at least one patch.\n"
+    #         "- All missing citations assigned to the same existing sentence must be combined into one revision patch.\n"
+    #         "- Do not provide explanations or commentary."
+    #     )
+
+######-------------------------------- NEW CODE
+
+    def plan_citation_provenance(self) -> str:
         """
-        Construct the prompt for citation-provenance repair.
-
-        Creates a prompt instructing a language model to generate minimal
-        sentence-level patches that add missing citation strings to a thematic
-        summary without rewriting the full summary.
-
-        Returns
-        -------
-        str
-            Prompt instructing the model to return citation-repair patches as
-            strict JSON.
-
-        Notes
-        -----
-        This prompt is used after citation auditing identifies required citations
-        that are missing from a synthesized theme summary.
-
-        The prompt asks the model to determine whether each missing citation
-        supports a point already represented in the summary. When possible, the
-        citation is added by minimally revising an existing sentence. A new
-        sentence is proposed only when the missing citation supports a distinct
-        point not already represented.
-
-        The expected response is a JSON object containing:
-
-        - `patches`
-
-        Each patch specifies:
-
-        - `missing_citations`
-        - `revise`
-        - `original_sentence`
-        - `revised_sentence`
-        - `anchor_sentence`
-        - `new_sentence`
-
-        The returned patches are intended to be applied deterministically by the
-        caller. This keeps citation repair bounded, auditable, and separate from
-        full-summary rewriting.
-
-        This prompt repairs citation presence and provenance. It does not perform
-        a full coverage audit or regenerate the thematic synthesis.
+        Select evidence for each missing source, identify the corresponding
+        summary claim and citation location, and classify the required action.
         """
         return (
-            "You are a research editor repairing citation provenance in a thematic summary.\n\n"
+            "You are restoring source attribution by classifying source "
+            "insights against claims in an existing thematic summary.\n\n"
 
-            "YOU WILL RECEIVE:\n"
-            "1. A THEMATIC SUMMARY.\n"
-            "2. A JSON array of missing in-text citations, each with a small sample of insights from that citation.\n\n"
+            "INPUTS AND THEIR ROLES\n\n"
+
+            "TEXT_TO_EDIT — CANDIDATE TEXT\n"
+            "The existing thematic summary. This is the ONLY input from "
+            "which existing summary claims and citation insertion sentences "
+            "may be selected.\n\n"
+
+            "MISSING CITATIONS — MANDATORY SOURCE CHECKLIST\n"
+            "Every source in this list must be accounted for in your output, "
+            "exactly once. For each source, return its exact citation string, "
+            "a supporting insight_id belonging to that source, an existing "
+            "target sentence, and the required action. Do not omit sources "
+            "because their claims require amendment or additional text. "
+            "Before returning, verify that every listed source has a record.\n\n"
+
+            "RESEARCH QUESTION — RELEVANCE CRITERION\n"
+            "The question being answered. Use it to determine which "
+            "information is germane. It is not candidate text or evidence.\n\n"
+
+            "ANALYTICAL FRAME — ABSTRACTION AND INTERPRETATION GUIDANCE\n"
+            "Use this frame to judge relevance and the appropriate level "
+            "of abstraction. Its statements are guidance, not claims "
+            "already present in TEXT_TO_EDIT and not source evidence.\n\n"
+
+            "SOURCE_INSIGHTS — SUPPORTING EVIDENCE\n"
+            "Source material grouped by citation, with an insight_id and "
+            "text for each insight. Select supporting evidence from this "
+            "input. It is not candidate text for citation insertion.\n\n"
+
+            "PREVIOUS REFERENCE ERRORS — CORRECTION FEEDBACK\n"
+            "If supplied, these describe earlier invalid references. "
+            "Quoted sentences in this feedback are not candidate text "
+            "unless they independently occur in TEXT_TO_EDIT.\n\n"
+
+            "CANDIDATE BOUNDARY\n"
+            "- Derive existing_summary_claim exclusively from claims "
+            "expressed in TEXT_TO_EDIT.\n"
+            "- Copy best_matching_existing_sentence exclusively from "
+            "the text between TEXT_TO_EDIT and END TEXT_TO_EDIT.\n"
+            "- Neither the research question, analytical frame, source "
+            "insights, nor retry feedback supplies candidate summary text.\n"
+            "- A sentence elsewhere in the request does not become part "
+            "of TEXT_TO_EDIT because it closely matches a selected insight.\n"
+            "- For an addition, still select an actual existing sentence "
+            "from TEXT_TO_EDIT as the edit location. Do not use the "
+            "proposed addition itself as the target.\n\n"
 
             "TASK\n"
-            "Create minimal sentence-level patches that add every missing in-text citation exactly as provided, without rewriting the full summary.\n\n"
+            "Return one record for every source in MISSING CITATIONS.\n"
+            "For each source, select a supplied insight and identify whether "
+            "its relevant meaning is already represented by a claim in "
+            "TEXT_TO_EDIT.\n"
+            "Coverage requires one selected insight per source, not "
+            "representation of every supplied insight.\n\n"
 
-            "CORE REQUIREMENTS\n"
-            "- Do NOT return a rewritten full summary.\n"
-            "- Preserve all existing claims, structure, wording, and citations unless a minimal sentence-level edit is necessary.\n"
-            "- Preserve every citation already present in the original summary.\n"
-            "- Add each missing citation exactly as provided.\n"
-            "- Do not rewrite, normalize, abbreviate, expand, or correct citation strings.\n"
-            "- Do not fully integrate every provided insight.\n"
-            "- Do not add a separate sentence for every missing citation unless necessary.\n"
-            "- Use the provided insights only to determine appropriate citation placement.\n"
-            "- Do not create repeated claims with different citations.\n\n"
+            "CLAIM MATCHING\n"
+            "- For each missing source, examine its insights and identify "
+            "a corresponding claim expressed in TEXT_TO_EDIT.\n"
+            "- A claim may be expressed within one sentence or across "
+            "multiple sentences. Read the relevant passage together.\n"
+            "- In existing_summary_claim, describe that claim FROM "
+            "TEXT_TO_EDIT. You may paraphrase or abstract it faithfully.\n"
+            "- This field describes what the editable summary already "
+            "says, not what the selected insight or analytical frame says, "
+            "and not what you propose adding.\n"
+            "- Select an insight from the missing source and assess whether "
+            "it supports this existing summary claim under the abstraction "
+            "rules below.\n"
+            "- Any valid unchanged insight-claim pair is sufficient; "
+            "you do not need to rank all valid pairs.\n"
+            "- If no corresponding summary claim exists, return "
+            "existing_summary_claim=null.\n"
+            "- After assessing the claim, choose an exact existing sentence "
+            "from TEXT_TO_EDIT as the citation location or location "
+            "for a later edit.\n\n"
 
-            "PATCH DECISION RULE\n"
-            "- For each missing citation, first determine whether the underlying point, argument, mechanism, or empirical observation from its provided insights is already represented anywhere in the thematic summary at a reasonable level of abstraction.\n"
-            "- If the underlying point is already represented, attach the missing citation to the most appropriate existing sentence and set revise=true.\n"
-            "- A missing citation does not require a new sentence merely because its provided insights are more specific than the existing summary.\n"
-            "- Human literature reviews often cite multiple sources for a broader synthesized claim; follow that practice here.\n"
-            "- Set revise=false only when the missing citation contributes a genuinely distinct point that is not already represented in the thematic summary, even at a reasonable level of abstraction.\n"
-            "- Prefer revise=true whenever possible.\n\n"
+            "ABSTRACTION AND RELEVANCE\n"
+            "- Use the research question and analytical frame to determine "
+            "which details are germane.\n"
+            "- Abstraction may omit details only when their omission does "
+            "not obscure information relevant to answering the research "
+            "question within the analytical frame.\n"
+            "- Preserve mechanisms, distinctions, qualifications, "
+            "disagreements, and exceptions when they affect that answer.\n"
+            "- Greater specificity in the insight does not by itself "
+            "require additional text.\n"
+            "- The existing abstraction must be expressed in TEXT_TO_EDIT; "
+            "do not invent an implicit broader claim merely to connect "
+            "two statements through a shared topic.\n"
+            "- Shared topics or outcomes alone do not establish support "
+            "for a different mechanism or relationship.\n"
+            "- Evidence from one setting does not by itself substantiate "
+            "a claim about a different named country, project, or event.\n"
+            "- Broad opening or concluding claims are permissible targets "
+            "when supported by the evidence. Multiple sources may support "
+            "the same claim.\n"
+            "- The analytical frame guides interpretation and abstraction. "
+            "It does not establish that a claim exists in TEXT_TO_EDIT "
+            "or supply evidence absent from the source.\n\n"
 
-            "REVISE = TRUE RULES\n"
-            "- original_sentence must be copied exactly from the thematic summary.\n"
-            "- revised_sentence must preserve the original sentence's meaning and wording as much as possible.\n"
-            "- The preferred change is adding one or more missing citations to the existing citation list.\n"
-            "- If the original sentence already has citations, add the missing citation using the same citation-list style.\n"
-            "- anchor_sentence and new_sentence must be empty strings.\n\n"
+            "CITATION LOCATION\n"
+            "- After assessing the represented claim, select the most "
+            "appropriate existing sentence for inserting the citation.\n"
+            "- Return it verbatim in best_matching_existing_sentence.\n"
+            "- This sentence is the insertion location, not necessarily "
+            "the complete expression of the claim. Relevant meaning "
+            "may be expressed across the surrounding passage.\n"
+            "- Do not request amendment because the insertion sentence "
+            "alone omits information already expressed in that passage.\n"
+            "- Place the citation where its evidentiary scope is clearest.\n\n"
 
-            "REVISE = FALSE RULES\n"
-            "- Use only if no existing sentence can plausibly support the missing citation.\n"
-            "- anchor_sentence must exist in the thematic summary exactly as written. Copy it verbatim. Do not invent or reconstruct sentences.\n"
-            "- new_sentence must be concise and substantively grounded in the provided insights.\n"
-            "- new_sentence must include the relevant missing citation exactly as provided.\n"
-            "- original_sentence and revised_sentence must be empty strings.\n\n"
+            "ACTION\n"
+            "- unchanged: the selected insight supports the existing "
+            "summary claim at an acceptable abstraction. Only attribution "
+            "is needed.\n"
+            "- amend: the existing claim needs adjustment to accommodate "
+            "information germane to the research question while preserving "
+            "its original substantive meaning.\n"
+            "- add: a relevant claim is absent and cannot be accommodated "
+            "through a suitable amendment. Additional text is needed.\n"
+            "- For unchanged or amend, existing_summary_claim describes "
+            "the existing claim BEFORE any changes.\n"
+            "- For add, describe the nearest relevant claim actually "
+            "expressed in TEXT_TO_EDIT, or return null if none exists. "
+            "Never describe proposed new text as an existing claim.\n"
+            "- All actions must return an exact existing sentence "
+            "from TEXT_TO_EDIT identifying the citation location or "
+            "location for a later edit.\n"
+            "- For amend, make a minimal revision; if that cannot preserve "
+            "the original claim, retain it and add supported sentences "
+            "instead. For add, produce supported additional text. Every "
+            "selected insight ID must appear in the returned sentence "
+            "associations; do not omit or defer any.\n"
+            "- Do not force an unchanged match to achieve source coverage.\n"
+            "- Do not change an original claim's substantive meaning "
+            "to make a source fit.\n"
+            "- Do not generate replacement prose.\n\n"
 
-            "BOUNDED OUTPUT / COMPRESSION RULES\n"
-            "- If additions would exceed the maximum output length, prefer citation-dense patches rather than many separate patches.\n"
-            "- Do not solve output-length pressure by omitting required missing citations.\n"
-            "- Do not propose removing existing citations.\n"
-            "- Do not propose dropping distinct claims unless they are genuinely duplicative of another retained claim.\n\n"
+            "SOURCE ACCOUNTING AND EXACT TEXT\n"
+            "- Account for every source in MISSING CITATIONS exactly once.\n"
+            "- Copy citation and insight_id exactly as supplied.\n"
+            "- The selected insight_id must belong to the stated citation.\n"
+            "- best_matching_existing_sentence must be a complete sentence "
+            "copied verbatim from TEXT_TO_EDIT, including existing "
+            "citations, introductory words, capitalization, and punctuation.\n"
+            "- Different sources may select the same sentence; Python "
+            "will group their records.\n\n"
+
+            "JUSTIFICATION\n"
+            "- unchanged: briefly explain how the selected insight supports "
+            "the identified existing_summary_claim. Assess support, not "
+            "completeness: do not require the summary to reproduce every "
+            "detail of the insight. Identify the supported assertion "
+            "rather than merely a shared topic or outcome.\n"
+            "- amend: explain what information the existing claim needs "
+            "to accommodate and why omitting it would obscure an answer "
+            "to the research question within the analytical frame.\n"
+            "- add: explain what relevant claim is absent, why its omission "
+            "matters, and why amending an existing claim is insufficient.\n"
+            "- Additional detail alone does not justify a change.\n"
+            "- Assess the existing passage, not just the insertion sentence.\n"
+            "- The justification guides a later rewrite step, which may "
+            "reassess the decision against the evidence.\n\n"
 
             "OUTPUT PROTOCOL\n"
-            "- Return ONLY a JSON object in the form:\n"
+            "- Return ONLY JSON in this form:\n"
             "{\n"
-            '  "patches": [\n'
+            '  "placements": [\n'
             "    {\n"
-            '      "missing_citations": ["Citation 1", "Citation 2"],\n'
-            '      "revise": true,\n'
-            '      "original_sentence": "<sentence copied exactly from the thematic summary>",\n'
-            '      "revised_sentence": "<same sentence minimally revised to include the missing citations>",\n'
-            '      "anchor_sentence": "",\n'
-            '      "new_sentence": ""\n'
-            "    },\n"
-            "    {\n"
-            '      "missing_citations": ["Citation 3"],\n'
-            '      "revise": false,\n'
-            '      "original_sentence": "",\n'
-            '      "revised_sentence": "",\n'
-            '      "anchor_sentence": "<sentence copied exactly from the thematic summary>",\n'
-            '      "new_sentence": "<new concise sentence including the missing citation>"\n'
+            '      "citation": "<exact missing citation>",\n'
+            '      "insight_id": "<exact supplied insight ID>",\n'
+            '      "existing_summary_claim": "<claim from TEXT_TO_EDIT, or null>",\n'
+            '      "best_matching_existing_sentence": "<exact sentence from TEXT_TO_EDIT>",\n'
+            '      "action": "unchanged",\n'
+            '      "justification": "<brief explanation>"\n'
             "    }\n"
             "  ]\n"
             "}\n"
-            "- Every missing citation should appear in at least one patch.\n"
-            "- A patch may address multiple missing citations if they support the same claim.\n"
+            "- action must be unchanged, amend, or add.\n"
+            "- existing_summary_claim must be null when no corresponding "
+            "existing claim is identified, not the string 'null'.\n"
+            "- Before returning, verify that every missing citation has "
+            "one record and every insertion sentence occurs verbatim "
+            "inside TEXT_TO_EDIT.\n"
+            "- Do not return commentary outside the JSON."
+        )
+
+    def rewrite_citation_provenance(self) -> str:
+        """
+        Complete planned attribution repairs while preserving original claims.
+
+        Amendments fall back to supported additions when necessary.
+        Every selected insight must be represented in the returned text.
+        """
+        return (
+            "You are a research editor implementing localized attribution "
+            "repairs in a thematic summary.\n\n"
+
+            "YOU WILL RECEIVE\n"
+            "1. RESEARCH QUESTION: the question being answered.\n"
+            "2. ANALYTICAL FRAME: guidance for relevance and abstraction.\n"
+            "3. CONTEXT PARAGRAPH: surrounding text used to maintain coherence.\n"
+            "4. SELECTED TEXT: the exact sentence or adjacent sentences "
+            "whose replacements you must return.\n"
+            "5. EXISTING CITATIONS: citation strings extracted from "
+            "the selected text.\n"
+            "6. SELECTED INSIGHTS: evidence to incorporate, each with "
+            "its insight_id and text.\n"
+            "7. PLANNED ASSIGNMENTS: insights assigned to original sentences, "
+            "with an existing_summary_claim, action, and justification.\n"
+            "8. IMPLEMENTATION GUIDANCE from the caller.\n\n"
+
+            "INPUT ROLES\n"
+            "- SELECTED TEXT contains the original claims you must preserve "
+            "and the locations at which repairs are implemented.\n"
+            "- CONTEXT PARAGRAPH provides context, not additional text "
+            "to return or rewrite.\n"
+            "- SELECTED INSIGHTS supplies evidence for additions "
+            "and amendments.\n"
+            "- RESEARCH QUESTION and ANALYTICAL FRAME guide relevance "
+            "and abstraction. They do not supply source evidence or "
+            "additional original claims.\n\n"
+
+            "UNDERSTANDING THE PLAN\n"
+            "- original_sentence identifies the existing target text.\n"
+            "- existing_summary_claim describes the claim identified "
+            "by the planner. It may span multiple sentences or be null.\n"
+            "- citation identifies the selected insight's source. "
+            "Python retrieves its citation using insight_id.\n"
+            "- justification explains the planner's placement decision "
+            "and the distinction it considered relevant.\n"
+            "- Assess the actual selected text, context, and evidence "
+            "rather than treating the planner's description as proof "
+            "of support.\n\n"
+
+            "ACTION CONTRACT\n"
+            "- action=unchanged: preserve the existing wording and "
+            "associate the selected insight with the claim it supports. "
+            "These assignments may accompany neighboring edits.\n"
+            "- action=amend: revise the selected sentence to accommodate "
+            "the insight while preserving its original substantive meaning. "
+            "Use the smallest adequate change.\n"
+            "- If an amendment cannot accommodate the insight without "
+            "altering or losing the original claim, preserve that claim "
+            "and add supported sentences instead.\n"
+            "- action=add: preserve the original claims and add supported "
+            "sentences representing the selected insight.\n"
+            "- Do not defer an addition because its content differs from "
+            "the existing claims or is difficult to connect elegantly.\n"
+            "- Prefer a slightly clunky but accurate addition over omission. "
+            "Do not invent causal relationships or other unsupported "
+            "connections to improve flow.\n"
+            "- Every selected insight must be represented. There is "
+            "no unresolved content outcome.\n\n"
+
+            "TASK\n"
+            "Return replacement sentences for SELECTED TEXT, including "
+            "the preserved original claims and all required amendments "
+            "and additions.\n"
+            "For each returned sentence, identify the selected insight IDs "
+            "supporting it and the existing citations it must retain. "
+            "Python will insert citation markers.\n"
+            "Complete every assignment before returning.\n\n"
+
+            "MEANING AND EVIDENCE\n"
+            "- Preserve original claims' substantive meaning, scope, "
+            "qualifications, and disagreements.\n"
+            "- The evidence underlying original claims may not be supplied. "
+            "Do not reinterpret, strengthen, or broaden those claims "
+            "to make new evidence fit.\n"
+            "- Every added substantive claim must be supported by "
+            "the selected insights.\n"
+            "- Preserve disagreement rather than combining conflicting "
+            "evidence into an apparently shared claim.\n"
+            "- A planned placement does not establish that its insight "
+            "supports every assertion in the original sentence.\n"
+            "- When an insight does not support the original assertion, "
+            "represent it in separate supported text rather than attaching "
+            "it to that assertion.\n\n"
+
+            "RELEVANCE AND ABSTRACTION\n"
+            "- Use the research question and analytical frame to determine "
+            "which insight details must be retained and which may be omitted.\n"
+            "- Abstraction is acceptable only when the resulting claim "
+            "remains supported and does not obscure information germane "
+            "to answering the research question within the analytical frame.\n"
+            "- Preserve mechanisms, distinctions, qualifications, "
+            "disagreements, and exceptions when they affect that answer.\n"
+            "- Represent each selected insight's relevant contribution; "
+            "do not reproduce every detail it contains.\n"
+            "- Greater specificity alone does not require reproducing "
+            "all specifics in the replacement text.\n"
+            "- Assess meaning across the relevant passage, not just "
+            "an isolated target sentence.\n"
+            "- Do not invent a broader implicit claim merely to connect "
+            "statements sharing a topic or outcome.\n"
+            "- For amendments, avoid unnecessary elaboration where "
+            "a small wording change suffices.\n"
+            "- For additions, express the supported relevant contribution "
+            "concisely rather than omitting it or reproducing the entire insight.\n"
+            "- The analytical frame guides interpretation; it does not "
+            "supply evidence absent from the sources.\n\n"
+
+            "COHERENCE AND EDIT BOUNDARIES\n"
+            "- Use CONTEXT PARAGRAPH to maintain logical flow, transitions, "
+            "terminology, and references.\n"
+            "- Handle adjacent selected sentences together so their "
+            "replacements form a coherent passage.\n"
+            "- Avoid unnecessary repetition. Where several additions "
+            "express the same supported claim, combine them and retain "
+            "all appropriate insight associations.\n"
+            "- Return replacements for SELECTED TEXT only. Do not return "
+            "or rewrite the surrounding paragraph.\n"
+            "- Additional sentences belong within the replacement passage "
+            "and should be placed near the relevant original claims.\n"
+            "- Context may guide interpretation, but an insight ID must "
+            "be associated with supported text actually returned, not "
+            "solely with a sentence elsewhere in the context paragraph.\n"
+            "- Coherence is desirable, but must not override completion "
+            "or evidentiary accuracy.\n\n"
+
+            "EVIDENCE AND CITATION ASSOCIATIONS\n"
+            "- Return each replacement sentence separately.\n"
+            "- text contains prose without citation markers or insight IDs. "
+            "Preserve appropriate non-citation parentheses.\n"
+            "- insight_ids lists the selected insights supporting claims "
+            "expressed in that returned sentence.\n"
+            "- Copy insight IDs exactly. Do not invent IDs or infer "
+            "IDs for original claims.\n"
+            "- existing_citations lists supplied original citation strings "
+            "associated with original claims retained in that sentence.\n"
+            "- Copy existing citation strings exactly.\n"
+            "- Preserve every existing citation with its original claim; "
+            "do not transfer it to an unrelated addition.\n"
+            "- Sharing a topic or outcome alone is insufficient "
+            "for an evidence association.\n"
+            "- Use separate sentences where needed to distinguish "
+            "claims supported by different evidence.\n"
+            "- Do not attach all insight IDs or citations indiscriminately "
+            "to every sentence.\n"
+            "- A sentence retaining an original claim may have an empty "
+            "insight_ids list. A new sentence may have an empty "
+            "existing_citations list.\n\n"
+
+            "COMPLETION CHECK\n"
+            "- Verify that every selected insight ID appears in at least "
+            "one returned sentence's insight_ids.\n"
+            "- Verify that every supplied existing citation is retained "
+            "with its original claim.\n"
+            "- If an amendment proved unsuitable, verify that supported "
+            "additional text represents that insight instead.\n"
+            "- Do not omit or defer selected insights.\n"
+            "- unresolved_insight_ids must be an empty array.\n\n"
+
+            "OUTPUT PROTOCOL\n"
+            "- Return ONLY a JSON object with this structure:\n"
+            "{\n"
+            '  "sentences": [\n'
+            "    {\n"
+            '      "text": "<replacement sentence without citation markers>",\n'
+            '      "insight_ids": ["<exact supplied insight ID>"],\n'
+            '      "existing_citations": ["<exact original citation string>"]\n'
+            "    }\n"
+            "  ],\n"
+            '  "unresolved_insight_ids": []\n'
+            "}\n"
+            "- Return sentences in their intended reading order.\n"
+            "- Every selected insight ID must appear in at least one "
+            "sentence's insight_ids.\n"
+            "- Every supplied existing citation must appear in at least "
+            "one sentence's existing_citations.\n"
+            "- Do not return explanations or commentary."
+        )
+
+    def recover_citation_target_sentence(self) -> str:
+        """
+        Recover an exact sentence from the summary when a planned target
+        does not match or is ambiguous. Does not rewrite or replan.
+        """
+        return (
+            "You are locating an existing sentence in a thematic summary.\n\n"
+
+            "YOU WILL RECEIVE\n"
+            "1. The original THEMATIC SUMMARY.\n"
+            "2. A PROPOSED TARGET SENTENCE that could not be uniquely "
+            "matched to the summary.\n"
+            "3. Selected insights associated with that target, supplied "
+            "only to help identify the intended sentence.\n\n"
+
+            "TASK\n"
+            "Identify the existing sentence that the proposed target was "
+            "intended to refer to. Copy that sentence exactly from the "
+            "summary, including its citations and punctuation.\n"
+            "This is a text-location task only. Do not rewrite the sentence, "
+            "reconsider citation placement, or select a different sentence "
+            "merely because it could accommodate the insights.\n\n"
+
+            "MATCHING RULES\n"
+            "- Compare the proposed target with the actual summary text.\n"
+            "- Differences in wording, punctuation, whitespace, or citations "
+            "may explain the failed match. Use them to identify the intended "
+            "original, but do not reproduce those differences in your answer.\n"
+            "- Return a complete sentence copied verbatim from the summary.\n"
+            "- Preserve all existing citations, spelling, capitalization, "
+            "punctuation, and internal whitespace exactly.\n"
+            "- Do not reconstruct a sentence from memory or combine text "
+            "from separate locations.\n"
+            "- Use the selected insights only to disambiguate the intended "
+            "target, not to invent a new placement.\n"
+            "- If there is no clear corresponding sentence, return "
+            "status=no_match.\n"
+            "- If multiple locations remain plausible, return "
+            "status=ambiguous rather than guessing.\n"
+            "- The proposed target may omit opening words or alter capitalization. "
+            "Restore the COMPLETE original sentence, including introductory words "
+            "and transitions, exactly as they appear in the summary.\n"
+            "- Use the proposed target only to locate the sentence. Copy your "
+            "answer from the summary, not from the proposed target.\n"
+            "- Before returning status=matched, verify that original_sentence "
+            "occurs verbatim inside containing_paragraph.\n\n"
+
+            "LOCATION CONTEXT\n"
+            "- For status=matched, also copy the paragraph containing the "
+            "sentence verbatim into containing_paragraph.\n"
+            "- The sentence must occur exactly once within that paragraph, "
+            "and the paragraph must occur exactly once in the summary.\n"
+            "- If these conditions cannot be met, return status=ambiguous.\n"
+            "- For status=no_match or status=ambiguous, return empty strings "
+            "for original_sentence and containing_paragraph.\n\n"
+
+            "OUTPUT PROTOCOL\n"
+            "- Return ONLY a JSON object with this structure:\n"
+            "{\n"
+            '  "status": "matched",\n'
+            '  "original_sentence": "<exact sentence from the summary>",\n'
+            '  "containing_paragraph": "<exact paragraph from the summary>"\n'
+            "}\n"
+            "- status must be one of: matched, no_match, ambiguous.\n"
             "- Do not provide explanations or commentary."
         )
 
+#####------------------------------------ \END NEW CODE\
 
     def integrate_orphans(self):
         """
