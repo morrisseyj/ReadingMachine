@@ -4797,6 +4797,7 @@ class Summarize:
                  llm_client: Any,
                  ai_model: str,
                  paper_output_length: int,  # Approximate total paper length in words
+                 analytical_framework: str,
                  summary_save_location: str = config.SUMMARY_SAVE_LOCATION, 
                  pickle_save_location: str = config.PICKLE_SAVE_LOCATION,
                  insight_embedding_path = os.path.join(os.getcwd(), "data", "pickles", "insight_embeddings.pkl")
@@ -4929,6 +4930,7 @@ class Summarize:
 
         self.llm_client: Any = llm_client
         self.ai_model: str = ai_model
+        self.analytical_framework: str = analytical_framework
         self.paper_output_length: int = paper_output_length
         self.summary_save_location = summary_save_location
         self.pickle_save_location = pickle_save_location
@@ -6046,32 +6048,53 @@ class Summarize:
 
     def _build_populated_schema_for_planning(self):
         """
+        Build the latest schema joined to populated-theme summaries for repair/optimize planning.
         """
 
-        latest_populated_schema_df = (
-            self.summary_state.theme_schema_list[-1]
-            .drop(columns = ["theme_label", "theme_description", "organizing_proposition", "question_text", "needs_repair", "optimized", "stable"]) #drop cols that will repeat across dfs 
-            # merge with populated themes to summaries
-            .merge( 
-                self.summary_state.populated_theme_list[-1], 
-                how = "left",
-                on = ["question_id", "theme_id"]
-                )
-            .assign(
-                # Identify pass/fail themes based on failed batch summaries
-                status = lambda x: np.where(
-                    x["thematic_summary"].str.contains("--- FAILED BATCH SUMMARIES ---"),
-                    "fail", 
-                    "pass"
-                    )
-                )
-            # Calculate word count for all summaries
-            .assign(word_count = lambda x: x["thematic_summary"].str.split().str.len().fillna(0).astype(int))
-            # Set word count to null for failing themes as we don't yet know thier conceptual capacity
-            .assign(word_count = lambda x: x["word_count"].where(x["status"].eq("pass")))
-            )
+        schema_df = self.summary_state.theme_schema_list[-1]
+        populated_df = self.summary_state.populated_theme_list[-1]
 
-        return(latest_populated_schema_df)
+        schema_merge_df = schema_df.drop(
+            columns=[
+                "theme_label",
+                "theme_description",
+                "organizing_proposition",
+                "question_text",
+            ]
+        )
+
+        latest_populated_schema_df = (
+            schema_merge_df
+            .merge(
+                populated_df,
+                how="left",
+                on=["question_id", "theme_id"],
+            )
+            .assign(
+                status=lambda x: np.where(
+                    x["thematic_summary"].str.contains(
+                        "--- FAILED BATCH SUMMARIES ---",
+                        na=False,
+                    ),
+                    "fail",
+                    "pass",
+                )
+            )
+            .assign(
+                word_count=lambda x: (
+                    x["thematic_summary"]
+                    .fillna("")
+                    .str.split()
+                    .str.len()
+                    .astype(int)
+                )
+            )
+            .assign(
+                word_count=lambda x: x["word_count"].where(x["status"].eq("pass"))
+            )
+        )
+
+        return latest_populated_schema_df
 
     def _gen_user_prompt_for_schema_change_planning(self, current_populated_question_schema_df, index, row):
         """
@@ -6087,6 +6110,10 @@ class Summarize:
         # Get the schema history
         schema_history_df_list = []
         for ix, df in enumerate(self.summary_state.schema_repair_list):
+            if df.empty: # Schema repair hisory is empty in cases like from clusters
+                continue
+
+            df = df.copy()
             df["iteration"] = ix + 1
             schema_history_df_list.append(df)
 
@@ -6095,7 +6122,7 @@ class Summarize:
             schema_history_df = pd.concat(schema_history_df_list)
             # Filter so we have the schema history just for this research question
             schema_history_df_rq = schema_history_df[
-                schema_history_df["research_question"] == row["question_id"]
+                schema_history_df["question_id"] == row["question_id"]
             ]
             schema_history_json_string = self._schema_history_to_json_string(schema_history_df_rq)
         
@@ -6104,14 +6131,14 @@ class Summarize:
             schema_history_json_string = ""
 
         plan_user_prompt = (
-            f"RESEARCH QUESTON:\n{row['question_text']}\n\n"
+            f"RESEARCH QUESTION:\n{row['question_text']}\n\n"
             f"LATEST SCHEMA AND SUMMARIES:\n{current_populated_question_schema_json}\n\n"
             f"SCHEMA HISTORY:\n{schema_history_json_string}"
         )
 
         return plan_user_prompt
 
-    def _repair_schema(self):
+    def _repair_schema(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Orchestrate the repair - calling gen repair plan and apply repair plan - while retreiveing the data needed to execute these calls
         """
@@ -6191,14 +6218,16 @@ class Summarize:
         # Concat the list of dfs to get a single df of the schema
         updated_schema_df = pd.concat(updated_schema_list, ignore_index=True)
         updated_schema_df_sorted = updated_schema_df.sort_values(by =["question_id", "theme_id"])
+        updated_schema_df_sorted["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         updated_repair_plan_df = pd.concat(updated_repair_plan_list)
         updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
+        updated_repair_plan_df["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
         return updated_schema_df_sorted, updated_repair_plan_df 
 
 
-    def _optimize_schema(self):
+    def _optimize_schema(self) -> tuple[pd.DataFrame | None, pd.DataFrame]:
         """
         docstring
         """
@@ -6301,6 +6330,7 @@ class Summarize:
         updated_schema_df_sorted = updated_schema_df.sort_values(
             by=["question_id", "theme_id"]
         )
+        updated_schema_df_sorted["theme_id"] = [i + 1 for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         all_optimizer_clear = (
             updated_schema_df_sorted
@@ -6316,17 +6346,18 @@ class Summarize:
                 "Your latest populated theme object (var.summary_state.populated_theme_list[-1]) is valid.\n"
                 "You should proceed to pass it to the optional redundancy handling pass and then to the rendering class."
             )
-            return None, None
+            return None, pd.DataFrame()
 
         updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
         updated_repair_plan_df = updated_repair_plan_df.sort_values(
             by=["research_question", "source_theme_id"]
         )
+        updated_repair_plan_df["theme_id"] = [i + 1 for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         return updated_schema_df_sorted, updated_repair_plan_df
 
 
-    def _schema_from_cluster_summaries(self):
+    def _schema_from_cluster_summaries(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         doc string
         """
@@ -6367,13 +6398,14 @@ class Summarize:
         
         schema_from_summaries = pd.concat(out_df_list)
         schema_from_summaries = schema_from_summaries.sort_values(by = ["question_id", "theme_id"])
+        schema_from_summaries["theme_id"] = [i + 1 for i in range(schema_from_summaries.shape[0])] # Make theme_id global
 
-        schema_change_history = None
+        schema_change_history = pd.DataFrame()
 
         return schema_from_summaries, schema_change_history
 
     
-    def _run_llm_schema_gen(self, source: str) -> pd.DataFrame:
+    def _run_llm_schema_gen(self, source: str) -> tuple[pd.DataFrame | None, pd.DataFrame]:
         """
         doctring
         """
@@ -6534,9 +6566,9 @@ class Summarize:
         # --- CASE 1: First schema pass, build from clusters
         if schema_len == 0:
             source_name = "cluster summaries"
-            new_schema = self._run_llm_schema_gen(source=source_name)
+            new_schema, schema_change_plan = self._run_llm_schema_gen(source=source_name)
             self.summary_state.theme_schema_list.append(new_schema)
-            self.summary_state.schema_repair_list.append(repair_plan)
+            self.summary_state.schema_repair_list.append(schema_change_plan)
             self.summary_state.save()
             return new_schema  
 
@@ -7549,292 +7581,94 @@ class Summarize:
 
         return theme_counts[["theme_id", "allocated_length"]]
 
-
-    def _check_length_and_flag(self, df: pd.DataFrame, max_prop: float, max_model_output_words: int = 2800) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Split populated themes by length-pressure status.
-
-        Flags themes whose generated summaries are approaching or exceeding a
-        specified proportion of their allocated word budget. This diagnostic is
-        used during theme population to identify summaries that may require
-        expansion, repartitioning, or repair because the theme may contain more
-        mapped insight content than can be represented within its current target
-        length.
-
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Populated-theme DataFrame containing at least:
-
-            - `allocated_length`
-            - `current_length`
-            - `stable`
-
-        max_prop : float
-            Proportion of `allocated_length` above which a theme is flagged.
-
-        max_model_output_words : int, default=2800
-            Hard maximum summary length. Themes already allocated this maximum are
-            not flagged.
-
-        Returns
-        -------
-        tuple[pd.DataFrame, pd.DataFrame]
-            Tuple containing:
-
-            - `df_len_ok`: themes not flagged for length pressure
-            - `df_len_flagged`: themes flagged for length pressure
-
-        Notes
-        -----
-        A theme is not flagged when:
-
-        - `current_length` is missing or zero
-        - `allocated_length` equals `max_model_output_words`
-        - `stable` is True
-        - `current_length <= allocated_length * max_prop`
-
-        The method adds a `length_flag` column to the input DataFrame before
-        splitting it into flagged and unflagged subsets.
-
-        Length pressure is a heuristic signal. It does not prove that a summary is
-        incomplete, but it can indicate that the theme is carrying too much
-        representational load or that assigned insights may need to be redistributed
-        during schema repair.
-        """
-
-        MAX_THEME_WORDS = max_model_output_words
-
-        def flag_row(row):
-            # Treat missing summaries as not flagged
-            if pd.isna(row["current_length"]) or row["current_length"] == 0:
-                return 0
-
-            # Do not flag if theme is already at hard ceiling
-            if row["allocated_length"] == MAX_THEME_WORDS:
-                return 0
-
-            # If the theme is marked as stable we should not flag - we don't want to re-write.
-            if row["stable"] == True:
-                return 0
-            
-            # Standard proportional check
-            if row["current_length"] <= row["allocated_length"] * max_prop:
-                return 0
-            else:
-                return 1
-
-        df["length_flag"] = df.apply(flag_row, axis=1)
-
-        df_len_ok = df[df["length_flag"] == 0]
-        df_len_flagged = df[df["length_flag"] == 1]
-
-        return df_len_ok, df_len_flagged
     
     def _run_theme_pop(
         self,
         schema_df: pd.DataFrame,
         mapped_themes_df: pd.DataFrame,
-        paper_len: int = 8000
+        paper_len: int = 8000,
     ) -> pd.DataFrame:
         """
-        Populate themes by synthesizing mapped insights into thematic narratives.
+        Populate unstable themes by synthesizing mapped insights into thematic summaries.
 
-        Generates theme-level summaries from the insight-to-theme mappings
-        produced during the mapping stage. Each theme is synthesized
-        independently and becomes the primary analytical representation used for
-        completeness auditing, orphan detection, schema repair, and subsequent
-        thematic refinement.
-
-        The theme-population workflow proceeds as follows:
-
-            mapped insights
-                ↓
-            length allocation
-                ↓
-            theme-level synthesis
-                ↓
-            populated themes
-                ↓
-            completeness auditing
-
-        Stable Theme Reuse
-        ------------------
-        Themes belonging to research questions whose schemas have already been
-        marked as stable are not regenerated.
-
-        Instead, populated themes from the most recent population pass are
-        reused and carried forward unchanged. Only themes associated with
-        unstable schemas are submitted to the LLM for regeneration.
-
-        Length Allocation
-        -----------------
-        Before synthesis, each theme receives an allocated word budget derived
-        from the relative number of mapped insights assigned to that theme.
-
-        These allocations are used to guide summary generation and to later
-        evaluate whether themes may be experiencing representational overload.
-
-        Theme Types
-        -----------
-        Different prompting strategies are used depending on theme type:
-
-        - general themes
-        - conflict themes
-        - other themes
-
-        This allows conflict-oriented and residual categories to be synthesized
-        differently from standard thematic categories.
-
-        Fallback and Sampling
-        ---------------------
-        If theme population fails or produces an empty summary, the method
-        retries synthesis using a sampled subset of insights constrained by a
-        maximum word budget.
-
-        Sampling is treated as a temporary context-management strategy rather
-        than a coverage decision. Any omitted information is expected to be
-        recovered later through completeness checking, orphan detection,
-        reintegration, and schema refinement.
-
-        Parameters
-        ----------
-        schema_df : pd.DataFrame
-            Active theme schema containing theme definitions and synthesis-state
-            metadata.
-
-            Expected columns include:
-
-            - `theme_id`
-            - `theme_label`
-            - `theme_description`
-            - `question_id`
-            - `question_text`
-            - `stable`
-
-        mapped_themes_df : pd.DataFrame
-            Insight-to-theme mapping table containing at least:
-
-            - `insight_id`
-            - `theme_id`
-            - `question_id`
-
-        paper_len : int, default=8000
-            Approximate target length of the synthesized output. Used when
-            allocating theme-level word budgets.
-
-        Returns
-        -------
-        pd.DataFrame
-            Populated theme table containing:
-
-            - `thematic_summary`
-            - `question_id`
-            - `theme_id`
-            - `theme_label`
-            - `theme_description`
-            - `allocated_length`
-            - `current_length`
-            - `perc_of_max_length`
-            - `needs_repair`
-            - `optimized`
-            - `stable`
-
-        Notes
-        -----
-        Themes with no mapped insights are retained and returned with empty
-        summaries. This preserves schema stability and allows structural
-        categories such as "Other" and "Conflict" to remain present even when
-        they are temporarily unused.
-
-        Summary length diagnostics are calculated for every generated theme.
-        These diagnostics are later used to identify themes that may require
-        schema repair, decomposition, or redistribution of representational
-        load.
-
-        This method performs synthesis only. It does not evaluate completeness,
-        detect orphaned insights, modify the schema, or persist outputs to
-        SummaryState.
+        Questions whose current mappings/populated themes are stable are carried
+        forward unchanged. Length diagnostics are recorded as passive metadata only.
         """
-        # Calculate the estimated lengths for each theme based on the number of insights mapped to them and merge this info back to the theme schema for use in the prompt when populating themes
-        # This is only done if the columsn do not already exist, because later we will iterate on this and in those subsequent cases we just amend the allocated length manually
-        # Normalise the id columsn as they come back from the LLM so could be str
-        # Copy the df because this could be called on a corpus_state object
-        
-        # Get the allocated lenghts
+
         schema_df = schema_df.copy()
         schema_df["theme_id"] = schema_df["theme_id"].astype(int)
+
         if "allocated_length" not in schema_df.columns:
             schema_df = schema_df.merge(
-            self._estimate_theme_lengths(paper_len),
-            on="theme_id",
-            how="left"
-        )
-        
-        # Get the populated themese for the stable schema 
+                self._estimate_theme_lengths(paper_len),
+                on="theme_id",
+                how="left",
+            )
+
         stable_questions = self._check_stable_questions()
-        # Get the stable populated themes
-        if len(stable_questions) > 0:
+
+        if stable_questions:
             stable_populated_themes = self.summary_state.populated_theme_list[-1][
-                self.summary_state.populated_theme_list[-1]["question_id"]
-                .isin(stable_questions)
-                ].copy()
+                self.summary_state.populated_theme_list[-1]["question_id"].isin(stable_questions)
+            ].copy()
         else:
             stable_populated_themes = pd.DataFrame()
 
-        # Get the unstable schema
         unstable_questions = [
             q for q in self.corpus_state.questions["question_id"].tolist()
             if q not in stable_questions
         ]
+
         unstable_schema = schema_df[
             schema_df["question_id"].isin(unstable_questions)
         ].copy()
 
-        # Iterate over the themes from the unstable schema to get the data for the LLM call
         populated_themes = []
+
         for idx, row in unstable_schema.iterrows():
             print(f"Populating theme {idx + 1} of {unstable_schema.shape[0]}...")
+
             rq_id = row["question_id"]
             rq_text = row["question_text"]
-            theme_id = row["theme_id"]
+            theme_id = int(row["theme_id"])
             theme_label = row["theme_label"]
             theme_description = row["theme_description"]
             organizing_proposition = row.get("organizing_proposition")
             allocated_length = row["allocated_length"]
 
-            # Get the insight ids for the specific question and theme
             insight_ids = mapped_themes_df[
                 (mapped_themes_df["question_id"] == rq_id)
                 & (mapped_themes_df["theme_id"] == theme_id)
             ]["insight_id"].tolist()
-            # Get the insight text from those insight ids
 
             insights_df = self.corpus_state.insights[
                 self.corpus_state.insights["insight_id"].isin(insight_ids)
             ].copy()
-            
-            # Add in the citations
-            insights = (insights_df["insight"] + " (" + insights_df["in_text_citation"] + ")").tolist()
-            
-            # Check if insights are zero (i.e. an empty conflicts or other catergory got returned by the LLM). If so throw an error. This is a broken schema is nothing is getting mapped to the theme
+
+            insights = (
+                insights_df["insight"] + " (" + insights_df["in_text_citation"] + ")"
+            ).tolist()
+
             if len(insights) == 0:
                 raise ValueError(
-                    "A theme was not allocated any insights during mapping. This suggests a catastophic failure of the schema rules. Check your schema."
+                    "A theme was not allocated any insights during mapping. "
+                    "This suggests a catastrophic failure of the schema rules. "
+                    "Check your schema."
                 )
-            
+
             insights_str = "\n".join(insights)
 
-            # Get the theme type to pass to the sys prompt to tailor the prompt to the theme type: general, conflict or other.
             if theme_label.strip().lower() == "conflict":
                 theme_type = "conflicts"
             elif theme_label.strip().lower() == "other":
                 theme_type = "other"
             else:
                 theme_type = "general"
-                
-            # Build the prompt
-            sys_prompt = Prompts().populate_themes(theme_len=allocated_length, theme_type=theme_type)
+
+            sys_prompt = Prompts().populate_themes(
+                theme_len=allocated_length,
+                theme_type=theme_type,
+            )
 
             user_prompt = (
                 f"RESEARCH QUESTION: {rq_text}\n"
@@ -7851,13 +7685,13 @@ class Summarize:
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "thematic_summary": {"type": "string"}
+                        "thematic_summary": {"type": "string"},
                     },
                     "required": ["thematic_summary"],
-                    "additionalProperties": False
-                }
+                    "additionalProperties": False,
+                },
             }
-            # Call the LLM
+
             response, error = utils.call_chat_completion(
                 sys_prompt=sys_prompt,
                 user_prompt=user_prompt,
@@ -7865,45 +7699,45 @@ class Summarize:
                 ai_model=self.ai_model,
                 fall_back=None,
                 return_json=True,
-                json_schema=json_schema, 
-                return_with_error=True
+                json_schema=json_schema,
+                return_with_error=True,
             )
-            
-            # Test for fall back
+
             if response is None:
                 raise ValueError(
                     f"Theme population for theme: {theme_label}; returned None.\n"
                     f"Error: {error}"
                 )
 
-            # Get the summary from the response and tag with metadata in a dataframe
             summary_text = response.get("thematic_summary", "")
 
-            if not summary_text.strip(): # This checks for an empty string, not None
-                print(f"Empty summary generated for theme_id {theme_id}. Error: {error}. Resubmitting for summary on sampled insights")
-                # --- sample when words in insights exceeds 70000 step ---
-                MAX_WORDS = 70000           
+            if not summary_text.strip():
+                print(
+                    f"Empty summary generated for theme_id {theme_id}. "
+                    f"Error: {error}. Resubmitting for summary on sampled insights"
+                )
 
-                # if total number of words in the insights exceeds the max, then sample
-                
+                MAX_WORDS = 70000
+
                 insights = utils.sample_to_word_limit(
                     insights,
                     max_words=MAX_WORDS,
-                    seed=config.seed
+                    seed=config.seed,
                 )
 
                 print(
                     f"Theme {theme_id}: sampled {len(insights)} insights to fit word budget"
                 )
+
                 insights_str = "\n".join(insights)
 
                 user_prompt = (
-                f"RESEARCH QUESTION: {rq_text}\n"
-                f"THEME LABEL: {theme_label}\n"
-                f"THEME DESCRIPTION: {theme_description}\n"
-                f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
-                f"INSIGHTS TO SYNTHESIZE:\n"
-                f"{insights_str}\n\n"
+                    f"RESEARCH QUESTION: {rq_text}\n"
+                    f"THEME LABEL: {theme_label}\n"
+                    f"THEME DESCRIPTION: {theme_description}\n"
+                    f"ORGANIZING PROPOSITION: {organizing_proposition}\n"
+                    f"INSIGHTS TO SYNTHESIZE:\n"
+                    f"{insights_str}\n\n"
                 )
 
                 response, error = utils.call_chat_completion(
@@ -7914,7 +7748,7 @@ class Summarize:
                     fall_back=None,
                     return_json=True,
                     json_schema=json_schema,
-                    return_with_error=True
+                    return_with_error=True,
                 )
 
                 if response is None:
@@ -7922,187 +7756,60 @@ class Summarize:
                         "Population of sampled insight set failed on return from LLM.\n"
                         f"Error: {error}"
                     )
-                
-                else:
-                    summary_text = response.get("thematic_summary")
 
-            # Put the summary into a dataframe        
-            thematic_summary = pd.DataFrame([summary_text], columns=["thematic_summary"])
-            # Now populate the rest of the populated summary text
-            thematic_summary["question_id"] = rq_id
-            thematic_summary["theme_id"] = int(theme_id)
-            thematic_summary["theme_label"] = theme_label
-            thematic_summary["theme_description"] = theme_description
-            thematic_summary["organizing_proposition"] = organizing_proposition
-            thematic_summary["allocated_length"] = allocated_length
-            
-            # Get the length of the summary in words and calculate the percentage of the allocated length that this summary represents
-            thematic_summary["current_length"] = len(thematic_summary["thematic_summary"].iloc[0].split())
-            thematic_summary["perc_of_max_length"] = thematic_summary["current_length"] / allocated_length if allocated_length > 0 else None
-            
-            # Append the result to the list of dfs the loop is producing, which will be concatenated at the end
+                summary_text = response.get("thematic_summary", "")
+
+                if not summary_text.strip():
+                    raise ValueError(
+                        f"Population of sampled insight set returned an empty summary "
+                        f"for theme_id {theme_id}."
+                    )
+
+            thematic_summary = pd.DataFrame(
+                [{
+                    "thematic_summary": summary_text,
+                    "question_id": rq_id,
+                    "theme_id": theme_id,
+                    "theme_label": theme_label,
+                    "theme_description": theme_description,
+                    "organizing_proposition": organizing_proposition,
+                    "allocated_length": allocated_length,
+                }]
+            )
+
+            thematic_summary["current_length"] = len(summary_text.split())
+            thematic_summary["perc_of_max_length"] = (
+                thematic_summary["current_length"] / allocated_length
+                if allocated_length > 0
+                else None
+            )
+
             populated_themes.append(thematic_summary)
 
-        # Concat the final list of dfs and return
-        # First check its not empty
         if not populated_themes:
             raise ValueError(
-                "All the themes were already marked as stable. Repopulation should not be attemped. Use your prior populated themes for redundancy/rendering"
+                "All themes were already stable. Repopulation should not be attempted. "
+                "Use the prior populated themes for redundancy/rendering."
             )
+
         populated_themes_df = pd.concat(populated_themes, ignore_index=True)
-        # Add back the stable questions and themes with thier populated summaries
-        if stable_populated_themes is not None and not stable_populated_themes.empty:
-            populated_themes_df = pd.concat([populated_themes_df, stable_populated_themes], ignore_index=True)
 
-        # Sort the values by question id and theme id so that they are in the same order as the schema and therefore able to be exported to the narrative
-        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
-        populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-        
-        return(populated_themes_df)
+        if not stable_populated_themes.empty:
+            populated_themes_df = pd.concat(
+                [populated_themes_df, stable_populated_themes],
+                ignore_index=True,
+            )
 
-    def _iterative_length_check_and_expand_loop(
-        self,
-        populated_themes_df: pd.DataFrame,
-        max_prop: float,
-        paper_len: int
-    ) -> pd.DataFrame:
-        """
-        Iteratively rerun length-pressured theme summaries with larger budgets.
+        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int)
 
-        Reviews populated theme summaries for length pressure and optionally
-        regenerates flagged themes with expanded word allocations. This provides a
-        human-in-the-loop mechanism for reducing over-compression before moving to
-        downstream orphan handling and schema refinement.
+        populated_themes_df = (
+            populated_themes_df
+            .sort_values(by=["question_id", "theme_id"])
+            .reset_index(drop=True)
+        )
 
-        The loop proceeds as follows:
+        return populated_themes_df
 
-            populated themes
-                ↓
-            length-pressure check
-                ↓
-            optional budget expansion
-                ↓
-            targeted theme repopulation
-                ↓
-            updated populated themes
-
-        Parameters
-        ----------
-        populated_themes_df : pd.DataFrame
-            Current populated-theme table containing generated summaries, theme
-            metadata, allocated lengths, current lengths, and stability flags.
-
-        max_prop : float
-            Proportion of allocated length above which a theme is flagged for
-            possible expansion.
-
-        paper_len : int
-            Approximate target output length used when rerunning theme population.
-
-        Returns
-        -------
-        pd.DataFrame
-            Updated populated-theme table with any regenerated summaries replacing
-            their previous versions.
-
-        Raises
-        ------
-        ValueError
-            If expanded `allocated_length` values fail to merge onto the rerun
-            schema for flagged themes.
-
-        Notes
-        -----
-        Flagged themes are rerun with a 20 percent increase in allocated length.
-
-        Only flagged themes are regenerated. Unflagged themes are carried forward
-        unchanged.
-
-        Stable themes are not flagged by `_check_length_and_flag()` and therefore
-        are not regenerated by this loop.
-
-        The loop continues until either no themes remain flagged or the user chooses
-        to accept the current populated themes.
-
-        Length pressure is treated as a heuristic signal of possible excessive
-        abstraction or representational overload. It does not prove that a theme is
-        incomplete, but it gives the user an opportunity to expand summaries before
-        orphan detection and schema repair evaluate coverage more directly.
-        """
-        # Check whether any of the populated themes exceed a certain proportion of th total allocated length
-        df_len_ok, df_len_flagged = self._check_length_and_flag(populated_themes_df, max_prop)
-        df_len_flagged = df_len_flagged.copy() # Copy to avoid modifying the original df with the flags, as this will be used in the loop and we want to preserve the original for reference.
-
-        #While any themes exceed the length threshold its a sign that the LLM is undertaking more compression of the granulatiry of the theme than might be optimal (to fit length requirements). 
-        # Offer the user the options to re-run these themes with a 20% expansion of the word count allocated to them.
-        while df_len_flagged is not None and not df_len_flagged.empty:
-            expand_count = None
-            while expand_count not in ["1", "2"]:
-                expand_count = input(
-                    f"{df_len_flagged.shape[0]} themes exceed {max_prop*100}% of their allocated length. This suggests the model is compressing these themes through aggressive abstraction and granularity is being lost. \n"
-                    "Do you want to:\n"
-                    "1) re-run these themes with a 20% expansion of the word count allocated to them? \n"
-                    "2) keep the current populated themes and move on to the next step? \n"
-                    "Enter 1 or 2:\n"
-                ).lower()
-
-            
-            if expand_count == "2":
-                # If the user is happy, end the loop. Populated themes is in tact and we keep it. 
-                break
-
-            else:
-                # If the user wants to expand, we re run the theme populator on the flagged themes with increased allocation and update populated themes with the longer theme summaries
-                # First get the schema map for the flagged themes and expand the allocated length by 20%
-                df_len_flagged = df_len_flagged.copy()
-                df_len_flagged.loc[:, "allocated_length"] = (df_len_flagged["allocated_length"] * 1.2).astype(int)
-                # Then get the ids and the corresponding insights
-                length_check_theme_ids = df_len_flagged["theme_id"].tolist()
-                rerun_mapped_df = self.summary_state.mapped_theme_list[-1][self.summary_state.mapped_theme_list[-1]["theme_id"].isin(length_check_theme_ids)].copy()
-                # Rerun on the flagged themes with the expanded length and get new summaries for those themes
-                rerun_theme_ids = df_len_flagged["theme_id"].tolist()
-                rerun_schema_df = (
-                    self.summary_state.theme_schema_list[-1][self.summary_state.theme_schema_list[-1]["theme_id"].isin(rerun_theme_ids)] # First filter the schema to just the themes we want to rerun
-                    .drop(columns=["allocated_length"], errors="ignore") # Drop allocated length as we will get the updated length from df_len_flagged 
-                    .copy() # Copy so that we are not modifying corpus_state
-                )
-                # Now get the updated allocated length via a merge
-                rerun_schema_df = ( 
-                    rerun_schema_df
-                    .merge(df_len_flagged[["theme_id", "allocated_length"]], 
-                           on="theme_id", 
-                           how="left")
-                )
-                # Add a sanity check to make sure the allocated length came through in the merge, as this is critical for the rerun. Fail loudly if there is a problem
-                if rerun_schema_df["allocated_length"].isna().any():
-                    raise ValueError(
-                        "Expanded allocated_length missing for some rerun themes."
-                    )
-                
-                # Rerun the theme populater on the theme_schema_df
-                rerun_populated_themes_df = self._run_theme_pop(rerun_schema_df, rerun_mapped_df, paper_len)
-                rerun_len_ok, df_len_flagged = self._check_length_and_flag(rerun_populated_themes_df, max_prop)
-                # If this produced any themes for which the length is now ok we replace the odl summaries in populated_theme_list with these updates
-                # Always replace all rerun themes (both ok + still flagged)
-                rerun_all = pd.concat([rerun_len_ok, df_len_flagged], ignore_index=True)
-
-                rerun_theme_ids = rerun_all["theme_id"].tolist()
-
-                # Drop old versions
-                populated_themes_df = populated_themes_df[
-                    ~populated_themes_df["theme_id"].isin(rerun_theme_ids)
-                ]
-
-                # Add updated versions
-                populated_themes_df = pd.concat(
-                    [populated_themes_df, rerun_all],
-                    ignore_index=True
-                )
-                    
-        # Make sure the final df of populated themes is in the same order as the theme schema for easier comparison and so that it can be exported to the narrative in the correct order
-        populated_themes_df["theme_id"] = populated_themes_df["theme_id"].astype(int) # Before sorting defensively make sure this is int
-        populated_themes_df = populated_themes_df.sort_values(by=["question_id", "theme_id"]).reset_index(drop=True)
-        return(populated_themes_df)
    
     def populate_themes(
         self,
@@ -8206,12 +7913,6 @@ class Summarize:
                 mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
                 paper_len=paper_len
             )
-            # Iteratively expand the theme lenght until the user is satisfied
-            populated_themes_df = self._iterative_length_check_and_expand_loop(
-                populated_themes_df=populated_themes_df,
-                max_prop=max_prop,
-                paper_len=paper_len
-            )
 
             # Append, save and return
             self.summary_state.populated_theme_list.append(populated_themes_df)
@@ -8257,13 +7958,6 @@ class Summarize:
         populated_themes_df = self._run_theme_pop(
             schema_df=self.summary_state.theme_schema_list[-1].copy(),
             mapped_themes_df=self.summary_state.mapped_theme_list[-1].copy(),
-            paper_len=paper_len
-        )
-        
-        # Iterate on the length of each theme and expand until the user is happy
-        populated_themes_df = self._iterative_length_check_and_expand_loop(
-            populated_themes_df=populated_themes_df,
-            max_prop=max_prop,
             paper_len=paper_len
         )
 
@@ -8601,6 +8295,9 @@ class Summarize:
 
         return response_summary
 
+#### -------------------- CODE UPDATE--------------------
+
+
     def _identify_missing_citations(self, summary: str, required_citations: list) -> list:
         """
         Identify citations missing from a synthesized summary.
@@ -8655,127 +8352,231 @@ class Summarize:
         return missing_citations
 
     
-    def _address_missing_citations(
+    # def _address_missing_citations(
+    #     self,
+    #     summary: str,
+    #     missing_citations_df: pd.DataFrame
+    # ) -> str:
+    #     """
+    #     Repair citation omissions in a synthesized thematic summary.
+
+    #     Uses the insights associated with missing citations to generate targeted
+    #     sentence-level patches for a thematic summary. The method asks the LLM to
+    #     propose either revisions to existing sentences or new sentences anchored
+    #     after existing text, then applies those patches deterministically.
+
+    #     Parameters
+    #     ----------
+    #     summary : str
+    #         Thematic summary text to repair.
+
+    #     missing_citations_df : pd.DataFrame
+    #         DataFrame containing omitted citation evidence. Expected columns are:
+
+    #         - `in_text_citation`
+    #         - `insight`
+
+    #     Returns
+    #     -------
+    #     str
+    #         Summary text after applying any valid citation-repair patches. If no
+    #         missing citations are supplied, returns the original summary unchanged.
+
+    #     Notes
+    #     -----
+    #     Missing citations are grouped by `in_text_citation` before being passed to
+    #     the LLM, along with the associated insight texts. The LLM returns structured
+    #     patch instructions rather than a fully rewritten summary.
+
+    #     Patches are applied only when their target sentence is found exactly in the
+    #     current summary. This prevents uncontrolled rewrites and keeps the repair
+    #     process deterministic.
+
+    #     Two patch types are supported:
+
+    #     - revise an existing sentence
+    #     - insert a new sentence after an anchor sentence
+
+    #     This method repairs citation presence, not full evidentiary accuracy. It
+    #     does not verify that citations are attached to the most appropriate claims
+    #     beyond the LLM-generated patch instructions.
+
+    #     The method may print missing-citation inputs, prompts, and proposed patches
+    #     for debugging.
+    #     """
+
+    #     if missing_citations_df.empty:
+    #         return summary
+
+    #     missing_citations_grouped = (
+    #         missing_citations_df
+    #         .groupby("in_text_citation")["insight"]
+    #         .apply(list)
+    #         .reset_index()
+    #         .to_dict(orient="records")
+    #     )
+
+    #     missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
+
+    #     user_prompt = (
+    #         f"THEMATIC SUMMARY:\n{summary}\n\n"
+    #         f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
+    #     )
+
+    #     sys_prompt = Prompts().repair_citation_provenance()
+
+    #     json_schema = {
+    #         "name": "repair_citation_provenance",
+    #         "strict": True,
+    #         "schema": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "patches": {
+    #                     "type": "array",
+    #                     "items": {
+    #                         "type": "object",
+    #                         "properties": {
+    #                             "missing_citations": {
+    #                                 "type": "array",
+    #                                 "items": {
+    #                                     "type": "string"
+    #                                 }
+    #                             },
+    #                             "revise": {
+    #                                 "type": "boolean"
+    #                             },
+    #                             "original_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "revised_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "anchor_sentence": {
+    #                                 "type": "string"
+    #                             },
+    #                             "new_sentence": {
+    #                                 "type": "string"
+    #                             }
+    #                         },
+    #                         "required": [
+    #                             "missing_citations",
+    #                             "revise",
+    #                             "original_sentence",
+    #                             "revised_sentence",
+    #                             "anchor_sentence",
+    #                             "new_sentence"
+    #                         ],
+    #                         "additionalProperties": False
+    #                     }
+    #                 }
+    #             },
+    #             "required": ["patches"],
+    #             "additionalProperties": False
+    #         }
+    #     }
+
+    #     response, error = utils.call_chat_completion(
+    #         sys_prompt=sys_prompt,
+    #         user_prompt=user_prompt,
+    #         llm_client=self.llm_client,
+    #         ai_model=self.ai_model,
+    #         fall_back=None,
+    #         return_json=True,
+    #         json_schema=json_schema,
+    #         max_tokens=4096, 
+    #         return_with_error=True
+    #     )
+
+    #     if response is None:
+    #         raise ValueError(
+    #             f"Citation repair returned nothing. Error: {error}"
+    #         )
+
+    #     for patch in response["patches"]:
+    #         # Check whether the sentences got returned correctly
+    #         if patch["revise"]:
+
+    #             if patch["original_sentence"] not in summary:
+    #                 print("WARNING: original sentence not found")
+    #                 continue
+
+    #         else:
+
+    #             if patch["anchor_sentence"] not in summary:
+    #                 print("WARNING: anchor sentence not found")
+    #                 continue
+
+    #         # Then deterministically insert the revised sentences
+    #         if patch["revise"]:
+
+    #             summary = summary.replace(
+    #                 patch["original_sentence"],
+    #                 patch["revised_sentence"],
+    #                 1
+    #             )
+
+    #         else:
+
+    #             summary = summary.replace(
+    #                 patch["anchor_sentence"],
+    #                 patch["anchor_sentence"] + " " + patch["new_sentence"],
+    #                 1
+    #             )
+
+    #     return summary
+
+
+    def _plan_citation_placements(
         self,
-        summary: str,
-        missing_citations_df: pd.DataFrame
-    ) -> str:
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
         """
-        Repair citation omissions in a synthesized thematic summary.
+        Return source-first citation placements.
 
-        Uses the insights associated with missing citations to generate targeted
-        sentence-level patches for a thematic summary. The method asks the LLM to
-        propose either revisions to existing sentences or new sentences anchored
-        after existing text, then applies those patches deterministically.
-
-        Parameters
-        ----------
-        summary : str
-            Thematic summary text to repair.
-
-        missing_citations_df : pd.DataFrame
-            DataFrame containing omitted citation evidence. Expected columns are:
-
-            - `in_text_citation`
-            - `insight`
-
-        Returns
-        -------
-        str
-            Summary text after applying any valid citation-repair patches. If no
-            missing citations are supplied, returns the original summary unchanged.
-
-        Notes
-        -----
-        Missing citations are grouped by `in_text_citation` before being passed to
-        the LLM, along with the associated insight texts. The LLM returns structured
-        patch instructions rather than a fully rewritten summary.
-
-        Patches are applied only when their target sentence is found exactly in the
-        current summary. This prevents uncontrolled rewrites and keeps the repair
-        process deterministic.
-
-        Two patch types are supported:
-
-        - revise an existing sentence
-        - insert a new sentence after an anchor sentence
-
-        This method repairs citation presence, not full evidentiary accuracy. It
-        does not verify that citations are attached to the most appropriate claims
-        beyond the LLM-generated patch instructions.
-
-        The method may print missing-citation inputs, prompts, and proposed patches
-        for debugging.
+        Raises OverflowError only for confirmed output truncation, allowing
+        the coordinator to split the request. Other failures raise ValueError.
         """
-
-        if missing_citations_df.empty:
-            return summary
-
-        missing_citations_grouped = (
-            missing_citations_df
-            .groupby("in_text_citation")["insight"]
-            .apply(list)
-            .reset_index()
-            .to_dict(orient="records")
-        )
-
-        missing_citations_json = json.dumps(missing_citations_grouped, indent=2, ensure_ascii=False)
-
-        user_prompt = (
-            f"THEMATIC SUMMARY:\n{summary}\n\n"
-            f"MISSING CITATIONS:\n{missing_citations_json}\n\n"
-        )
-
-        sys_prompt = Prompts().repair_citation_provenance()
-
         json_schema = {
-            "name": "repair_citation_provenance",
+            "name": "plan_citation_provenance",
             "strict": True,
             "schema": {
                 "type": "object",
                 "properties": {
-                    "patches": {
+                    "placements": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "missing_citations": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
+                                "citation": {"type": "string"},
+                                "insight_id": {"type": "string"},
+                                "existing_summary_claim": {
+                                    "type": ["string", "null"],
                                 },
-                                "revise": {
-                                    "type": "boolean"
+                                "best_matching_existing_sentence": {
+                                    "type": "string",
                                 },
-                                "original_sentence": {
-                                    "type": "string"
+                                "action": {
+                                    "type": "string",
+                                    "enum": ["unchanged", "amend", "add"],
                                 },
-                                "revised_sentence": {
-                                    "type": "string"
-                                },
-                                "anchor_sentence": {
-                                    "type": "string"
-                                },
-                                "new_sentence": {
-                                    "type": "string"
-                                }
+                                "justification": {"type": "string"},
                             },
                             "required": [
-                                "missing_citations",
-                                "revise",
-                                "original_sentence",
-                                "revised_sentence",
-                                "anchor_sentence",
-                                "new_sentence"
+                                "citation",
+                                "insight_id",
+                                "existing_summary_claim",
+                                "best_matching_existing_sentence",
+                                "action",
+                                "justification",
                             ],
-                            "additionalProperties": False
-                        }
-                    }
+                            "additionalProperties": False,
+                        },
+                    },
                 },
-                "required": ["patches"],
-                "additionalProperties": False
-            }
+                "required": ["placements"],
+                "additionalProperties": False,
+            },
         }
 
         response, error = utils.call_chat_completion(
@@ -8786,47 +8587,1380 @@ class Summarize:
             fall_back=None,
             return_json=True,
             json_schema=json_schema,
-            max_tokens=4096, 
-            return_with_error=True
+            max_tokens=4096,
+            return_with_error=True,
         )
 
-        if response is None:
-            raise ValueError(
-                f"Citation repair returned nothing. Error: {error}"
+        if error is not None and error.get("type") == "truncation":
+            raise OverflowError(
+                f"Citation planning output truncated. Error: {error}"
             )
 
-        for patch in response["patches"]:
-            # Check whether the sentences got returned correctly
-            if patch["revise"]:
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation planning failed. Error: {error}"
+            )
 
-                if patch["original_sentence"] not in summary:
-                    print("WARNING: original sentence not found")
-                    continue
+        return response
 
-            else:
 
-                if patch["anchor_sentence"] not in summary:
-                    print("WARNING: anchor sentence not found")
-                    continue
+    def _rewrite_citation_sentences(
+        self,
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
+        json_schema = {
+            "name": "rewrite_citation_provenance",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "sentences": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "insight_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "existing_citations": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "text",
+                                "insight_ids",
+                                "existing_citations",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "unresolved_insight_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "sentences",
+                    "unresolved_insight_ids",
+                ],
+                "additionalProperties": False,
+            },
+        }
 
-            # Then deterministically insert the revised sentences
-            if patch["revise"]:
+        response, error = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=None,
+            return_json=True,
+            json_schema=json_schema,
+            max_tokens=4096,
+            return_with_error=True,
+        )
 
-                summary = summary.replace(
-                    patch["original_sentence"],
-                    patch["revised_sentence"],
-                    1
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation sentence rewrite failed. Error: {error}"
+            )
+
+        return response
+
+
+    def _recover_citation_target(
+        self,
+        sys_prompt: str,
+        user_prompt: str,
+    ) -> dict:
+        json_schema = {
+            "name": "recover_citation_target_sentence",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["matched", "no_match", "ambiguous"],
+                    },
+                    "original_sentence": {"type": "string"},
+                    "containing_paragraph": {"type": "string"},
+                },
+                "required": [
+                    "status",
+                    "original_sentence",
+                    "containing_paragraph",
+                ],
+                "additionalProperties": False,
+            },
+        }
+
+        response, error = utils.call_chat_completion(
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            llm_client=self.llm_client,
+            ai_model=self.ai_model,
+            fall_back=None,
+            return_json=True,
+            json_schema=json_schema,
+            max_tokens=4096,
+            return_with_error=True,
+        )
+
+        if error is not None or not isinstance(response, dict):
+            raise ValueError(
+                f"Citation target recovery failed. Error: {error}"
+            )
+
+        return response
+
+    def _resolve_citation_plan(
+        self,
+        plan: dict,
+        summary: str,
+        missing_citations_df: pd.DataFrame,
+    ) -> list:
+        """
+        Validate and resolve source-first citation placements.
+
+        Returns records containing:
+            original_sentence, start, end, assignments
+
+        Each assignment retains:
+            citation, insight_id, existing_summary_claim,
+            action, justification, needs_update
+
+        Offsets refer to the unchanged input summary.
+        """
+        import json
+        from collections import Counter
+
+        evidence = missing_citations_df[
+            ["insight_id", "in_text_citation", "insight"]
+        ].copy()
+
+        if evidence.isna().any().any():
+            raise ValueError("Citation evidence contains missing values.")
+
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+
+        for insight_id, rows in evidence.groupby("insight_id"):
+            if (
+                rows["in_text_citation"].nunique() != 1
+                or rows["insight"].nunique() != 1
+            ):
+                raise ValueError(
+                    f"Conflicting evidence for insight ID {insight_id}."
                 )
 
-            else:
+        lookup = (
+            evidence.drop_duplicates("insight_id")
+            .set_index("insight_id")
+            .to_dict(orient="index")
+        )
 
-                summary = summary.replace(
-                    patch["anchor_sentence"],
-                    patch["anchor_sentence"] + " " + patch["new_sentence"],
-                    1
+        required_sources = set(evidence["in_text_citation"])
+
+        if (
+            not isinstance(plan, dict)
+            or not isinstance(plan.get("placements"), list)
+        ):
+            raise ValueError("Citation plan must contain a placements list.")
+
+        placements = plan["placements"]
+        expected_fields = {
+            "citation",
+            "insight_id",
+            "existing_summary_claim",
+            "best_matching_existing_sentence",
+            "action",
+            "justification",
+        }
+
+        source_counts = Counter()
+
+        # Validate the complete plan before making target-recovery calls.
+        for placement in placements:
+            if (
+                not isinstance(placement, dict)
+                or set(placement) != expected_fields
+            ):
+                raise ValueError("Citation placement contains invalid fields.")
+
+            for field in (
+                "citation",
+                "insight_id",
+                "best_matching_existing_sentence",
+                "action",
+                "justification",
+            ):
+                if (
+                    not isinstance(placement[field], str)
+                    or not placement[field].strip()
+                ):
+                    raise ValueError(
+                        f"Placement field {field!r} must be a nonempty string."
+                    )
+
+            citation = placement["citation"]
+            insight_id = placement["insight_id"]
+            action = placement["action"]
+            claim = placement["existing_summary_claim"]
+
+            if action not in {"unchanged", "amend", "add"}:
+                raise ValueError(f"Invalid citation action: {action!r}")
+
+            if claim is not None and (
+                not isinstance(claim, str) or not claim.strip()
+            ):
+                raise ValueError(
+                    "existing_summary_claim must be nonempty text or null."
                 )
 
-        return summary
+            if action in {"unchanged", "amend"} and claim is None:
+                raise ValueError(
+                    f"Action {action!r} requires an existing summary claim."
+                )
+
+            if citation not in required_sources:
+                raise ValueError(
+                    f"Planner returned an unexpected citation: {citation!r}"
+                )
+
+            if insight_id not in lookup:
+                raise ValueError(
+                    f"Planner returned unknown insight ID: {insight_id!r}"
+                )
+
+            expected_citation = lookup[insight_id]["in_text_citation"]
+            if citation != expected_citation:
+                raise ValueError(
+                    f"Insight {insight_id} belongs to "
+                    f"{expected_citation!r}, not {citation!r}."
+                )
+
+            source_counts[citation] += 1
+
+        omitted_sources = required_sources - set(source_counts)
+        repeated_sources = [
+            citation
+            for citation, count in source_counts.items()
+            if count > 1
+        ]
+
+        if omitted_sources or repeated_sources:
+            raise ValueError(
+                "Citation plan has incomplete or duplicate source coverage. "
+                f"Omitted: {sorted(omitted_sources)}. "
+                f"Repeated: {sorted(repeated_sources)}."
+            )
+
+        resolved = {}
+
+        # Reuse recovery results when multiple sources return the same target.
+        recovered_locations = {}
+
+        for placement in placements:
+            proposed_target = placement["best_matching_existing_sentence"]
+            target = proposed_target
+
+            if target in recovered_locations:
+                target, start = recovered_locations[target]
+
+            elif summary.count(target) == 1:
+                start = summary.index(target)
+
+            else:
+                insight_id = placement["insight_id"]
+
+                recovery = self._recover_citation_target(
+                    sys_prompt=Prompts().recover_citation_target_sentence(),
+                    user_prompt=json.dumps(
+                        {
+                            "THEMATIC SUMMARY": summary,
+                            "PROPOSED TARGET SENTENCE": proposed_target,
+                            "SELECTED INSIGHTS": [
+                                {
+                                    "insight_id": insight_id,
+                                    **lookup[insight_id],
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                )
+
+                if recovery["status"] != "matched":
+                    raise ValueError(
+                        f"Target recovery returned {recovery['status']} "
+                        f"for {placement['citation']!r}: "
+                        f"{proposed_target!r}"
+                    )
+
+                target = recovery["original_sentence"]
+                paragraph = recovery["containing_paragraph"]
+
+                if (
+                    not isinstance(target, str)
+                    or not target.strip()
+                    or not isinstance(paragraph, str)
+                    or not paragraph.strip()
+                    or summary.count(paragraph) != 1
+                    or paragraph.count(target) != 1
+                ):
+                    raise ValueError(
+                        "Recovered sentence and context are not uniquely exact."
+                    )
+
+                start = summary.index(paragraph) + paragraph.index(target)
+                recovered_locations[proposed_target] = (target, start)
+
+            end = start + len(target)
+
+            if summary[start:end] != target:
+                raise ValueError("Resolved target does not match the summary.")
+
+            location = (start, end)
+            record = resolved.setdefault(
+                location,
+                {
+                    "original_sentence": target,
+                    "start": start,
+                    "end": end,
+                    "assignments": [],
+                },
+            )
+
+            record["assignments"].append({
+                "citation": placement["citation"],
+                "insight_id": placement["insight_id"],
+                "existing_summary_claim": placement["existing_summary_claim"],
+                "action": placement["action"],
+                "justification": placement["justification"],
+                "needs_update": placement["action"] != "unchanged",
+            })
+
+        results = sorted(
+            resolved.values(),
+            key=lambda record: record["start"],
+        )
+
+        for previous, current in zip(results, results[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError(
+                    "Resolved target sentences overlap: "
+                    f"{previous['original_sentence']!r} and "
+                    f"{current['original_sentence']!r}"
+                )
+
+        return results
+
+    def _extract_existing_citations(
+        self,
+        text: str,
+        known_citations: list,
+    ) -> list:
+        """
+        Extract exact known citation strings from parenthetical citation lists.
+
+        Assumes citation lists use semicolon-separated corpus citation strings.
+        Ordinary parenthetical text is ignored.
+        """
+        import re
+
+        known = set(known_citations)
+        found = []
+
+        for match in re.finditer(r"\([^()]*\)", text):
+            members = [
+                value.strip()
+                for value in match.group()[1:-1].split(";")
+            ]
+
+            if members and all(value in known for value in members):
+                found.extend(members)
+
+        return list(dict.fromkeys(found))
+
+
+    def _insert_sentence_citations(
+        self,
+        sentence: str,
+        citations: list,
+        known_citations: list,
+    ) -> str:
+        """
+        Add citations before terminal punctuation.
+
+        Extends an existing terminal citation list when recognizable;
+        otherwise adds a separate parenthetical citation list.
+        """
+        import re
+
+        citations = list(dict.fromkeys(citations))
+        if not citations:
+            return sentence
+
+        # Preserve terminal punctuation and closing quotation marks.
+        ending = re.search(r"""([.!?]?["'”’]*)$""", sentence)
+        suffix = ending.group()
+        body = sentence[:ending.start()].rstrip()
+
+        terminal_group = re.search(r"\(([^()]*)\)$", body)
+        known = set(known_citations)
+
+        if terminal_group:
+            existing = [
+                value.strip()
+                for value in terminal_group.group(1).split(";")
+            ]
+
+            if existing and all(value in known for value in existing):
+                combined = list(dict.fromkeys(existing + citations))
+                return (
+                    body[:terminal_group.start()]
+                    + "(" + "; ".join(combined) + ")"
+                    + suffix
+                )
+
+        return body + " (" + "; ".join(citations) + ")" + suffix
+
+
+    def _implement_citation_plan(
+        self,
+        summary: str,
+        resolved_plan: list,
+        missing_citations_df: pd.DataFrame,
+        research_question: str,
+        analytical_frame: str,
+    ) -> str:
+        """
+        Implement resolved citation placements using original text offsets.
+
+        Adjacent targets within a paragraph are rewritten together when
+        any assignment requires changes.
+
+        Silent omissions of selected insight IDs produce warnings.
+        Invalid references, lost existing citations, and explicit unresolved
+        results remain errors.
+        """
+        import json
+        import re
+
+        # Full evidence lookup for the insights selected during planning.
+        evidence = missing_citations_df.copy()
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+
+        lookup = (
+            evidence.drop_duplicates("insight_id")
+            .set_index("insight_id")
+            .to_dict(orient="index")
+        )
+
+        known_citations = list(dict.fromkeys(
+            str(value).strip()
+            for value in self.corpus_state.insights[
+                "in_text_citation"
+            ].dropna()
+            if str(value).strip()
+        ))
+        known_citations = list(dict.fromkeys(
+            known_citations + evidence["in_text_citation"].tolist()
+        ))
+
+        # Locate paragraphs without changing the original summary.
+        paragraph_spans = []
+        start = 0
+
+        for separator in re.finditer(r"\r?\n[ \t]*\r?\n", summary):
+            if separator.start() > start:
+                paragraph_spans.append((start, separator.start()))
+            start = separator.end()
+
+        if start < len(summary):
+            paragraph_spans.append((start, len(summary)))
+
+        # Validate resolved targets and their source associations.
+        targets = []
+
+        for record in resolved_plan:
+            left, right = record["start"], record["end"]
+
+            if (
+                not 0 <= left < right <= len(summary)
+                or summary[left:right] != record["original_sentence"]
+            ):
+                raise ValueError(
+                    "Resolved target no longer matches the input summary."
+                )
+
+            paragraph_index = next(
+                (
+                    index
+                    for index, (p_start, p_end)
+                    in enumerate(paragraph_spans)
+                    if p_start <= left and right <= p_end
+                ),
+                None,
+            )
+            if paragraph_index is None:
+                raise ValueError(
+                    "Target sentence crosses paragraph boundaries."
+                )
+
+            if not record["assignments"]:
+                raise ValueError("Resolved target contains no assignments.")
+
+            for assignment in record["assignments"]:
+                insight_id = assignment["insight_id"]
+
+                if insight_id not in lookup:
+                    raise ValueError(
+                        f"Unknown resolved insight ID: {insight_id!r}"
+                    )
+
+                if assignment["citation"] != lookup[insight_id]["in_text_citation"]:
+                    raise ValueError(
+                        f"Citation mismatch for insight {insight_id!r}."
+                    )
+
+                if assignment["action"] not in {"unchanged", "amend", "add"}:
+                    raise ValueError(
+                        f"Invalid resolved action: {assignment['action']!r}"
+                    )
+
+            targets.append({
+                **record,
+                "paragraph_index": paragraph_index,
+            })
+
+        targets.sort(key=lambda item: item["start"])
+
+        for previous, current in zip(targets, targets[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError("Resolved targets overlap.")
+
+        # Group adjacent targets to maintain coherence during rewriting.
+        groups = []
+
+        for target in targets:
+            if groups:
+                previous = groups[-1][-1]
+                gap = summary[previous["end"]:target["start"]]
+
+                if (
+                    previous["paragraph_index"] == target["paragraph_index"]
+                    and not gap.strip()
+                ):
+                    groups[-1].append(target)
+                    continue
+
+            groups.append([target])
+
+        replacements = []
+
+        for group in groups:
+            needs_rewrite = any(
+                assignment["action"] != "unchanged"
+                for target in group
+                for assignment in target["assignments"]
+            )
+
+            # Citation-only groups bypass the model.
+            if not needs_rewrite:
+                for target in group:
+                    citations = list(dict.fromkeys(
+                        lookup[assignment["insight_id"]]["in_text_citation"]
+                        for assignment in target["assignments"]
+                    ))
+
+                    existing = self._extract_existing_citations(
+                        target["original_sentence"],
+                        known_citations,
+                    )
+                    additions = [
+                        citation
+                        for citation in citations
+                        if citation not in existing
+                    ]
+
+                    replacement = self._insert_sentence_citations(
+                        target["original_sentence"],
+                        additions,
+                        known_citations,
+                    )
+
+                    replacements.append((
+                        target["start"],
+                        target["end"],
+                        replacement,
+                    ))
+
+                continue
+
+            # Prepare a localized rewrite against the original summary.
+            left = group[0]["start"]
+            right = group[-1]["end"]
+            original_text = summary[left:right]
+
+            p_start, p_end = paragraph_spans[
+                group[0]["paragraph_index"]
+            ]
+
+            selected_ids = list(dict.fromkeys(
+                assignment["insight_id"]
+                for target in group
+                for assignment in target["assignments"]
+            ))
+
+            existing_citations = self._extract_existing_citations(
+                original_text,
+                known_citations,
+            )
+
+            unparsed = [
+                citation
+                for citation in known_citations
+                if citation in original_text
+                and citation not in existing_citations
+            ]
+            if unparsed:
+                raise ValueError(
+                    "Existing citations could not be parsed safely: "
+                    f"{unparsed}"
+                )
+
+            response = self._rewrite_citation_sentences(
+                sys_prompt=Prompts().rewrite_citation_provenance(),
+                user_prompt=json.dumps(
+                    {
+                        "RESEARCH QUESTION": research_question,
+                        "ANALYTICAL FRAME": analytical_frame,
+                        "CONTEXT PARAGRAPH": summary[p_start:p_end],
+                        "SELECTED TEXT": original_text,
+                        "EXISTING CITATIONS": existing_citations,
+                        "SELECTED INSIGHTS": [
+                            {
+                                "insight_id": insight_id,
+                                "insight": lookup[insight_id]["insight"],
+                            }
+                            for insight_id in selected_ids
+                        ],
+                        "PLANNED ASSIGNMENTS": [
+                            {
+                                "original_sentence": target["original_sentence"],
+                                "assignments": [
+                                    {
+                                        "citation": assignment["citation"],
+                                        "insight_id": assignment["insight_id"],
+                                        "existing_summary_claim": assignment[
+                                            "existing_summary_claim"
+                                        ],
+                                        "action": assignment["action"],
+                                        "justification": assignment["justification"],
+                                    }
+                                    for assignment in target["assignments"]
+                                ],
+                            }
+                            for target in group
+                        ],
+                        "IMPLEMENTATION GUIDANCE": (
+                            "Assess selected insights against the context "
+                            "paragraph, including claims expressed across "
+                            "sentences. Do not add detail merely because "
+                            "it is more specific. For amend, make a minimal "
+                            "revision; if that cannot preserve the original "
+                            "claim, retain it and add supported sentences "
+                            "instead. For add, include supported additional "
+                            "text. Every selected insight ID must appear "
+                            "in the returned sentence associations; do not "
+                            "omit or defer any. Preserve original claims "
+                            "and their citations. For unchanged assignments "
+                            "included alongside neighboring edits, retain "
+                            "their supported claims and associate their "
+                            "insight IDs appropriately. Return replacements "
+                            "only for SELECTED TEXT; do not repeat surrounding "
+                            "paragraph text. Return sentence-level evidence "
+                            "associations using the required output schema."
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+
+            # Explicit unresolved results still stop processing.
+            unresolved = response["unresolved_insight_ids"]
+            if unresolved:
+                raise ValueError(
+                    f"Rewrite left unresolved insight IDs: {unresolved}"
+                )
+
+            if not response["sentences"]:
+                raise ValueError("Rewrite returned no sentences.")
+
+            allowed_ids = set(selected_ids)
+            allowed_existing = set(existing_citations)
+            used_ids = set()
+            retained_existing = set()
+            rendered_sentences = []
+
+            for sentence in response["sentences"]:
+                text = sentence["text"].strip()
+                insight_ids = sentence["insight_ids"]
+                original_citations = sentence["existing_citations"]
+
+                if not text:
+                    raise ValueError("Rewrite returned empty sentence text.")
+
+                unknown_ids = set(insight_ids) - allowed_ids
+                if unknown_ids:
+                    raise ValueError(
+                        f"Rewrite returned unknown insight IDs: {unknown_ids}"
+                    )
+
+                unknown_citations = (
+                    set(original_citations) - allowed_existing
+                )
+                if unknown_citations:
+                    raise ValueError(
+                        "Rewrite returned unknown existing citations: "
+                        f"{unknown_citations}"
+                    )
+
+                # Remove citation markers copied into prose only when those
+                # citations are also declared for this returned sentence.
+                embedded = self._extract_existing_citations(
+                    text,
+                    known_citations,
+                )
+                declared = set(original_citations) | {
+                    lookup[insight_id]["in_text_citation"]
+                    for insight_id in insight_ids
+                }
+
+                if set(embedded) - declared:
+                    raise ValueError(
+                        "Rewrite included undeclared citations in prose: "
+                        f"{sorted(set(embedded) - declared)}"
+                    )
+
+                if embedded:
+                    def remove_citation_group(match):
+                        members = [
+                            value.strip()
+                            for value in match.group()[1:-1].split(";")
+                        ]
+                        if members and all(
+                            value in declared for value in members
+                        ):
+                            return ""
+                        return match.group()
+
+                    text = re.sub(
+                        r"\([^()]*\)",
+                        remove_citation_group,
+                        text,
+                    )
+                    text = re.sub(
+                        r"[ \t]+([.,;:!?])",
+                        r"\1",
+                        text,
+                    ).strip()
+
+                used_ids.update(insight_ids)
+                retained_existing.update(original_citations)
+
+                citations = list(dict.fromkeys(
+                    original_citations
+                    + [
+                        lookup[insight_id]["in_text_citation"]
+                        for insight_id in insight_ids
+                    ]
+                ))
+
+                rendered_sentences.append(
+                    self._insert_sentence_citations(
+                        text,
+                        citations,
+                        known_citations,
+                    )
+                )
+
+            # Accept partial coverage with an explicit diagnostic warning.
+            # Do not attach omitted sources to unsupported sentences.
+            missing_ids = allowed_ids - used_ids
+
+            if missing_ids:
+                assignments_by_id = {
+                    assignment["insight_id"]: assignment
+                    for target in group
+                    for assignment in target["assignments"]
+                }
+
+                omission_details = [
+                    {
+                        "insight_id": insight_id,
+                        "citation": lookup[insight_id]["in_text_citation"],
+                        "action": assignments_by_id[insight_id]["action"],
+                    }
+                    for insight_id in sorted(missing_ids)
+                ]
+
+                print(
+                    "WARNING: Accepting a partial citation rewrite. "
+                    "Selected insights were omitted:\n"
+                    + json.dumps(
+                        {
+                            "research_question": research_question,
+                            "original_text": original_text,
+                            "omitted_insights": omission_details,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    flush=True,
+                )
+
+            # Existing citations must still be preserved.
+            if retained_existing != allowed_existing:
+                raise ValueError(
+                    "Rewrite omitted existing citations: "
+                    f"{sorted(allowed_existing - retained_existing)}"
+                )
+
+            replacements.append((
+                left,
+                right,
+                " ".join(rendered_sentences),
+            ))
+
+        # Apply right to left so earlier original offsets remain valid.
+        replacements.sort(key=lambda item: item[0])
+
+        for previous, current in zip(replacements, replacements[1:]):
+            if previous[1] > current[0]:
+                raise ValueError("Replacement spans overlap.")
+
+        updated = summary
+        for left, right, replacement in reversed(replacements):
+            updated = updated[:left] + replacement + updated[right:]
+
+        return updated
+
+
+    def _address_missing_citations(
+        self,
+        summary: str,
+        missing_citations_df: pd.DataFrame,
+        research_question: str,
+        analytical_frame: str,
+    ) -> str:
+        """
+        Coordinate citation repairs.
+
+        - Sample up to five insights per source.
+        - Start planning with twenty sources per batch.
+        - Split only batches whose output truncates.
+        - Retain successful source placements across three planning rounds.
+        - Resolve all sources before applying edits.
+        - Warn about final missing citations; still reject lost old citations.
+        """
+        import json
+        from collections import Counter
+
+        if missing_citations_df.empty:
+            return summary
+
+        # ---- Validate full theme-specific evidence. ----
+        columns = ["insight_id", "in_text_citation", "insight"]
+        missing_columns = set(columns) - set(missing_citations_df.columns)
+        if missing_columns:
+            raise ValueError(
+                f"Missing citation evidence columns: {sorted(missing_columns)}"
+            )
+
+        evidence = missing_citations_df[columns].copy()
+
+        if evidence.isna().any().any():
+            raise ValueError("Citation evidence contains missing values.")
+
+        evidence["insight_id"] = evidence["insight_id"].astype(str)
+        evidence["in_text_citation"] = (
+            evidence["in_text_citation"].astype(str).str.strip()
+        )
+        evidence["insight"] = evidence["insight"].astype(str)
+
+        if any(
+            evidence[column].str.strip().eq("").any()
+            for column in columns
+        ):
+            raise ValueError("Citation evidence contains empty values.")
+
+        for insight_id, rows in evidence.groupby("insight_id"):
+            if (
+                rows["in_text_citation"].nunique() != 1
+                or rows["insight"].nunique() != 1
+            ):
+                raise ValueError(
+                    f"Conflicting evidence for insight ID {insight_id}."
+                )
+
+        evidence = evidence.drop_duplicates("insight_id")
+
+        missing_citations = self._identify_missing_citations(
+            summary,
+            list(dict.fromkeys(evidence["in_text_citation"])),
+        )
+        if not missing_citations:
+            return summary
+
+        evidence = evidence[
+            evidence["in_text_citation"].isin(missing_citations)
+        ].copy()
+
+        evidence_by_source = {
+            citation: rows.copy()
+            for citation, rows in evidence.groupby(
+                "in_text_citation",
+                sort=False,
+            )
+        }
+
+        # Sample once so retries use the same source evidence.
+        # Full evidence remains available downstream.
+        source_lookup = {
+            citation: {
+                "in_text_citation": citation,
+                "insights": rows.sample(
+                    n=min(len(rows), 5),
+                    random_state=config.seed,
+                )[["insight_id", "insight"]].to_dict("records"),
+            }
+            for citation, rows in evidence_by_source.items()
+        }
+
+        citation_by_insight = evidence.set_index(
+            "insight_id"
+        )["in_text_citation"].to_dict()
+
+        expected_fields = {
+            "citation",
+            "insight_id",
+            "existing_summary_claim",
+            "best_matching_existing_sentence",
+            "action",
+            "justification",
+        }
+
+        def validate_record(record):
+            """Structural failures remain fatal rather than being retried."""
+            if (
+                not isinstance(record, dict)
+                or set(record) != expected_fields
+            ):
+                raise ValueError("Citation planner returned invalid fields.")
+
+            for field in expected_fields - {"existing_summary_claim"}:
+                if (
+                    not isinstance(record[field], str)
+                    or not record[field].strip()
+                ):
+                    raise ValueError(
+                        f"Planning field {field!r} must be a nonempty string."
+                    )
+
+            claim = record["existing_summary_claim"]
+            if claim is not None and (
+                not isinstance(claim, str) or not claim.strip()
+            ):
+                raise ValueError(
+                    "existing_summary_claim must be nonempty text or null."
+                )
+
+            if record["action"] not in {"unchanged", "amend", "add"}:
+                raise ValueError(
+                    f"Invalid planning action: {record['action']!r}"
+                )
+
+            if record["action"] in {"unchanged", "amend"} and claim is None:
+                raise ValueError(
+                    "Unchanged/amend placements require an existing claim."
+                )
+
+        # Accepted placements survive later source failures in this call.
+        pending = list(missing_citations)
+        accepted = {}
+        failures = {}
+
+        batch_size = 20
+        max_rounds = 3
+        sys_prompt = Prompts().plan_citation_provenance()
+
+        def plan_batch_with_splitting(citations):
+            """
+            Split confirmed truncation recursively.
+
+            Successful responses are returned normally. Other errors propagate.
+            A truncated single-source request cannot be split further.
+            """
+            sources = [
+                source_lookup[citation]
+                for citation in citations
+            ]
+
+            user_prompt = (
+                "TEXT_TO_EDIT\n\n"
+                f"{summary}\n\n"
+                "END TEXT_TO_EDIT\n\n"
+
+                "MISSING CITATIONS\n\n"
+                f"{json.dumps(citations, ensure_ascii=False, indent=2)}\n\n"
+
+                "RESEARCH QUESTION\n\n"
+                f"{research_question}\n\n"
+
+                "ANALYTICAL FRAME\n\n"
+                f"{analytical_frame}\n\n"
+
+                "SOURCE_INSIGHTS\n\n"
+                f"{json.dumps(sources, ensure_ascii=False, indent=2)}\n\n"
+                "END SOURCE_INSIGHTS"
+            )
+
+            feedback = {
+                citation: failures[citation]
+                for citation in citations
+                if citation in failures
+            }
+            if feedback:
+                user_prompt += (
+                    "\n\nPREVIOUS REFERENCE ERRORS\n\n"
+                    + json.dumps(feedback, ensure_ascii=False, indent=2)
+                    + "\n\nReturn corrected placements for every source "
+                    "in MISSING CITATIONS. Use only its supplied insight "
+                    "IDs and exact sentences from TEXT_TO_EDIT."
+                )
+
+            try:
+                response_plan = self._plan_citation_placements(
+                    sys_prompt=sys_prompt,
+                    user_prompt=user_prompt,
+                )
+            except OverflowError:
+                if len(citations) == 1:
+                    raise OverflowError(
+                        "Citation planning output still truncates for "
+                        f"a single source: {citations[0]!r}"
+                    ) from None
+
+                midpoint = len(citations) // 2
+                left_citations = citations[:midpoint]
+                right_citations = citations[midpoint:]
+
+                print(
+                    f"Planning output truncated for {len(citations)} "
+                    f"sources. Retrying as {len(left_citations)} and "
+                    f"{len(right_citations)} sources...",
+                    flush=True,
+                )
+
+                left_plan = plan_batch_with_splitting(left_citations)
+                right_plan = plan_batch_with_splitting(right_citations)
+
+                return {
+                    "placements": (
+                        left_plan["placements"]
+                        + right_plan["placements"]
+                    )
+                }
+
+            if (
+                not isinstance(response_plan, dict)
+                or not isinstance(response_plan.get("placements"), list)
+            ):
+                raise ValueError("Planner returned no placements list.")
+
+            return response_plan
+
+        # ---- Retry only sources whose references have not passed. ----
+        for round_number in range(1, max_rounds + 1):
+            if not pending:
+                break
+
+            round_sources = list(pending)
+            total_batches = (
+                len(round_sources) + batch_size - 1
+            ) // batch_size
+
+            print(
+                f"Citation planning round {round_number}/{max_rounds}: "
+                f"{len(round_sources)} pending sources..."
+            )
+
+            for batch_number, start in enumerate(
+                range(0, len(round_sources), batch_size),
+                start=1,
+            ):
+                batch_citations = round_sources[start:start + batch_size]
+                batch_set = set(batch_citations)
+
+                insight_count = sum(
+                    len(source_lookup[citation]["insights"])
+                    for citation in batch_citations
+                )
+
+                print(
+                    f"Planning batch {batch_number}/{total_batches}: "
+                    f"{len(batch_citations)} sources, "
+                    f"{insight_count} sampled insights..."
+                )
+
+                batch_plan = plan_batch_with_splitting(batch_citations)
+                placements = batch_plan["placements"]
+
+                for record in placements:
+                    validate_record(record)
+
+                unexpected = {
+                    record["citation"]
+                    for record in placements
+                    if record["citation"] not in batch_set
+                }
+                if unexpected:
+                    print(
+                        "Ignoring unexpected source labels: "
+                        f"{sorted(unexpected)}"
+                    )
+
+                counts = Counter(
+                    record["citation"]
+                    for record in placements
+                )
+                records_by_source = {
+                    record["citation"]: record
+                    for record in placements
+                    if record["citation"] in batch_set
+                }
+
+                for citation in batch_citations:
+                    if counts[citation] != 1:
+                        failures[citation] = (
+                            "Expected exactly one placement for this source; "
+                            f"received {counts[citation]}."
+                        )
+                        continue
+
+                    record = records_by_source[citation]
+                    insight_id = record["insight_id"]
+
+                    supplied_ids = {
+                        item["insight_id"]
+                        for item in source_lookup[citation]["insights"]
+                    }
+
+                    # Recover only unknown chunk/meta prefix swaps.
+                    if insight_id not in citation_by_insight:
+                        alternate_id = None
+
+                        for prefix, alternate_prefix in (
+                            ("chunk_insight_", "meta_insight_"),
+                            ("meta_insight_", "chunk_insight_"),
+                        ):
+                            if insight_id.startswith(prefix):
+                                suffix = insight_id[len(prefix):]
+                                if suffix.isascii() and suffix.isdigit():
+                                    alternate_id = alternate_prefix + suffix
+                                break
+
+                        if (
+                            alternate_id is not None
+                            and alternate_id in supplied_ids
+                        ):
+                            print(
+                                f"Correcting ID for {citation!r}: "
+                                f"{insight_id!r} -> {alternate_id!r}"
+                            )
+                            insight_id = alternate_id
+                            record["insight_id"] = alternate_id
+                        else:
+                            failures[citation] = (
+                                f"Unknown insight ID {insight_id!r}. "
+                                "Choose an exact ID supplied for this source."
+                            )
+                            continue
+
+                    if citation_by_insight[insight_id] != citation:
+                        failures[citation] = (
+                            f"Insight {insight_id!r} belongs to another source. "
+                            "Choose evidence supplied under this citation."
+                        )
+                        continue
+
+                    if insight_id not in supplied_ids:
+                        failures[citation] = (
+                            f"Insight {insight_id!r} was not in this source's "
+                            "supplied sample. Choose an ID from that sample."
+                        )
+                        continue
+
+                    # Resolve independently so one bad target does not
+                    # discard the other sources' accepted placements.
+                    try:
+                        resolved = self._resolve_citation_plan(
+                            plan={"placements": [record]},
+                            summary=summary,
+                            missing_citations_df=evidence_by_source[citation],
+                        )
+                    except ValueError as exc:
+                        message = str(exc)
+
+                        if (
+                            message.startswith("Target recovery returned ")
+                            or message
+                            == "Recovered sentence and context are not uniquely exact."
+                        ):
+                            failures[citation] = (
+                                f"{message} Copy a complete existing sentence "
+                                "from TEXT_TO_EDIT. Neither SOURCE_INSIGHTS, "
+                                "the analytical frame, nor this feedback "
+                                "supplies candidate target text. If new text "
+                                "is needed, choose an existing sentence as "
+                                "the edit location."
+                            )
+                            continue
+
+                        # Unexpected failures remain fatal.
+                        raise
+
+                    if len(resolved) != 1:
+                        raise ValueError(
+                            "Single-source resolution returned an "
+                            "unexpected number of targets."
+                        )
+
+                    accepted[citation] = resolved[0]
+                    failures.pop(citation, None)
+
+            pending = [
+                citation
+                for citation in missing_citations
+                if citation not in accepted
+            ]
+
+            print(
+                f"Citation planning: {len(accepted)}/{len(missing_citations)} "
+                f"sources resolved; {len(pending)} pending."
+            )
+
+        if pending:
+            details = {
+                citation: failures.get(
+                    citation,
+                    "No accepted placement.",
+                )
+                for citation in pending
+            }
+            raise ValueError(
+                f"Citation planning incomplete after {max_rounds} rounds: "
+                f"{details}"
+            )
+
+        # ---- Group accepted sources sharing the same target span. ----
+        grouped = {}
+
+        for citation in missing_citations:
+            target = accepted[citation]
+            location = (target["start"], target["end"])
+
+            combined = grouped.setdefault(
+                location,
+                {
+                    "original_sentence": target["original_sentence"],
+                    "start": target["start"],
+                    "end": target["end"],
+                    "assignments": [],
+                },
+            )
+            combined["assignments"].extend(target["assignments"])
+
+        resolved_plan = sorted(
+            grouped.values(),
+            key=lambda target: target["start"],
+        )
+
+        for previous, current in zip(resolved_plan, resolved_plan[1:]):
+            if previous["end"] > current["start"]:
+                raise ValueError("Resolved target sentences overlap.")
+
+        print(
+            f"Implementing repairs at {len(resolved_plan)} target sentences..."
+        )
+
+        updated_summary = self._implement_citation_plan(
+            summary=summary,
+            resolved_plan=resolved_plan,
+            missing_citations_df=evidence,
+            research_question=research_question,
+            analytical_frame=analytical_frame,
+        )
+
+        # Partial rewrite coverage is allowed, but reported explicitly.
+        unresolved = self._identify_missing_citations(
+            updated_summary,
+            missing_citations,
+        )
+        if unresolved:
+            print(
+                "WARNING: Citation repair completed with missing sources:\n"
+                + json.dumps(
+                    {
+                        "research_question": research_question,
+                        "missing_citations": unresolved,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                flush=True,
+            )
+
+        # Losing previously present citations remains fatal.
+        known_citations = list(dict.fromkeys(
+            str(value).strip()
+            for value in self.corpus_state.insights[
+                "in_text_citation"
+            ].dropna()
+            if str(value).strip()
+        ))
+
+        originally_present = [
+            citation
+            for citation in known_citations
+            if citation in summary
+        ]
+        lost = self._identify_missing_citations(
+            updated_summary,
+            originally_present,
+        )
+        if lost:
+            raise ValueError(
+                f"Citation repair removed existing citations: {lost}"
+            )
+
+        return updated_summary
+
+
+    #### --------------------\END NEW CODE--------------------
 
 
     def _load_failed_themes(self, remove_latest_iteration: bool = False) -> defaultdict:
@@ -9325,7 +10459,12 @@ class Summarize:
                         )
 
                         # Have the LLM repair the summary to add in missing citations
-                        updated_summary = self._address_missing_citations(updated_summary, theme_missing_citations_df)
+                        updated_summary = self._address_missing_citations(
+                            summary=updated_summary,
+                            missing_citations_df=theme_missing_citations_df,
+                            research_question=question_text,
+                            analytical_frame=self.analytical_framework
+                            )
 
                 # Store final fully integrated summary for this theme
                 updated_row = pd.DataFrame([{
@@ -9593,48 +10732,48 @@ class Summarize:
             if resume == "1":
                 with open(self.orphan_pickle_resume_path, "rb") as f:
                     checked_insights_df_meta_state = pickle.load(f)
-                    # Check that the pickled state matches the current state
-                    pickled_state = checked_insights_df_meta_state["state_meta"]
-                    current_state = {
-                        "corpus_hash": self.corpus_state.fingerprint(),
-                        "summary_hash": self.summary_state.fingerprint()
-                    }
-                    if pickled_state != current_state:
-                        raise ValueError(
-                            "The corpus state or summary state has changed between resume. Resume invalid"
-                            "Either choose a fresh start or if you know what you are doing use force = True" 
-                            )
-                    # Load the checked insights data frame from the pickle to resume the process
-                    checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
-                    mode = checked_insights_df_meta_state["mode"]
+                # Check that the pickled state matches the current state
+                pickled_state = checked_insights_df_meta_state["state_meta"]
+                current_state = {
+                    "corpus_hash": self.corpus_state.fingerprint(),
+                    "summary_hash": self.summary_state.fingerprint()
+                }
+                if pickled_state != current_state:
+                    raise ValueError(
+                        "The corpus state or summary state has changed between resume. Resume invalid"
+                        "Either choose a fresh start or if you know what you are doing use force = True" 
+                        )
+                # Load the checked insights data frame from the pickle to resume the process
+                checked_insights_df = checked_insights_df_meta_state["checked_insights_df"]
+                mode = checked_insights_df_meta_state["mode"]
 
-                    print("Resuming orphan identification process from last saved point...")
-                    orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
-                    self.summary_state.populated_theme_list[-1] = updated_summary_df
-                    if mode == "replace":
-                        self.summary_state.orphan_list[-1] = orphans_df
-                    elif mode == "append":
-                        self.summary_state.orphan_list.append(orphans_df)
-                    
-                    # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
-                    # Have to wrap in this try - except as windows keeps hold of the file for reasons that are not clear.
-                    try:
-                        os.remove(self.orphan_pickle_resume_path)
-                    except PermissionError:
-                        while True:
-                            confirm = input(
-                                "\nCould not automatically delete resume file.\n"
-                                "This is a known Windows file system issue.\n\n"
-                                f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
-                                "This file will trigger resume mode on the next run if not removed.\n\n"
-                                "Enter 'c' to continue:\n"
-                            ).lower().strip()
+                print("Resuming orphan identification process from last saved point...")
+                orphans_df, updated_summary_df = self._get_orphans_and_updated_summary(checked_insights_df=checked_insights_df, mode=mode, batch_size=batch_size)
+                self.summary_state.populated_theme_list[-1] = updated_summary_df
+                if mode == "replace":
+                    self.summary_state.orphan_list[-1] = orphans_df
+                elif mode == "append":
+                    self.summary_state.orphan_list.append(orphans_df)
+                
+                # Clean up the resume pickle as the process is complete and we want to void a resume trigger if we run again
+                # Have to wrap in this try - except as windows keeps hold of the file for reasons that are not clear.
+                try:
+                    os.remove(self.orphan_pickle_resume_path)
+                except PermissionError:
+                    while True:
+                        confirm = input(
+                            "\nCould not automatically delete resume file.\n"
+                            "This is a known Windows file system issue.\n\n"
+                            f"Please manually delete:\n{self.orphan_pickle_resume_path}\n\n"
+                            "This file will trigger resume mode on the next run if not removed.\n\n"
+                            "Enter 'c' to continue:\n"
+                        ).lower().strip()
 
-                            if confirm == "c":
-                                break
+                        if confirm == "c":
+                            break
 
-                    self.summary_state.save()
-                    return(self.summary_state.orphan_list[-1])
+                self.summary_state.save()
+                return(self.summary_state.orphan_list[-1])
  
             else:
                 print("Starting new orphan identification process and deleting the in progress pickle...")
