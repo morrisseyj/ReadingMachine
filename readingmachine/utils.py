@@ -177,6 +177,21 @@ def validate_format(
             "OR both 'questions' and 'injected_value'."
         )
 
+# Cache the effort supported by each model for standard calls.
+# If a model rejects "none", its first call retries with "low";
+# later calls for that model use "low" immediately.
+_reasoning_effort_by_model: Dict[str, str] = {}
+
+
+def _is_unsupported_none_effort(error: Exception) -> bool:
+    """Return True only for the API error that rejects reasoning effort 'none'."""
+    message = str(error).lower()
+    return (
+        "reasoning.effort" in message
+        and "'none' is not supported" in message
+    )
+
+
 def call_chat_completion(
     llm_client,
     ai_model: str,
@@ -184,8 +199,8 @@ def call_chat_completion(
     user_prompt: str,
     fall_back,
     return_json: bool,
-    json_schema: Optional[dict] = None,
-    max_tokens: Optional[int] = None,
+    json_schema=None,
+    max_tokens=None,
     return_with_error: bool = False,
     reasoning_effort: Optional[str] = "none",
 ) -> Union[
@@ -193,13 +208,33 @@ def call_chat_completion(
     Dict[str, Any],
     Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]],
 ]:
-    """Make a standard Responses API call with no reasoning by default."""
+    """
+    Make a standard Responses API call.
+
+    By default, request reasoning effort "none". If the selected model
+    rejects "none", retry that call once with "low" and cache "low" for
+    later standard calls to the same model.
+
+    If return_json=True, json_schema is required. When
+    return_with_error=True, return (result, error).
+    """
+    # Structured JSON output needs an explicit schema.
     if return_json and json_schema is None:
         raise ValueError("json_schema is required when return_json=True.")
 
-    # Treat None as the standard no-reasoning setting.
-    effort = reasoning_effort if reasoning_effort is not None else "none"
+    # Treat None as the caller's request for the standard "none" effort.
+    requested_effort = reasoning_effort or "none"
 
+    # Reuse the effort learned from an earlier call for this model.
+    # The cache applies to the default/"none" mode; explicit other efforts
+    # remain under the caller's control.
+    if requested_effort == "none":
+        effort = _reasoning_effort_by_model.get(ai_model, "none")
+    else:
+        effort = requested_effort
+
+    # Build a Responses API request. Do not pass temperature: some models
+    # only accept their default temperature.
     request = {
         "model": ai_model,
         "instructions": sys_prompt,
@@ -207,23 +242,41 @@ def call_chat_completion(
         "reasoning": {"effort": effort},
     }
 
+    # Convert the legacy schema argument to the Responses API format.
+    # json_schema should usually contain name, strict, and schema.
     if return_json:
-        # json_schema is the value previously nested under
-        # response_format.json_schema, usually name/schema/strict.
         request["text"] = {
             "format": {"type": "json_schema", **json_schema}
         }
 
+    # Responses API uses max_output_tokens rather than max_tokens.
     if max_tokens is not None:
         request["max_output_tokens"] = max_tokens
 
-    result: Union[str, Dict[str, Any], None] = None
-    error: Optional[Dict[str, str]] = None
+    result = None
+    error = None
 
     try:
-        response = llm_client.responses.create(**request)
-        content = getattr(response, "output_text", None)
+        try:
+            response = llm_client.responses.create(**request)
 
+        except Exception as exc:
+            # Only retry when the API specifically rejects effort "none".
+            # Other errors flow to the outer handler without being retried.
+            if effort == "none" and _is_unsupported_none_effort(exc):
+                _reasoning_effort_by_model[ai_model] = "low"
+                print(
+                    f"{ai_model} does not support reasoning effort 'none'; "
+                    "retrying with 'low'. Later standard calls will use 'low'."
+                )
+
+                request["reasoning"] = {"effort": "low"}
+                response = llm_client.responses.create(**request)
+            else:
+                raise
+
+        # Treat non-completed responses as API errors, preserving the
+        # wrapper's fallback and optional error-return behavior.
         if getattr(response, "status", None) != "completed":
             raise RuntimeError(
                 f"Model call failed with status: "
@@ -232,6 +285,7 @@ def call_chat_completion(
                 f"details: {getattr(response, 'details', None)}"
             )
 
+        content = getattr(response, "output_text", None)
         if not content:
             raise ValueError("Empty response content")
 
@@ -247,12 +301,17 @@ def call_chat_completion(
         else:
             result = content
 
-    except Exception as e:
+    except Exception as exc:
+        # Keep API failures in the established return contract.
         result = fall_back if return_json else ""
-        error = {"type": "api_error", "message": str(e)}
+        error = {
+            "type": "api_error",
+            "message": str(exc),
+        }
 
     if return_with_error:
         return result, error
+
     return result
 
 
@@ -266,7 +325,12 @@ def call_reasoning_model(
     max_poll_errors: int = 20,
     reasoning_effort: Optional[str] = None,
 ):
-    """Run a background Responses API call with an explicit reasoning effort."""
+    """
+    Run a background Responses API reasoning job and poll until it finishes.
+
+    Returns the established status dictionary with status, response, error,
+    and response_id. This function requires an explicit reasoning effort.
+    """
     if reasoning_effort is None:
         raise ValueError(
             "reasoning_effort is required for reasoning model calls."
@@ -289,9 +353,11 @@ def call_reasoning_model(
                 print(f"Created response: {created_response.id}")
                 return created_response.id
 
-            except (APITimeoutError, APIConnectionError) as e:
-                last_err = e
-                print(f"Create failed (attempt {attempt}/{max_retry}): {e}")
+            except (APITimeoutError, APIConnectionError) as exc:
+                last_err = exc
+                print(
+                    f"Create failed (attempt {attempt}/{max_retry}): {exc}"
+                )
                 attempt += 1
 
         print("Failed to create reasoning job.")
@@ -302,9 +368,11 @@ def call_reasoning_model(
             "response_id": None,
         }
 
-    resp_id = get_resp_id()
-    if isinstance(resp_id, dict):
-        return resp_id
+    response_id = get_resp_id()
+
+    # Job creation returns either its ID or the established failure dictionary.
+    if isinstance(response_id, dict):
+        return response_id
 
     last_status = None
     poll_errors = 0
@@ -312,28 +380,29 @@ def call_reasoning_model(
     while True:
         try:
             print("Polling for response...")
-            current_response = llm_client.responses.retrieve(resp_id)
+            current_response = llm_client.responses.retrieve(response_id)
             print("Successfully retrieved response status.")
             poll_errors = 0
 
-        except (APITimeoutError, APIConnectionError) as e:
+        except (APITimeoutError, APIConnectionError) as exc:
             poll_errors += 1
             print(
                 f"Polling error ({poll_errors}/{max_poll_errors}): "
-                f"{e}. Retrying in {poll_interval}s."
+                f"{exc}. Retrying in {poll_interval}s."
             )
 
             if poll_errors >= max_poll_errors:
                 return {
                     "status": "failed",
                     "response": None,
-                    "error": f"Exceeded max polling errors: {e}",
-                    "response_id": resp_id,
+                    "error": f"Exceeded max polling errors: {exc}",
+                    "response_id": response_id,
                 }
 
             time.sleep(poll_interval)
             continue
 
+        # Print status changes without repeating the same status each poll.
         if current_response.status != last_status:
             print(
                 f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
@@ -347,14 +416,14 @@ def call_reasoning_model(
                     "status": "success",
                     "response": current_response.output_text,
                     "error": None,
-                    "response_id": resp_id,
+                    "response_id": response_id,
                 }
 
             return {
                 "status": "failed",
                 "response": current_response,
                 "error": "Completed with no output_text",
-                "response_id": resp_id,
+                "response_id": response_id,
             }
 
         if current_response.status in {
@@ -367,7 +436,7 @@ def call_reasoning_model(
                 "status": "failed",
                 "response": current_response,
                 "error": getattr(current_response, "error", None),
-                "response_id": resp_id,
+                "response_id": response_id,
             }
 
         print(

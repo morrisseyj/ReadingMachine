@@ -1114,12 +1114,13 @@ class Ingestor:
             "paper_date": "NA"
         }
     
-        response_dict = utils.call_chat_completion(llm_client=self.llm_client,
+        response_dict, error = utils.call_chat_completion(llm_client=self.llm_client,
                                                     ai_model=self.ai_model,
                                                     sys_prompt=sys_prompt,
                                                     user_prompt=user_prompt,
                                                     return_json=True,
                                                     json_schema=json_schema,
+                                                    return_with_error=True,
                                                     fall_back=fallback)
 
         # Validate keys
@@ -2563,13 +2564,18 @@ class Insights:
                 "results": {}
             }
 
-            response_dict = utils.call_chat_completion(ai_model = self.ai_model,
-                                 llm_client = self.llm_client,
-                                 sys_prompt = sys_prompt,
-                                 user_prompt = user_prompt,
-                                 return_json = True, 
-                                 json_schema = json_schema,
-                                 fall_back=fall_back)
+            response_dict, error = utils.call_chat_completion(
+                ai_model = self.ai_model,
+                llm_client = self.llm_client,
+                sys_prompt = sys_prompt,
+                user_prompt = user_prompt,
+                return_json = True, 
+                json_schema = json_schema,
+                fall_back=fall_back,
+                return_with_error=True,
+            )
+
+            print(response_dict, error)
             
             # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the corpus_state later.
             results = response_dict.get("results", {})
