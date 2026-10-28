@@ -186,128 +186,52 @@ def call_chat_completion(
     return_json: bool,
     json_schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
-    return_with_error: bool = False
-    ) -> Union[
+    return_with_error: bool = False,
+) -> Union[
     str,
     Dict[str, Any],
-    Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]]
-    ]:
-    """
-    Call a chat-completion model with standardized prompt, JSON, and error handling.
+    Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]],
+]:
+    """Call the Responses API while preserving the legacy chat wrapper API."""
+    if return_json and json_schema is None:
+        raise ValueError("json_schema is required when return_json=True.")
 
-    Builds a two-message chat-completion request from a system prompt and a
-    user prompt, sends it to the supplied LLM client, and returns either raw
-    text or parsed JSON. The helper optionally requests JSON-mode or
-    schema-constrained JSON responses and can return structured error
-    metadata alongside the result.
-
-    Parameters
-    ----------
-    llm_client : Any
-        Client object exposing `chat.completions.create()`.
-
-    ai_model : str
-        Model identifier passed to the chat-completion API.
-
-    sys_prompt : str
-        System prompt used as the first message.
-
-    user_prompt : str
-        User prompt used as the second message.
-
-    fall_back : dict[str, Any]
-        Value returned when `return_json=True` and the API call fails or the
-        response cannot be parsed as JSON.
-
-    return_json : bool
-        If True, request a JSON response and parse the returned content with
-        `json.loads()`. If False, return the response content as text.
-
-    json_schema : dict, optional
-        Optional schema passed as `response_format={"type": "json_schema",
-        "json_schema": json_schema}` when `return_json=True`. If omitted and
-        `return_json=True`, JSON object mode is requested instead.
-
-    max_tokens : int, optional
-        Maximum number of output tokens to request. If omitted, no
-        `max_tokens` argument is passed.
-
-    return_with_error : bool, default=False
-        If True, return `(result, error)`. If False, return only `result`.
-
-    Returns
-    -------
-    str or dict[str, Any] or tuple[str | dict[str, Any], dict[str, str] | None]
-        If `return_with_error=False`, returns either response text
-        (`return_json=False`) or parsed JSON / fallback (`return_json=True`).
-
-        If `return_with_error=True`, returns a tuple containing the result
-        and an error dictionary, or `None` if no error occurred.
-
-    Raises
-    ------
-    None
-        API and JSON parsing failures are caught internally. Failures are
-        represented through fallback return values and, when requested,
-        structured error metadata.
-
-    Notes
-    -----
-    The request is sent with `temperature=0`.
-
-    If `return_json=True`, JSON parsing failures return `fall_back` and
-    record a `"parse_error"` when `return_with_error=True`.
-
-    If the API call fails or returns empty content, the function returns
-    `fall_back` for JSON mode and an empty string for text mode. In this
-    case the recorded error type is `"api_error"`.
-
-    This wrapper does not validate returned JSON against `json_schema`
-    locally; it only passes the schema to the model API through
-    `response_format`.
-    """
-    # create the messages
-    messages = [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-
-    # Allocate the variabls for the API call to kwargs for cleaner handling of optional parameters
-    kwargs = {
+    request = {
         "model": ai_model,
-        "messages": messages,
-        "temperature": 0
+        "instructions": sys_prompt,
+        "input": user_prompt,
+        "temperature": 0,
     }
 
-    # Conditionally add response format to kwargs based on return_json and json_schema
     if return_json:
-        if json_schema is not None:
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": json_schema
-            }
-        else:
-            kwargs["response_format"] = {"type": "json_object"}
-    
-    # Conditionally add max_tokens to kwargs if provided
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+        # json_schema is the value previously nested under
+        # response_format.json_schema, usually name/schema/strict.
+        request["text"] = {
+            "format": {"type": "json_schema", **json_schema}
+        }
 
-    # Set both values to none and compute later
+    if max_tokens is not None:
+        request["max_output_tokens"] = max_tokens
+
     result: Union[str, Dict[str, Any], None] = None
     error: Optional[Dict[str, str]] = None
 
-    # Pass api the kwargs
     try:
-        response = llm_client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
+        response = llm_client.responses.create(**request)
+        content = getattr(response, "output_text", None)
 
-        # Check if call worked:
-        # LLM returned something
-        if content is None:
+        if getattr(response, "status", None) != "completed":
+            response_error = getattr(response, "error", None)
+            details = getattr(response, "details", None)
+            raise RuntimeError(
+                f"Model call failed with status: "
+                f"{getattr(response, 'status', 'unknown')}; "
+                f"error: {response_error}; details: {details}"
+            )
+
+        if not content:
             raise ValueError("Empty response content")
 
-        # LLM returned valid JSON (if expected)
         if return_json:
             try:
                 result = json.loads(content.strip())
@@ -315,95 +239,30 @@ def call_chat_completion(
                 result = fall_back
                 error = {
                     "type": "parse_error",
-                    "message": f"Failed to parse JSON: {e}"
+                    "message": f"Failed to parse JSON: {e}",
                 }
         else:
             result = content
 
-    # Api call failed and error was returned
     except Exception as e:
         result = fall_back if return_json else ""
-        error = {
-            "type": "api_error",
-            "message": str(e)
-        }
+        error = {"type": "api_error", "message": str(e)}
 
-    # Conditionally retrn output or output with error based on return_with_error flag
     if return_with_error:
         return result, error
-
     return result
+
 
 def call_reasoning_model(
     prompt: str,
-    llm_client: OpenAI,
+    llm_client,
     ai_model: str = "o3-deep-research",
     id_timeout: float = 30,
     max_retry: int = 2,
     poll_interval: int = 60,
     max_poll_errors: int = 20,
 ):
-    """
-    Run a background reasoning-model job and poll until completion.
-
-    Creates a background response using the OpenAI Responses API, then
-    periodically retrieves the response status until the job completes,
-    fails, is cancelled, expires, or exceeds the allowed number of polling
-    errors.
-
-    Parameters
-    ----------
-    prompt : str
-        Prompt submitted to the reasoning model.
-
-    llm_client : OpenAI
-        OpenAI client instance exposing `responses.create()` and
-        `responses.retrieve()`.
-
-    ai_model : str, default="o3-deep-research"
-        Model identifier used when creating the response.
-
-    id_timeout : float, default=30
-        Timeout, in seconds, used when creating the background response job.
-
-    max_retry : int, default=2
-        Maximum number of attempts to create the background response job when
-        transient timeout or connection errors occur.
-
-    poll_interval : int, default=60
-        Number of seconds to wait between response-status polling attempts.
-
-    max_poll_errors : int, default=20
-        Maximum number of consecutive polling timeout or connection errors
-        allowed before the function returns failure.
-
-    Returns
-    -------
-    dict
-        Dictionary with the following keys:
-
-        - `status`: `"success"` or `"failed"`
-        - `response`: output text on success, the full response object in
-        some failure cases, or None if no response is available
-        - `error`: None on success, otherwise error details
-        - `response_id`: created response ID, or None if job creation failed
-
-    Notes
-    -----
-    The response is created with `background=True` and with the
-    `web_search_preview` tool enabled.
-
-    Only `APITimeoutError` and `APIConnectionError` are retried during job
-    creation and polling. Other exceptions are not caught.
-
-    If the response status is `"completed"` but `output_text` is empty, the
-    function returns `status="failed"` and includes the full response object
-    for inspection.
-
-    This function blocks while polling. It does not return until the
-    background response reaches a terminal status or polling fails too many
-    times.
-    """
+    """Run a background Responses API job with the legacy polling contract."""
 
     def get_resp_id():
         attempt = 1
@@ -414,11 +273,10 @@ def call_reasoning_model(
                 created_response = llm_client.responses.create(
                     model=ai_model,
                     input=prompt,
-                    tools=[{"type": "web_search_preview"}],
+                    tools=[{"type": "web_search"}],
                     timeout=id_timeout,
                     background=True,
                 )
-
                 print(f"Created response: {created_response.id}")
                 return created_response.id
 
@@ -428,7 +286,6 @@ def call_reasoning_model(
                 attempt += 1
 
         print("Failed to create reasoning job.")
-
         return {
             "status": "failed",
             "response": None,
@@ -437,8 +294,6 @@ def call_reasoning_model(
         }
 
     resp_id = get_resp_id()
-
-    # get_resp_id now returns either an id string or a failure dict
     if isinstance(resp_id, dict):
         return resp_id
 
@@ -446,7 +301,6 @@ def call_reasoning_model(
     poll_errors = 0
 
     while True:
-
         try:
             print("Polling for response...")
             current_response = llm_client.responses.retrieve(resp_id)
@@ -455,12 +309,10 @@ def call_reasoning_model(
 
         except (APITimeoutError, APIConnectionError) as e:
             poll_errors += 1
-
             print(
                 f"Polling error ({poll_errors}/{max_poll_errors}): "
                 f"{e}. Retrying in {poll_interval}s."
             )
-
             if poll_errors >= max_poll_errors:
                 return {
                     "status": "failed",
@@ -468,7 +320,6 @@ def call_reasoning_model(
                     "error": f"Exceeded max polling errors: {e}",
                     "response_id": resp_id,
                 }
-
             time.sleep(poll_interval)
             continue
 
@@ -480,7 +331,6 @@ def call_reasoning_model(
             last_status = current_response.status
 
         if current_response.status == "completed":
-
             if getattr(current_response, "output_text", None):
                 return {
                     "status": "success",
@@ -493,7 +343,6 @@ def call_reasoning_model(
                 "Completed but output_text was empty. "
                 "Returning full response object."
             )
-
             return {
                 "status": "failed",
                 "response": current_response,
@@ -520,7 +369,6 @@ def call_reasoning_model(
             f"status={current_response.status} "
             f"sleeping {poll_interval}s..."
         )
-
         time.sleep(poll_interval)
 
 
