@@ -2533,6 +2533,25 @@ class Insights:
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
             chunk_id: str = str(row["chunk_id"])
 
+            json_schema = {
+                "name": "claim_extraction",
+                "strict": False,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        }
+                    },
+                    "required": ["results"],
+                    "additionalProperties": False,
+                },
+            }
+
             # Build prompts
             sys_prompt: str = Prompts().gen_chunk_insights(paper_context=self.paper_context)
             user_prompt: str = (
@@ -2549,6 +2568,7 @@ class Insights:
                                  sys_prompt = sys_prompt,
                                  user_prompt = user_prompt,
                                  return_json = True, 
+                                 json_schema = json_schema,
                                  fall_back=fall_back)
             
             # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the corpus_state later.
@@ -2956,11 +2976,35 @@ class Insights:
                 "results": {}
             }
 
+            json_schema = {
+                "name": "meta_insight_extraction",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "object",
+                            "properties": {
+                                "meta_insight": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                }
+                            },
+                            "required": ["meta_insight"],
+                            "additionalProperties": False,
+                        }
+                    },
+                    "required": ["results"],
+                    "additionalProperties": False,
+                },
+            }
+
             response_dict = utils.call_chat_completion(ai_model = self.ai_model,
                                 llm_client = self.llm_client,
                                 sys_prompt = sys_prompt,
                                 user_prompt = user_prompt,
                                 return_json = True, 
+                                json_schema = json_schema,
                                 fall_back=fall_back)
             
             results = pd.DataFrame(response_dict["results"])
@@ -9756,6 +9800,17 @@ class Summarize:
                 theme_label = row["theme_label"]
                 current_theme_text = row["thematic_summary"]
 
+                json_schema = {
+                        "name": "redundancy_reduction",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "properties": {"refined_theme": {"type": "string"}},
+                            "required": ["refined_theme"],
+                            "additionalProperties": False
+                        }
+                    }
+
                 # System Prompt (Your structural version)
                 sys_prompt = Prompts().address_redundancy()
                 
@@ -9777,16 +9832,7 @@ class Summarize:
                     ai_model=self.ai_model,
                     return_json=True,
                     fall_back=fall_back,
-                    json_schema={
-                        "name": "redundancy_reduction",
-                        "strict": True,
-                        "schema": {
-                            "type": "object",
-                            "properties": {"refined_theme": {"type": "string"}},
-                            "required": ["refined_theme"],
-                            "additionalProperties": False
-                        }
-                    }
+                    json_schema=json_schema,
                 )
 
                 refined_theme = response["refined_theme"]
