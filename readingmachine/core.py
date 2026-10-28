@@ -1084,6 +1084,27 @@ class Ingestor:
         """
         
         # Set variables for the call_chat_completion function from utils
+        json_schema = {
+            "name": "paper_metadata",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "paper_id": {"type": "string"},
+                    "paper_title": {"type": "string"},
+                    "paper_author": {"type": "string"},
+                    "paper_date": {"type": "string"},
+                },
+                "required": [
+                    "paper_id",
+                    "paper_title",
+                    "paper_author",
+                    "paper_date",
+                ],
+                "additionalProperties": False,
+            },
+        }
+
         sys_prompt = Prompts().get_metadata()
         user_prompt = f"paper_id: {paper_id}\nTEXT:\n{text}"
         fallback = {
@@ -1098,6 +1119,7 @@ class Ingestor:
                                                     sys_prompt=sys_prompt,
                                                     user_prompt=user_prompt,
                                                     return_json=True,
+                                                    json_schema=json_schema,
                                                     fall_back=fallback)
 
         # Validate keys
