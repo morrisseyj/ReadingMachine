@@ -187,20 +187,24 @@ def call_chat_completion(
     json_schema: Optional[dict] = None,
     max_tokens: Optional[int] = None,
     return_with_error: bool = False,
+    reasoning_effort: Optional[str] = "none",
 ) -> Union[
     str,
     Dict[str, Any],
     Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]],
 ]:
-    """Call the Responses API while preserving the legacy chat wrapper API."""
+    """Make a standard Responses API call with no reasoning by default."""
     if return_json and json_schema is None:
         raise ValueError("json_schema is required when return_json=True.")
+
+    # Treat None as the standard no-reasoning setting.
+    effort = reasoning_effort if reasoning_effort is not None else "none"
 
     request = {
         "model": ai_model,
         "instructions": sys_prompt,
         "input": user_prompt,
-        "temperature": 0,
+        "reasoning": {"effort": effort},
     }
 
     if return_json:
@@ -221,12 +225,11 @@ def call_chat_completion(
         content = getattr(response, "output_text", None)
 
         if getattr(response, "status", None) != "completed":
-            response_error = getattr(response, "error", None)
-            details = getattr(response, "details", None)
             raise RuntimeError(
                 f"Model call failed with status: "
                 f"{getattr(response, 'status', 'unknown')}; "
-                f"error: {response_error}; details: {details}"
+                f"error: {getattr(response, 'error', None)}; "
+                f"details: {getattr(response, 'details', None)}"
             )
 
         if not content:
@@ -261,8 +264,13 @@ def call_reasoning_model(
     max_retry: int = 2,
     poll_interval: int = 60,
     max_poll_errors: int = 20,
+    reasoning_effort: Optional[str] = None,
 ):
-    """Run a background Responses API job with the legacy polling contract."""
+    """Run a background Responses API call with an explicit reasoning effort."""
+    if reasoning_effort is None:
+        raise ValueError(
+            "reasoning_effort is required for reasoning model calls."
+        )
 
     def get_resp_id():
         attempt = 1
@@ -273,6 +281,7 @@ def call_reasoning_model(
                 created_response = llm_client.responses.create(
                     model=ai_model,
                     input=prompt,
+                    reasoning={"effort": reasoning_effort},
                     tools=[{"type": "web_search"}],
                     timeout=id_timeout,
                     background=True,
@@ -313,6 +322,7 @@ def call_reasoning_model(
                 f"Polling error ({poll_errors}/{max_poll_errors}): "
                 f"{e}. Retrying in {poll_interval}s."
             )
+
             if poll_errors >= max_poll_errors:
                 return {
                     "status": "failed",
@@ -320,6 +330,7 @@ def call_reasoning_model(
                     "error": f"Exceeded max polling errors: {e}",
                     "response_id": resp_id,
                 }
+
             time.sleep(poll_interval)
             continue
 
@@ -339,10 +350,6 @@ def call_reasoning_model(
                     "response_id": resp_id,
                 }
 
-            print(
-                "Completed but output_text was empty. "
-                "Returning full response object."
-            )
             return {
                 "status": "failed",
                 "response": current_response,
@@ -370,7 +377,6 @@ def call_reasoning_model(
             f"sleeping {poll_interval}s..."
         )
         time.sleep(poll_interval)
-
 
 def restart_pipeline(saves_location = os.path.join(os.getcwd(), "data", "runs")):
     """
