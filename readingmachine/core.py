@@ -3569,14 +3569,22 @@ class Insights:
             how="left",
             on=["insight_id", "question_id"],
         )
-        self.corpus_state.insights = new_state
+
+        # drop the low relevance insights after the check
+        relevant_new_state = new_state[new_state["relevant"]==1].drop(columns = ["relevant"]).copy()
+
+        # Keep a record of the irrelevant insights for checking - even if we lose this in memory, we can quickly recreate the class and load from pickle to get it back
+        self.not_relevant_insights = new_state[new_state["relevant"]==0].copy()
+
+        # update the state
+        self.corpus_state.insights = relevant_new_state
 
         self.corpus_state.save(
             os.path.join(config.STATE_SAVE_LOCATION, "08_insights")
         )
         print(self.corpus_state.insights)
 
-        return self.corpus_state.insights
+        return
         
 
 class Clustering:
