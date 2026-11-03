@@ -816,53 +816,57 @@ class Prompts:
         auditing, and traceability.
         """
         
-        return(
-            "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
-            "Your job is to extract traceable claims from a text chunk and assign each claim to the relevant research question(s).\n"
-            "Do NOT add new information or general knowledge. Only extract what is explicitly present in the text chunk.\n\n"
+        return (
+            "You are a disciplined reader in a human-in-the-loop corpus-reading system.\n"
+            "Extract concise, traceable claims from the supplied text and assign each claim "
+            "only to research questions it is relevant to.\n"
+            "Use only information supported by the supplied text and context. Do not add "
+            "outside knowledge, infer unstated facts, or complete an argument for the source.\n\n"
 
+            "The context and analytical frame for the paper is as follows:\n"
             f"{paper_context}\n\n"
-
-            "Input format:\n\n"
 
             "RESEARCH QUESTIONS:\n"
             "<rq_id>: <rq_text>\n"
-            "<rq_id>: <rq_text>\n"
             "...\n\n"
-
             "CHUNK METADATA:\n"
             "Paper Author(s): <author names>\n"
             "Paper Date: <publication year>\n\n"
-
             "TEXT CHUNK:\n"
             "<text chunk>\n\n"
 
             "Instructions:\n"
-            "1) For each research question, extract any explicit claims, arguments, findings, or statements in the text that bear on that question.\n"
-            "2) An 'explicit claim' includes:\n"
-            "   - stated findings or conclusions\n"
-            "   - causal statements (e.g., X leads to Y)\n"
-            "   - explanations of mechanisms or processes\n"
-            "   - descriptive statements that clearly assert a relationship, condition, or effect\n"
-            "3) Do NOT restrict extraction to formal conclusions. Many valid claims appear as descriptive or explanatory statements.\n"
-            "4) A claim must be directly supported by the text in the chunk, but does NOT need to represent a complete argument.\n"
-            "5) Do NOT infer, generalize, or combine information beyond what is clearly stated.\n"
-            "6) Preserve wording as much as possible. Minor trimming for clarity is allowed, but do not rewrite or reinterpret.\n"
-            "7) Each extracted item must be concise (one sentence or short phrase) and must stand alone as a coherent idea.\n"
-            "8) The same claim may repeat across questions if it is relevant to more than one, but do not duplicate within a question.\n"
-            "9) Include only rq_ids for which there are relevant claims. If there are no relevant claims for any question, return {\"results\": {}}.\n\n"
+            "1. Assess each research question separately. Use the paper context to understand "
+            "what each question seeks. Include a claim only when the text provides substantive "
+            "information relevant to that question. The source need not explicitly address the "
+            "research question.\n"
+            "2. Write each claim as a concise, self-contained account that makes its relevance "
+            "to the question clear to a reader who has not seen the extraction process. Include "
+            "the source-supported arrangement or practice and its impact when the question asks "
+            "for both.\n"
+            "3. Maintain the source's original language as much as possible and prioritize clear "
+            "exposition of the insight. When clear exposition and fidelity to the source original language "
+            "are in conflict, prioritize clear exposition. Always maintain "
+            "the source's original meaning, attribution, and level of certainty. Do "
+            "not add facts, causes, or connections that the source does not support.\n"
+            "3. Do not include a claim merely because it shares a topic with a research question. "
+            "It must provide substantive information responsive to that question.\n"
+            "4. Return the smallest useful set of distinct claims. Do not split one assertion "
+            "into multiple paraphrases or repeat the same claim within a question.\n"
+            "5. Assign a claim to multiple questions only when it is independently relevant "
+            "to each. Return only question IDs with at least one claim. If none qualify, "
+            'return {"results": {}}.\n\n'
 
-            "Output MUST be valid JSON only, matching this schema:\n\n"
-
+            "Output valid JSON only, using this structure:\n"
             "{\n"
             '  "results": {\n'
-            '    "<rq_id>": ["<claim>"]\n'
+            '    "<rq_id>": ["<claim>", "<claim>"]\n'
             "  }\n"
             "}\n\n"
-
-            "Do not output markdown, explanations, or any text outside the JSON."
+            "Do not output markdown, explanations, or text outside the JSON."
         )
-
+    
+    
     def gen_meta_insights(self, paper_context):
         """
         Construct the prompt for paper-level meta-insight extraction.
@@ -915,69 +919,108 @@ class Prompts:
         """
 
         return (
-            "You are a disciplined reader in a human-in-the-loop, LLM-assisted corpus reading system.\n"
-            "Your task is to extract **meta-insights (including: claims/arguments/findings etc.)** — higher-level, traceable arguments or conclusions that span across multiple parts of a text.\n"
-            "Do NOT add new information or general knowledge. Only extract what is supported by the text.\n\n"
-            
-            "Note: this process complements chunk-level insight extraction (already conducted).\n"
-            "Chunk-level insights capture localized claims. Your role is to identify broader insights that ONLY become visible when combining information across multiple parts of the document.\n"
-            "Meta-insights must therefore complement — not repeat — chunk-level insights.\n\n"
-            
+            "You are a disciplined reader in a human-in-the-loop corpus-reading system.\n"
+            "Extract concise, traceable meta-insights from the supplied text and assign each "
+            "only to the specified research question.\n"
+            "Use only information supported by the supplied text and context. Do not add "
+            "outside knowledge, infer unstated facts, or complete an argument for the source.\n\n"
+
+            "The context and analytical frame for the paper is as follows:\n"
             f"{paper_context}\n\n"
 
-            "INPUT FORMAT:\n\n"
-            "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION\n"
+            "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n"
             "<question_id>: <question_text>\n\n"
             "PAPER TEXT:\n"
             "<paper_content>\n\n"
             "EXISTING CHUNK INSIGHTS:\n"
             "<chunk_insight_1>\n<chunk_insight_2>\n...\n<chunk_insight_n>\n\n"
-            "OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n"
-            "<question_id1>: <question_text1>\n<question_id2>: <question_text2>\n...\n\n"
-            "---\n\n"
+            "OTHER RESEARCH QUESTIONS (context only):\n"
+            "<question_id1>: <question_text1>\n"
+            "<question_id2>: <question_text2>\n"
+            "...\n\n"
+
+            "Instructions:\n"
+            "1. Use the paper context to understand what the specified question seeks. Include "
+            "a meta-insight only when it makes a substantive contribution to answering that "
+            "question. The source need not explicitly address the question.\n"
+            "2. Write each meta-insight as a concise, self-contained account that makes its "
+            "relevance to the question clear to a reader who has not seen the extraction "
+            "process. Include the source-supported relationships and impacts needed to answer "
+            "the question fully.\n"
+            "3. Maintain the source's original language as much as possible and prioritize clear "
+            "exposition of the insight. When clear exposition and fidelity to the source's "
+            "original language are in conflict, prioritize clear exposition. Always maintain "
+            "the source's original meaning, attribution, and level of certainty. Do not add "
+            "facts, causes, or connections that the source does not support.\n"
+            "4. Do not include a meta-insight merely because it shares a topic with the "
+            "question. It must provide substantive information responsive to that question.\n"
+            "5. Return the smallest useful set of distinct meta-insights. Do not split one "
+            "integrated claim into paraphrases or repeat the same contribution in different words.\n"
+            "6. Derive meta-insights only for the specified research question. Use other "
+            "research questions as context, not as targets.\n\n"
+
+            "CRITICAL META-INSIGHT REQUIREMENT:\n"
+            "- A meta-insight must require combining information from multiple parts of the "
+            "paper, such as multiple paragraphs, sections, or arguments.\n"
+            "- If an insight could reasonably be extracted from a single sentence, paragraph, "
+            "or localized passage, do not include it as a meta-insight.\n\n"
+
+            "ADDITIONALITY REQUIREMENT:\n"
+            "- Compare each candidate with the existing chunk insights. Include it only if it "
+            "adds substantive information to the answer that is not already present in those "
+            "insights.\n"
+            "- Different wording, a broader paraphrase, or combining existing chunk insights "
+            "without adding a substantive relationship, pattern, explanation, or conclusion "
+            "does not qualify.\n"
+            "- The added contribution must be supported by the paper text and advance the "
+            "answer to the specified question.\n\n"
 
             "OUTPUT REQUIREMENTS:\n"
-            "Return a valid JSON object matching this exact schema:\n\n"
+            "Return a valid JSON object matching this structure:\n"
             "{\n"
             '  "results": {\n'
-            '    "meta_insight": ["<claim)>"]\n'
+            '    "meta_insight": ["<claim>", "<claim>"]\n'
             "  }\n"
             "}\n\n"
-
-            "ADDITIONAL INSTRUCTIONS:\n"
-            "- The value of \"meta_insight\" must always be a JSON array (list), even if only one insight.\n"
-            "- Return an empty results object {\"results\": {}} if no valid meta-insights are found.\n"
-            "- Derive meta-insights that pertain ONLY to the specified research question.\n"
-            "- Use other research questions only as context, not as targets.\n\n"
-
-            "CRITICAL CONSTRAINT (DEFINES META-INSIGHTS):\n"
-            "- A meta-insight MUST require combining information from multiple parts of the text (e.g., multiple paragraphs, sections, or arguments).\n"
-            "- If an insight could reasonably be extracted from a single sentence, paragraph, or localized passage, DO NOT include it.\n\n"
-
-            "NOVELTY REQUIREMENT:\n"
-            "- Do NOT restate, paraphrase, or slightly generalize existing chunk insights.\n"
-            "- A meta-insight must introduce a substantively new claim that only becomes visible when considering multiple parts of the document together.\n\n"
-
-            "WHAT COUNTS AS A VALID META-INSIGHT:\n"
-            "- cross-cutting patterns or relationships\n"
-            "- connections between different mechanisms or arguments\n"
-            "- higher-level explanations that integrate multiple claims\n"
-            "- document-level conclusions that depend on multiple sections\n\n"
-
-            "WHAT TO EXCLUDE:\n"
-            "- single-claim restatements\n"
-            "- paraphrases of chunk insights\n"
-            "- localized findings expressed more generally\n\n"
-
-            "FORMATTING:\n"
-            "- Each extracted item must be concise (one sentence or short phrase).\n"
-            "- Each insight must stand alone as a coherent idea.\n\n"
-
-            "CONTEXT NOTE:\n"
-            "- If the full text exceeds the context window, you may only see part of the document.\n"
-            "- Treat the provided text as the full context available and extract meta-insights accordingly.\n\n"
-
+            "The value of \"meta_insight\" must always be a JSON array. If no meta-insights "
+            'qualify, return {"results": {}}.\n\n'
             "Do not output explanations, markdown, or any text outside the JSON object."
+        )
+
+
+    def check_insights(self, paper_context):
+        """
+        Construct the prompt for insight quality checking.
+        """
+        return (
+            "You are an independent reviewer checking extracted insights for relevance "
+            "to an assigned research question.\n"
+            "Use the research question and supplied paper context to understand the question's "
+            "scope. Assess each insight as written. Do not add information or revise the insight.\n\n"
+
+            "PAPER CONTEXT AND ANALYTICAL FRAMEWORK:\n"
+            f"{paper_context}\n\n"
+
+            "For each insight, decide whether it provides substantive information responsive "
+            "to the assigned research question. The source need not explicitly address or fully "
+            "answer the question. A shared topic or merely plausible connection is not enough. "
+            "Do not impose criteria beyond the question and the scope stated in the paper context.\n\n"
+
+            "As a final test, imagine a reader who has not seen the extraction process. Given "
+            "the question, the paper context, and the insight, would the reader understand how "
+            "the insight provides meaningful information relevant to the question?\n\n"
+
+            "Return one decision for every supplied insight, preserving its exact `insight_id` "
+            "and input order. Use 1 if relevant and 0 if not relevant. Do not include rationales "
+            "or omit any IDs.\n\n"
+
+            "Output valid JSON only, matching this schema:\n"
+            "{\n"
+            '  "results": [\n'
+            '    {"insight_id": "<insight_id>", "relevant": 1},\n'
+            '    {"insight_id": "<insight_id>", "relevant": 0}\n'
+            "  ]\n"
+            "}\n"
         )
     
     ####

@@ -161,8 +161,12 @@ outputs to be inspected, persisted, rewound, or reused across runs.
 """
 # import custom libraries
 
+from tabnanny import check
+
 from llvmlite.ir import Value
 import json
+
+from numpy.ma import ids
 
 from . import config, utils
 from .state import CorpusState, SummaryState
@@ -2504,36 +2508,41 @@ class Insights:
         """
 
         if insights is None:
+            # Start a new run. A supplied list means we are resuming from a checkpoint.
             insights = []
-            processed_chunks = []
+
+        # Find chunks already present in the checkpoint so they are not processed again.
+        if insights:
+            insights_df = pd.concat(insights, ignore_index=True)
+            processed_chunks = insights_df["chunk_id"].dropna().unique().tolist()
         else:
-            if len(insights) > 0:
-                insights_df = pd.concat(insights).reset_index(drop=True)
-                processed_chunks = insights_df["chunk_id"].unique().tolist()
-            else:
-                # Explicitly handle injected empty list
-                processed_chunks = []
+            processed_chunks = []
 
         remaining_chunks = self.corpus_state.chunks[
             ~self.corpus_state.chunks["chunk_id"].isin(processed_chunks)
         ]
 
-        # Generate a list of all the research questions with ids in the form <rq_id>: <rq_text> for the llm to consdier against each chunk
-        rqs_ids = [f"{row['question_id']}: {row['question_text']}" for _, row in self.corpus_state.questions.iterrows()]
+        # Format all research questions for the model.
+        rqs_ids = [
+            f"{row['question_id']}: {row['question_text']}"
+            for _, row in self.corpus_state.questions.iterrows()
+        ]
         rqs_ids_str = "\n".join(rqs_ids)
 
-        # Create a temp copy of the remaining chunks to iterate over, this is just to be safe and not mutate the original dataframe as we go through the loop
+        # Iterate over a copy so this loop does not modify the corpus chunks.
         temp_state_insights = remaining_chunks.copy()
 
-        # Iterate over each chunk
-        for idx, (df_index, row) in enumerate(temp_state_insights.iterrows()):
-            print(f"Processing chunk {len(processed_chunks) + idx + 1} of {temp_state_insights.shape[0] + len(processed_chunks)}...")
+        for idx, (_, row) in enumerate(temp_state_insights.iterrows()):
+            print(
+                f"Processing chunk {len(processed_chunks) + idx + 1} "
+                f"of {temp_state_insights.shape[0] + len(processed_chunks)}..."
+            )
 
-            # Extract fields from row
-            paper_id: str = row["paper_id"]
+            paper_id = row["paper_id"]
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
-            chunk_id: str = str(row["chunk_id"])
+            chunk_id = str(row["chunk_id"])
 
+            # Each research-question result is a list of claim strings.
             json_schema = {
                 "name": "claim_extraction",
                 "strict": False,
@@ -2553,95 +2562,115 @@ class Insights:
                 },
             }
 
-            # Build prompts
-            sys_prompt: str = Prompts().gen_chunk_insights(paper_context=self.paper_context)
-            user_prompt: str = (
+            sys_prompt = Prompts().gen_chunk_insights(
+                paper_context=self.paper_context
+            )
+            user_prompt = (
                 f"RESEARCH QUESTIONS:\n{rqs_ids_str}\n\n"
                 f"TEXT CHUNK:\n{chunk_text}\n"
             )
 
-            fall_back = {
-                "results": {}
-            }
-
             response_dict, error = utils.call_chat_completion(
-                ai_model = self.ai_model,
-                llm_client = self.llm_client,
-                sys_prompt = sys_prompt,
-                user_prompt = user_prompt,
-                return_json = True, 
-                json_schema = json_schema,
-                fall_back=fall_back,
+                ai_model=self.ai_model,
+                llm_client=self.llm_client,
+                sys_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                return_json=True,
+                json_schema=json_schema,
+                fall_back={"results": {}},
                 return_with_error=True,
             )
 
             print(response_dict, error)
-            
-            # Turn the response into a df with columns question_id and insight, where each row is a different insight, and the insights are the insights for that question id that were extracted from the chunk. This will make it easier to merge into the corpus_state later.
+
+            # Convert the question-to-claims response into one row per claim.
             results = response_dict.get("results", {})
-            
-            response_df = (
-                pd.DataFrame(results.items(), columns=["question_id", "insight"])
-                .explode("insight") #explode on insights to make tidy data from the lists
-                .reset_index(drop=True)
-                           )
-            # If the response is empty (no insights were found) add a row with the chunk id and paper id
+            records = []
+
+            for question_id, claims in results.items():
+                for claim in claims:
+                    records.append(
+                        {
+                            "question_id": question_id,
+                            "insight": claim,
+                        }
+                    )
+
+            response_df = pd.DataFrame(
+                records,
+                columns=["question_id", "insight"],
+            )
+
             if response_df.empty:
-                response_df = pd.DataFrame([{
-                    "question_id": pd.NA,
-                    "insight": pd.NA, 
-                    "chunk_id": chunk_id,
-                    "paper_id": paper_id
-                }])
-            # Otherwise just add the chunk id and paper id to the response df
-            else: 
-                # Add paper_id and chunk_id to the response_df 
+                # Keep a row for the chunk even when the model returned no claims.
+                response_df = pd.DataFrame(
+                    [
+                        {
+                            "question_id": pd.NA,
+                            "insight": pd.NA,
+                            "chunk_id": chunk_id,
+                            "paper_id": paper_id,
+                        }
+                    ]
+                )
+            else:
+                # Attach source identifiers to every extracted claim.
                 response_df["chunk_id"] = chunk_id
                 response_df["paper_id"] = paper_id
 
-            # Append to insights list
             insights.append(response_df)
-            # Batch writes every 10 chunks
+
+            # Save progress periodically so an interrupted run can resume.
             if (idx + 1) % 10 == 0:
-                utils.safe_pickle(insights, os.path.join(self.pickle_path, self.chunk_insights_pickle_file))
+                utils.safe_pickle(
+                    insights,
+                    os.path.join(self.pickle_path, self.chunk_insights_pickle_file),
+                )
 
-        # Convert insights list to DataFrame
         print("Converting insights to DataFrame and merging into corpus_state...")
-        insights_complete_df: pd.DataFrame = pd.concat(insights).reset_index(drop=True) if insights else pd.DataFrame(columns=["question_id", "insight", "chunk_id", "paper_id"])
-        
-        # Merge into global insights table - first drop existing insight columns if present (these can be created by previous runs of recover_chunk_insights_generation)
-        base_insights = (
-            self.corpus_state.insights
-            .drop(columns=["insight"], errors="ignore") # drop the metadata columns if they exist as we will merge them back in from the corpus_state later, but ignore if they don't exist as this function can be run multiple times and they will only be there after the first run
+
+        # Combine checkpointed and newly generated claim rows.
+        if insights:
+            insights_complete_df = pd.concat(insights, ignore_index=True)
+        else:
+            insights_complete_df = pd.DataFrame(
+                columns=["question_id", "insight", "chunk_id", "paper_id"]
+            )
+
+        # Keep metadata from the existing insights table, but use the newly generated
+        # question IDs and claims as the source of truth.
+        base_insights = self.corpus_state.insights
+        if base_insights is None:
+            base_insights = self.corpus_state.chunks.drop(
+                columns=["question_id", "chunk_text"],
+                errors="ignore",
+            )
+
+        base_insights = base_insights.drop(
+            columns=["insight", "question_id"],
+            errors="ignore",
         )
-        
-        # Now we merge this chunk insights with all the insights data and metadata. 
-        # Notably we drop question_id from the corpus_state.insights as previously if papers wwere not associated with a question when importing them, the question_id was NA
-        # Now we have all the chunks and thier insights associated with a question_id thus this becomes the primary df
-        working_insights_df = (
-            insights_complete_df
-            .merge(
-                base_insights.drop(columns=["question_id"], errors="ignore"), # So that we don't duplicate question_id columns
-                how="left",
-                on=["paper_id", "chunk_id"]
-                ))
-        
-        # Add insight_ids
-        mask = working_insights_df["insight"].notna()
 
-        # Create numeric ids only where valid
+        working_insights_df = insights_complete_df.merge(
+            base_insights,
+            how="left",
+            on=["paper_id", "chunk_id"],
+        )
+
+        # Assign IDs only to rows containing an extracted claim.
+        has_insight = working_insights_df["insight"].notna()
         working_insights_df["insight_id"] = pd.NA
-        working_insights_df.loc[mask, "insight_id"] = range(1, mask.sum() + 1)
-
-        # Explicitly transform only valid rows to final string form
-        working_insights_df.loc[mask, "insight_id"] = (
-            "chunk_insight_" +
-            working_insights_df.loc[mask, "insight_id"].astype(int).astype(str)
+        working_insights_df.loc[has_insight, "insight_id"] = range(
+            1,
+            has_insight.sum() + 1,
+        )
+        working_insights_df.loc[has_insight, "insight_id"] = (
+            "chunk_insight_"
+            + working_insights_df.loc[has_insight, "insight_id"].astype(int).astype(str)
         )
 
         return working_insights_df
-    
-    
+            
     def _recover_chunk_insights_generation(self):
         """
         Resume chunk-level insight extraction from a checkpoint.
@@ -3069,9 +3098,11 @@ class Insights:
             )
         # Now we have the meta insights with all the metadata and we can append to the corpus_state insights
         self.corpus_state.insights = pd.concat([self.corpus_state.insights, meta_insights_complete], ignore_index=True)
-        # Save to parquet and return
-        self.corpus_state.save(os.path.join(config.STATE_SAVE_LOCATION, "08_insights"))
-        return self.corpus_state.insights
+
+        print(self.corpus_state.insights)
+        return()
+
+    
 
     @staticmethod
     def ensure_list(x):
@@ -3215,7 +3246,332 @@ class Insights:
         if current_chunk:
             chunks.append(current_chunk)
         return chunks
-    
+
+    def _check_insights_llm(self, question_id, question_text, insights_batch):
+        """Check one batch of insights against one research question."""
+
+        json_schema = {
+            "name": "insight_relevance_check",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "insight_id": {"type": "string"},
+                                "relevant": {
+                                    "type": "integer",
+                                    "enum": [0, 1],
+                                },
+                            },
+                            "required": ["insight_id", "relevant"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["results"],
+                "additionalProperties": False,
+            },
+        }
+
+        sys_prompt = Prompts().check_insights(
+            paper_context=self.paper_context
+        )
+        user_prompt = (
+            f"RESEARCH QUESTION:\n"
+            f"{question_id}: {question_text}\n\n"
+            f"INSIGHTS TO CHECK:\n"
+            f"{json.dumps(insights_batch, ensure_ascii=False)}\n"
+        )
+
+        response, error = utils.call_chat_completion(
+            ai_model=self.ai_model,
+            llm_client=self.llm_client,
+            sys_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            return_json=True,
+            fall_back=None,
+            json_schema=json_schema,
+            return_with_error=True,
+        )
+
+        if error is not None:
+            raise ValueError(f"Error during insight checking: {error}")
+
+        return response
+
+    def check_insights(self, batch_size=25):
+        """Check insights in question-specific batches and update corpus state."""
+
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1.")
+
+        pickle_save_path = (
+            Path(config.PICKLE_SAVE_LOCATION) / "insight_check_pickle.pkl"
+        )
+        checked_id_df_list = []
+
+        # Recover, overwrite, or abort if a checkpoint already exists.
+        if pickle_save_path.exists():
+            recover = None
+            while recover not in ["1", "2", "3"]:
+                recover = input(
+                    "An insight check pickle file already exists. Do you want to:\n"
+                    "1. Recover from the existing pickle file\n"
+                    "2. Overwrite the existing pickle file\n"
+                    "3. Abort\n"
+                    "Enter 1, 2, or 3: "
+                ).strip()
+
+            if recover == "1":
+                with open(pickle_save_path, "rb") as f:
+                    checked_id_df_list = pickle.load(f)
+
+                if not isinstance(checked_id_df_list, list):
+                    raise ValueError(
+                        "The checkpoint must contain a list of result DataFrames."
+                    )
+
+                # Require the current checkpoint format; overwrite an older one.
+                expected_checkpoint_columns = {
+                    "insight_id",
+                    "relevant",
+                    "question_id",
+                }
+                for checked_df in checked_id_df_list:
+                    if not isinstance(checked_df, pd.DataFrame):
+                        raise ValueError(
+                            "The checkpoint contains an item that is not a DataFrame."
+                        )
+                    if set(checked_df.columns) != expected_checkpoint_columns:
+                        raise ValueError(
+                            "The checkpoint has an incompatible format. "
+                            "Choose overwrite to start a new run."
+                        )
+
+                checked_pairs = set()
+                for checked_df in checked_id_df_list:
+                    checked_pairs.update(
+                        zip(
+                            checked_df["question_id"],
+                            checked_df["insight_id"],
+                        )
+                    )
+
+            elif recover == "2":
+                checked_id_df_list = []
+                checked_pairs = set()
+
+                # Clear the checkpoint before starting the new run.
+                with open(pickle_save_path, "wb") as f:
+                    pickle.dump(checked_id_df_list, f)
+
+            else:
+                print("Aborting insight check.")
+                raise SystemExit("Insight check aborted by user.")
+
+        else:
+            checked_pairs = set()
+
+        new_results_since_save = 0
+        questions = self.corpus_state.questions
+
+        if not {"question_id", "question_text"}.issubset(questions.columns):
+            raise ValueError(
+                "corpus_state.questions must contain question_id and question_text."
+            )
+
+        # Process one question at a time, batching only that question's insights.
+        for _, question_row in questions.iterrows():
+            question_id = question_row["question_id"]
+            question_text = question_row["question_text"]
+
+            question_insights = self.corpus_state.insights[
+                (self.corpus_state.insights["question_id"] == question_id)
+                & self.corpus_state.insights["insight_id"].notna()
+                & self.corpus_state.insights["insight"].notna()
+            ]
+
+            unchecked_insights = []
+            for _, insight_row in question_insights.iterrows():
+                insight_id = insight_row["insight_id"]
+                if (question_id, insight_id) not in checked_pairs:
+                    unchecked_insights.append(
+                        {
+                            "insight_id": insight_id,
+                            "insight": insight_row["insight"],
+                        }
+                    )
+
+            total_batches = (
+                len(unchecked_insights) + batch_size - 1
+            ) // batch_size
+
+            for batch_number, start in enumerate(
+                range(0, len(unchecked_insights), batch_size),
+                start=1,
+            ):
+                insights_batch = unchecked_insights[start : start + batch_size]
+                expected_ids = {
+                    item["insight_id"]
+                    for item in insights_batch
+                }
+
+                print(
+                    f"Checking {question_id}: batch {batch_number} "
+                    f"of {total_batches}..."
+                )
+
+                # Make one LLM call for this batch.
+                response = self._check_insights_llm(
+                    question_id=question_id,
+                    question_text=question_text,
+                    insights_batch=insights_batch,
+                )
+                results_df = pd.DataFrame(
+                    response.get("results", []),
+                    columns=["insight_id", "relevant"],
+                )
+
+                # Retry once for IDs omitted from the first response.
+                if results_df["insight_id"].duplicated().any():
+                    raise ValueError(
+                        f"Checker returned duplicate insight IDs for {question_id}."
+                    )
+
+                returned_ids = set(results_df["insight_id"].tolist())
+                unexpected_ids = returned_ids - expected_ids
+                if unexpected_ids:
+                    raise ValueError(
+                        f"Checker returned unexpected insight IDs: {unexpected_ids}"
+                    )
+
+                missing_ids = expected_ids - returned_ids
+                if missing_ids:
+                    print(
+                        "Warning: Checker omitted insight IDs. "
+                        "Retrying the missing insights..."
+                    )
+
+                    missing_batch = [
+                        item
+                        for item in insights_batch
+                        if item["insight_id"] in missing_ids
+                    ]
+                    retry_response = self._check_insights_llm(
+                        question_id=question_id,
+                        question_text=question_text,
+                        insights_batch=missing_batch,
+                    )
+                    retry_df = pd.DataFrame(
+                        retry_response.get("results", []),
+                        columns=["insight_id", "relevant"],
+                    )
+
+                    if retry_df["insight_id"].duplicated().any():
+                        raise ValueError(
+                            f"Checker returned duplicate insight IDs on retry "
+                            f"for {question_id}."
+                        )
+
+                    unexpected_retry_ids = (
+                        set(retry_df["insight_id"].tolist()) - missing_ids
+                    )
+                    if unexpected_retry_ids:
+                        raise ValueError(
+                            "Checker returned unexpected insight IDs on retry: "
+                            f"{unexpected_retry_ids}"
+                        )
+
+                    failed_ids = missing_ids - set(
+                        retry_df["insight_id"].tolist()
+                    )
+                    if failed_ids:
+                        raise ValueError(
+                            f"Checker failed to return IDs on retry: {failed_ids}"
+                        )
+
+                    results_df = pd.concat(
+                        [results_df, retry_df],
+                        ignore_index=True,
+                    )
+
+                if set(results_df["insight_id"].tolist()) != expected_ids:
+                    raise ValueError(
+                        f"Checker results do not match batch IDs for {question_id}."
+                    )
+
+                if not results_df["relevant"].isin([0, 1]).all():
+                    raise ValueError(
+                        f"Checker returned an invalid relevance value for {question_id}."
+                    )
+
+                # Put results in the same order as the submitted batch.
+                id_order = {
+                    item["insight_id"]: position
+                    for position, item in enumerate(insights_batch)
+                }
+                results_df["_batch_order"] = results_df["insight_id"].map(id_order)
+                results_df = (
+                    results_df
+                    .sort_values("_batch_order")
+                    .drop(columns=["_batch_order"])
+                    .reset_index(drop=True)
+                )
+
+                results_df["question_id"] = question_id
+                checked_id_df_list.append(results_df)
+
+                checked_pairs.update(
+                    (question_id, insight_id)
+                    for insight_id in results_df["insight_id"].tolist()
+                )
+
+                # Checkpoint progress after each 100 completed decisions.
+                new_results_since_save += len(results_df)
+                if new_results_since_save >= 100:
+                    with open(pickle_save_path, "wb") as f:
+                        pickle.dump(checked_id_df_list, f)
+                    new_results_since_save = 0
+
+        # Save any results after the last 100-result checkpoint.
+        with open(pickle_save_path, "wb") as f:
+            pickle.dump(checked_id_df_list, f)
+
+        if checked_id_df_list:
+            checked_insights = pd.concat(
+                checked_id_df_list,
+                ignore_index=True,
+            )
+        else:
+            checked_insights = pd.DataFrame(
+                columns=["insight_id", "relevant", "question_id"]
+            )
+
+        # Replace any previous checker decisions, then merge in the current ones.
+        old_state = self.corpus_state.insights.drop(
+            columns=["relevant"],
+            errors="ignore",
+        )
+
+        new_state = old_state.merge(
+            checked_insights,
+            how="left",
+            on=["insight_id", "question_id"],
+        )
+        self.corpus_state.insights = new_state
+
+        self.corpus_state.save(
+            os.path.join(config.STATE_SAVE_LOCATION, "08_insights")
+        )
+        print(self.corpus_state.insights)
+
+        return self.corpus_state.insights
+        
+
 class Clustering:
     """
     Embedding and clustering stage of the ReadingMachine pipeline.

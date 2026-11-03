@@ -316,7 +316,8 @@ def call_chat_completion(
 
 
 def call_reasoning_model(
-    prompt: str,
+    input: str,
+    instructions: str,
     llm_client,
     ai_model: str = "o3-deep-research",
     id_timeout: float = 30,
@@ -324,17 +325,44 @@ def call_reasoning_model(
     poll_interval: int = 60,
     max_poll_errors: int = 20,
     reasoning_effort: Optional[str] = None,
+    json_schema: Optional[dict] = None,
+    tools=None,
 ):
     """
-    Run a background Responses API reasoning job and poll until it finishes.
+    Run a background Responses API job and poll until it finishes.
+
+    If json_schema is provided, request structured JSON output and parse it.
+    If tools is None, do not provide tools to the model.
 
     Returns the established status dictionary with status, response, error,
-    and response_id. This function requires an explicit reasoning effort.
+    and response_id. On success, response is parsed JSON when json_schema
+    was supplied; otherwise it is output text.
     """
     if reasoning_effort is None:
         raise ValueError(
             "reasoning_effort is required for reasoning model calls."
         )
+
+    # Normalize convenient tool inputs:
+    #   "web_search" -> [{"type": "web_search"}]
+    #   {"type": "web_search"} -> [{"type": "web_search"}]
+    #   ["web_search", {...}] -> [{"type": "web_search"}, {...}]
+    normalized_tools = None
+    if tools is not None:
+        if isinstance(tools, str):
+            tools = [tools]
+        elif isinstance(tools, dict):
+            tools = [tools]
+        elif not isinstance(tools, (list, tuple)):
+            raise TypeError("tools must be None, a tool name, a dict, or a list.")
+
+        normalized_tools = [
+            {"type": tool} if isinstance(tool, str) else tool
+            for tool in tools
+        ]
+
+        if not all(isinstance(tool, dict) for tool in normalized_tools):
+            raise TypeError("Each item in tools must be a tool name or dict.")
 
     def get_resp_id():
         attempt = 1
@@ -342,14 +370,30 @@ def call_reasoning_model(
 
         while attempt <= max_retry:
             try:
-                created_response = llm_client.responses.create(
-                    model=ai_model,
-                    input=prompt,
-                    reasoning={"effort": reasoning_effort},
-                    tools=[{"type": "web_search"}],
-                    timeout=id_timeout,
-                    background=True,
-                )
+                request = {
+                    "model": ai_model,
+                    "input": input,
+                    "instructions": instructions,
+                    "reasoning": {"effort": reasoning_effort},
+                    "timeout": id_timeout,
+                    "background": True,
+                }
+
+                # Add tools only when the caller supplied them.
+                if normalized_tools is not None:
+                    request["tools"] = normalized_tools
+
+                # Responses API structured output format.
+                # json_schema should usually contain name, strict, and schema.
+                if json_schema is not None:
+                    request["text"] = {
+                        "format": {
+                            "type": "json_schema",
+                            **json_schema,
+                        }
+                    }
+
+                created_response = llm_client.responses.create(**request)
                 print(f"Created response: {created_response.id}")
                 return created_response.id
 
@@ -411,18 +455,34 @@ def call_reasoning_model(
             last_status = current_response.status
 
         if current_response.status == "completed":
-            if getattr(current_response, "output_text", None):
+            output_text = getattr(current_response, "output_text", None)
+
+            if not output_text:
                 return {
-                    "status": "success",
-                    "response": current_response.output_text,
-                    "error": None,
+                    "status": "failed",
+                    "response": current_response,
+                    "error": "Completed with no output_text",
                     "response_id": response_id,
                 }
 
+            # Return parsed JSON when a schema was requested.
+            if json_schema is not None:
+                try:
+                    output = json.loads(output_text)
+                except Exception as exc:
+                    return {
+                        "status": "failed",
+                        "response": output_text,
+                        "error": f"Failed to parse JSON output: {exc}",
+                        "response_id": response_id,
+                    }
+            else:
+                output = output_text
+
             return {
-                "status": "failed",
-                "response": current_response,
-                "error": "Completed with no output_text",
+                "status": "success",
+                "response": output,
+                "error": None,
                 "response_id": response_id,
             }
 
