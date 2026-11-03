@@ -3192,7 +3192,14 @@ class Insights:
         the configured context window and must be split before LLM
         processing.
         """
-        encoding = tiktoken.encoding_for_model(model)
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+        except KeyError:
+            if model == "gpt-6-sol":
+                encoding = tiktoken.get_encoding("o200k_base")
+            else:
+                raise
+        
         return len(encoding.encode(text))
     
     @staticmethod
