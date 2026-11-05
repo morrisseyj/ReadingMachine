@@ -6589,6 +6589,8 @@ class Summarize:
                 updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
                 updated_question_schema_df["question_id"] = row["question_id"]
                 updated_question_schema_df["theme_id"] = [(i + 1) for i in range(updated_question_schema_df.shape[0])]
+                updated_question_schema_df["schema_produced_by"] = "optimize_plan"
+                updated_question_schema_df["optimizer_clear"] = False
                 # Append the df to the list
                 updated_schema_list.append(updated_question_schema_df)
 
@@ -6599,7 +6601,7 @@ class Summarize:
 
         updated_repair_plan_df = pd.concat(updated_repair_plan_list)
         updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
-        updated_repair_plan_df["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
+        updated_repair_plan_df["theme_id"] = [(i + 1) for i in range(updated_repair_plan_df.shape[0])] # Make theme_id global
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
         return updated_schema_df_sorted, updated_repair_plan_df 
 
@@ -6699,6 +6701,7 @@ class Summarize:
             updated_question_schema_df["theme_id"] = [
                 i + 1 for i in range(updated_question_schema_df.shape[0])
             ]
+            updated_question_schema_df["schema_produced_by"] = "optimize_plan"
             updated_question_schema_df["optimizer_clear"] = False
 
             updated_schema_list.append(updated_question_schema_df)
@@ -8584,7 +8587,7 @@ class Summarize:
         return(orphans_df)
     
 
-    def _summarize_failed_orphan_batch(
+    def _summarize_failed_orphan_batch_llm(
         self,
         orphans: str,
         question_text: str,
@@ -8666,11 +8669,65 @@ class Summarize:
         if response is None:
             raise ValueError(
                 f"Failed orphan batch summarization failed. Error {error}"
-            )
+                )
 
         response_summary = response["summary"]
 
         return response_summary
+
+    def _summarize_failed_orphan_batch(
+        self,
+        orphans: str,
+        question_text: str,
+        theme_label: str,
+    ) -> str:
+        """Summarize an orphan batch, splitting it recursively if summarization fails."""
+        
+        def _split_orphans(orphans: str) -> tuple[str, str]:
+            """
+            Helper function to split the orphan chunk when summarizing it exceeds the output context
+            """
+            lines = [line for line in orphans.splitlines() if line.strip()]
+            if len(lines) < 2:
+                raise ValueError("Cannot split orphan batch into smaller batches.")
+
+            midpoint = (len(lines) + 1) // 2
+            return "\n".join(lines[:midpoint]), "\n".join(lines[midpoint:])
+
+        ##### - END HELPER
+        
+        try:
+            return self._summarize_failed_orphan_batch_llm(
+                orphans=orphans,
+                question_text=question_text,
+                theme_label=theme_label,
+            )
+
+        except ValueError as exc:
+            print("Failed orphan batch summary output exceeded context window, splitting batch in 2 and trying again.")
+            # Check that the output error pertains to the summarize failed orphan effort exceeding the output context window
+            _OUTPUT_LIMIT_ERROR = (
+                "Failed orphan batch summarization failed. "
+                "Error Response incomplete: the output or reasoning token limit was reached. "
+                "Increase max_tokens or reduce the input length or reasoning effort."
+            )
+
+            if _OUTPUT_LIMIT_ERROR not in str(exc):
+                raise
+                
+            parts = _split_orphans(orphans)
+
+            # A single item cannot be split further, so allow the original error through.
+            if len(parts) < 2:
+                raise
+
+            # Recursively split it until it works
+            summaries = [
+                self._summarize_failed_orphan_batch(part, question_text, theme_label)
+                for part in parts
+            ]
+            
+            return "\n\n".join(summary for summary in summaries if summary.strip())
 
 #### -------------------- CODE UPDATE--------------------
 

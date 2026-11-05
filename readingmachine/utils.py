@@ -206,35 +206,28 @@ def call_chat_completion(
 ) -> Union[
     str,
     Dict[str, Any],
-    Tuple[Union[str, Dict[str, Any]], Optional[Dict[str, str]]],
+    Tuple[Optional[Union[str, Dict[str, Any]]], Optional[str]],
+    None,
 ]:
     """
     Make a standard Responses API call.
 
-    By default, request reasoning effort "none". If the selected model
-    rejects "none", retry that call once with "low" and cache "low" for
-    later standard calls to the same model.
+    Requests "none" reasoning effort by default. If the model rejects
+    "none", retry that call once with "low".
 
     If return_json=True, json_schema is required. When
-    return_with_error=True, return (result, error).
+    return_with_error=True, return (result, error_message).
     """
-    # Structured JSON output needs an explicit schema.
+    # Retain this parameter to preserve the existing function signature.
+    # Errors return None, as requested.
+    _ = fall_back
+
     if return_json and json_schema is None:
         raise ValueError("json_schema is required when return_json=True.")
 
-    # Treat None as the caller's request for the standard "none" effort.
     requested_effort = reasoning_effort or "none"
+    effort = requested_effort
 
-    # Reuse the effort learned from an earlier call for this model.
-    # The cache applies to the default/"none" mode; explicit other efforts
-    # remain under the caller's control.
-    if requested_effort == "none":
-        effort = _reasoning_effort_by_model.get(ai_model, "none")
-    else:
-        effort = requested_effort
-
-    # Build a Responses API request. Do not pass temperature: some models
-    # only accept their default temperature.
     request = {
         "model": ai_model,
         "instructions": sys_prompt,
@@ -242,75 +235,89 @@ def call_chat_completion(
         "reasoning": {"effort": effort},
     }
 
-    # Convert the legacy schema argument to the Responses API format.
-    # json_schema should usually contain name, strict, and schema.
     if return_json:
         request["text"] = {
             "format": {"type": "json_schema", **json_schema}
         }
 
-    # Responses API uses max_output_tokens rather than max_tokens.
     if max_tokens is not None:
         request["max_output_tokens"] = max_tokens
 
     result = None
-    error = None
+    error_message = None
 
     try:
         try:
             response = llm_client.responses.create(**request)
 
         except Exception as exc:
-            # Only retry when the API specifically rejects effort "none".
-            # Other errors flow to the outer handler without being retried.
-            if effort == "none" and _is_unsupported_none_effort(exc):
-                _reasoning_effort_by_model[ai_model] = "low"
+            # Retry only when this call's "none" effort was rejected.
+            message = str(exc).lower()
+            unsupported_none = (
+                "reasoning.effort" in message
+                and "'none' is not supported" in message
+            )
+
+            if effort == "none" and unsupported_none:
                 print(
                     f"{ai_model} does not support reasoning effort 'none'; "
-                    "retrying with 'low'. Later standard calls will use 'low'."
+                    "retrying this call with 'low'."
                 )
-
                 request["reasoning"] = {"effort": "low"}
                 response = llm_client.responses.create(**request)
             else:
                 raise
 
-        # Treat non-completed responses as API errors, preserving the
-        # wrapper's fallback and optional error-return behavior.
         if getattr(response, "status", None) != "completed":
-            raise RuntimeError(
-                f"Model call failed with status: "
-                f"{getattr(response, 'status', 'unknown')}; "
-                f"error: {getattr(response, 'error', None)}; "
-                f"details: {getattr(response, 'details', None)}"
+            status = getattr(response, "status", "unknown")
+            incomplete_details = getattr(
+                response, "incomplete_details", None
             )
+            reason = getattr(incomplete_details, "reason", None)
+            api_error = getattr(response, "error", None)
+            api_error_message = getattr(api_error, "message", None)
 
-        content = getattr(response, "output_text", None)
-        if not content:
-            raise ValueError("Empty response content")
+            if status == "incomplete" and reason == "max_output_tokens":
+                error_message = (
+                    "Response incomplete: the output or reasoning token "
+                    "limit was reached. Increase max_tokens or reduce the "
+                    "input length or reasoning effort."
+                )
+            elif status == "incomplete" and reason:
+                error_message = (
+                    f"Response incomplete: {reason.replace('_', ' ')}."
+                )
+            elif api_error_message:
+                error_message = (
+                    f"Model call ended with status '{status}': "
+                    f"{api_error_message}"
+                )
+            else:
+                error_message = f"Model call ended with status '{status}'."
 
-        if return_json:
-            try:
-                result = json.loads(content.strip())
-            except Exception as exc:
-                result = fall_back
-                error = {
-                    "type": "parse_error",
-                    "message": f"Failed to parse JSON: {exc}",
-                }
+            result = None
+
         else:
-            result = content
+            content = getattr(response, "output_text", None)
+
+            if not content:
+                error_message = (
+                    "Model call completed, but returned no output."
+                )
+            elif return_json:
+                try:
+                    result = json.loads(content.strip())
+                except Exception as exc:
+                    error_message = f"Failed to parse JSON output: {exc}"
+            else:
+                result = content
 
     except Exception as exc:
-        # Keep API failures in the established return contract.
-        result = fall_back if return_json else ""
-        error = {
-            "type": "api_error",
-            "message": str(exc),
-        }
+        result = None
+        error_message = f"API call failed: {exc}"
 
     if return_with_error:
-        return result, error
+        return result, error_message
 
     return result
 
