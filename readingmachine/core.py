@@ -5864,7 +5864,7 @@ class Summarize:
         schema_change_plan,
         *,
         iteration=None,
-        research_question=None,
+        question_id=None,
     ):
         """
         Convert a schema-change planner response into a flat history dataframe.
@@ -5937,7 +5937,7 @@ class Summarize:
 
             rows.append({
                 "iteration": iteration,
-                "research_question": research_question,
+                "question_id": question_id,
                 "changed_by": changed_by,
                 "source_theme_id": source["source_theme_id"],
                 "source_theme_label": source["source_theme_label"],
@@ -5953,7 +5953,7 @@ class Summarize:
 
         columns = [
             "iteration",
-            "research_question",
+            "question_id",
             "changed_by",
             "source_theme_id",
             "source_theme_label",
@@ -6005,7 +6005,7 @@ class Summarize:
         for _, row in history_df.iterrows():
             records.append({
                 "iteration_id": clean_scalar(row.get("iteration_id")),
-                "research_question": clean_scalar(row.get("research_question")),
+                "question_id": clean_scalar(row.get("question_id")),
                 "changed_by": clean_scalar(row.get("changed_by")),
                 "source_theme_id": clean_scalar(row.get("source_theme_id")),
                 "source_theme_label": clean_scalar(row.get("source_theme_label")),
@@ -6560,7 +6560,7 @@ class Summarize:
                 repair_plan_for_history_df = self._schema_change_plan_to_history_df(
                     schema_change_plan = repair_plan_json,
                     iteration = len(self.summary_state.schema_repair_list) + 1,
-                    research_question = row["question_id"]
+                    question_id = row["question_id"]
                     )
                 
                 updated_repair_plan_list.append(repair_plan_for_history_df)
@@ -6588,8 +6588,9 @@ class Summarize:
                 # Convert the output to df 
                 updated_question_schema_df = pd.DataFrame(updated_question_schema_dict)
                 updated_question_schema_df["question_id"] = row["question_id"]
+                updated_question_schema_df["question_text"] = row["question_text"]
                 updated_question_schema_df["theme_id"] = [(i + 1) for i in range(updated_question_schema_df.shape[0])]
-                updated_question_schema_df["schema_produced_by"] = "optimize_plan"
+                updated_question_schema_df["schema_produced_by"] = "repair_plan"
                 updated_question_schema_df["optimizer_clear"] = False
                 # Append the df to the list
                 updated_schema_list.append(updated_question_schema_df)
@@ -6600,7 +6601,7 @@ class Summarize:
         updated_schema_df_sorted["theme_id"] = [(i + 1) for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
         updated_repair_plan_df = pd.concat(updated_repair_plan_list)
-        updated_repair_plan_df.sort_values(by = ["research_question", "source_theme_id"])
+        updated_repair_plan_df.sort_values(by = ["question_id", "source_theme_id"])
         updated_repair_plan_df["theme_id"] = [(i + 1) for i in range(updated_repair_plan_df.shape[0])] # Make theme_id global
         # return both the updated schema and the latest repair plan to the overall coordinator so that it can ammend the state
         return updated_schema_df_sorted, updated_repair_plan_df 
@@ -6669,7 +6670,7 @@ class Summarize:
             optimize_plan_for_history_df = self._schema_change_plan_to_history_df(
                 schema_change_plan=optimize_plan_json,
                 iteration=len(self.summary_state.schema_repair_list) + 1,
-                research_question=question_id,
+                question_id=question_id,
             )
 
             updated_optimize_plan_list.append(optimize_plan_for_history_df)
@@ -6730,7 +6731,7 @@ class Summarize:
 
         updated_repair_plan_df = pd.concat(updated_optimize_plan_list)
         updated_repair_plan_df = updated_repair_plan_df.sort_values(
-            by=["research_question", "source_theme_id"]
+            by=["question_id", "source_theme_id"]
         )
         updated_repair_plan_df["theme_id"] = [i + 1 for i in range(updated_schema_df_sorted.shape[0])] # Make theme_id global
 
@@ -9472,7 +9473,7 @@ class Summarize:
         summary: str,
         resolved_plan: list,
         missing_citations_df: pd.DataFrame,
-        research_question: str,
+        question_text: str,
         analytical_frame: str,
     ) -> str:
         """
@@ -9678,7 +9679,7 @@ class Summarize:
                 sys_prompt=Prompts().rewrite_citation_provenance(),
                 user_prompt=json.dumps(
                     {
-                        "RESEARCH QUESTION": research_question,
+                        "RESEARCH QUESTION": question_text,
                         "ANALYTICAL FRAME": analytical_frame,
                         "CONTEXT PARAGRAPH": summary[p_start:p_end],
                         "SELECTED TEXT": original_text,
@@ -9856,7 +9857,7 @@ class Summarize:
                     "Selected insights were omitted:\n"
                     + json.dumps(
                         {
-                            "research_question": research_question,
+                            "research_question": question_text,
                             "original_text": original_text,
                             "omitted_insights": omission_details,
                         },
@@ -9897,7 +9898,7 @@ class Summarize:
         self,
         summary: str,
         missing_citations_df: pd.DataFrame,
-        research_question: str,
+        question_text: str,
         analytical_frame: str,
     ) -> str:
         """
@@ -10062,7 +10063,7 @@ class Summarize:
                 f"{json.dumps(citations, ensure_ascii=False, indent=2)}\n\n"
 
                 "RESEARCH QUESTION\n\n"
-                f"{research_question}\n\n"
+                f"{question_text}\n\n"
 
                 "ANALYTICAL FRAME\n\n"
                 f"{analytical_frame}\n\n"
@@ -10345,7 +10346,7 @@ class Summarize:
             summary=summary,
             resolved_plan=resolved_plan,
             missing_citations_df=evidence,
-            research_question=research_question,
+            question_text=question_text,
             analytical_frame=analytical_frame,
         )
 
@@ -10359,7 +10360,7 @@ class Summarize:
                 "WARNING: Citation repair completed with missing sources:\n"
                 + json.dumps(
                     {
-                        "research_question": research_question,
+                        "research_question": question_text,
                         "missing_citations": unresolved,
                     },
                     ensure_ascii=False,
@@ -10896,7 +10897,7 @@ class Summarize:
                         updated_summary = self._address_missing_citations(
                             summary=updated_summary,
                             missing_citations_df=theme_missing_citations_df,
-                            research_question=question_text,
+                            question_text=question_text,
                             analytical_frame=self.analytical_framework
                             )
 
@@ -10933,14 +10934,26 @@ class Summarize:
 
         # Add back the stable themes
         if not stable_populated_themes.empty:
-            stable_populated_themes = stable_populated_themes[[
-                "thematic_summary",
-                "question_id",
-                "theme_id",
-                "theme_label",
-                "theme_description",
-                "question_text"
-                ]].copy()
+            stable_populated_themes = (
+                stable_populated_themes
+                .drop(columns=["question_text"], errors="ignore")
+                .merge(
+                    self.corpus_state.questions[["question_id", "question_text"]],
+                    on="question_id",
+                    how="left",
+                    validate="many_to_one",
+                )
+                [[
+                    "thematic_summary",
+                    "question_id",
+                    "theme_id",
+                    "theme_label",
+                    "theme_description",
+                    "question_text",
+                ]]
+                .copy()
+            )
+
             theme_no_orphans = pd.concat([theme_no_orphans, stable_populated_themes], ignore_index=True)
 
         # Sort for outputing in the correct order - before this make sure the theme_id is int to prevent sorting issues
