@@ -1790,12 +1790,13 @@ class Ingestor:
             sys_prompt = Prompts().gen_in_text_citation()
             json_schema = {
                 "name": "formatted_citations",
+                "strict": True,
                 "schema": {
                     "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
+                    "properties": {key: {"type": "string"} for key in batch},
+                    "required": list(batch.keys()),
+                    "additionalProperties": False,
+                },
             }
 
             fall_back = {}
@@ -2540,8 +2541,8 @@ class Insights:
 
             paper_id = row["paper_id"]
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
-            paper_author = row["paper_author"]
-            paper_date = row["paper_date"]
+            paper_author = self.corpus_state.insights.loc[self.corpus_state.insights["paper_id"] == paper_id, "paper_author"].iloc[0]
+            paper_date = int(self.corpus_state.insights.loc[self.corpus_state.insights["paper_id"] == paper_id, "paper_date"].iloc[0])
             chunk_id = str(row["chunk_id"])
 
             # Each research-question result is a list of claim strings.
