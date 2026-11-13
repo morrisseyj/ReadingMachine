@@ -2540,6 +2540,8 @@ class Insights:
 
             paper_id = row["paper_id"]
             chunk_text = row["chunk_text"] if pd.notna(row["chunk_text"]) else ""
+            paper_author = row["paper_author"]
+            paper_date = row["paper_date"]
             chunk_id = str(row["chunk_id"])
 
             # Each research-question result is a list of claim strings.
@@ -2567,6 +2569,11 @@ class Insights:
             )
             user_prompt = (
                 f"RESEARCH QUESTIONS:\n{rqs_ids_str}\n\n"
+
+                "CHUNK METADATA:\n"
+                f"Paper Author(s): {paper_author}\n"
+                f"Paper Date: {paper_date}\n\n"
+
                 f"TEXT CHUNK:\n{chunk_text}\n"
             )
 
@@ -2849,6 +2856,8 @@ class Insights:
                 meta_insight_check_df = pd.DataFrame({
                     "paper_id": [paper_id] * len(paper_content_list),
                     "question_id": [rqid] * len(paper_content_list),
+                    "paper_author": self.corpus_state.insights[self.corpus_state.insights["paper_id"] == paper_id]["paper_author"].iloc[0],
+                    "paper_date": self.corpus_state.insights[self.corpus_state.insights["paper_id"] == paper_id]["paper_date"].iloc[0],
                     "paper_content": paper_content_list,
                     "paper_chunk_insights": [paper_question_chunk_insights] * len(paper_content_list),
                 })
@@ -3002,6 +3011,9 @@ class Insights:
             sys_prompt: str = Prompts().gen_meta_insights(paper_context=self.paper_context)
             user_prompt: str = (
                 f"SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n{rq}\n"
+                "PAPER METADATA:\n"
+                f"Paper Author(s): {row["paper_author"]}\n"
+                f"Paper Date: {row["paper_date"]}\n\n"
                 f"PAPER TEXT:\n{paper_content}\n"
                 f"EXISTING CHUNK INSIGHTS:\n{paper_chunk_insights}\n\n"
                 f"OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n{other_rqs_str}\n\n"

@@ -930,6 +930,9 @@ class Prompts:
 
             "SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n"
             "<question_id>: <question_text>\n\n"
+            "PAPER METADATA:\n"
+            "Paper Author(s): <author names>\n"
+            "Paper Date: <publication year>\n\n"
             "PAPER TEXT:\n"
             "<paper_content>\n\n"
             "EXISTING CHUNK INSIGHTS:\n"
