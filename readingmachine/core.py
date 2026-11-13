@@ -3012,8 +3012,8 @@ class Insights:
             user_prompt: str = (
                 f"SPECIFIC RESEARCH QUESTION FOR CONSIDERATION:\n{rq}\n"
                 "PAPER METADATA:\n"
-                f"Paper Author(s): {row["paper_author"]}\n"
-                f"Paper Date: {row["paper_date"]}\n\n"
+                f"Paper Author(s): {row['paper_author']}\n"
+                f"Paper Date: {row['paper_date']}\n\n"
                 f"PAPER TEXT:\n{paper_content}\n"
                 f"EXISTING CHUNK INSIGHTS:\n{paper_chunk_insights}\n\n"
                 f"OTHER RESEARCH QUESTIONS IN THE REVIEW (context only):\n{other_rqs_str}\n\n"
