@@ -8546,6 +8546,12 @@ class Summarize:
         for _, row in self.summary_state.populated_theme_list[-1].iterrows():
             # This runs question by question so first we iterate over those
             t_id, q_id, thematic_summary = row["theme_id"], row["question_id"], row["thematic_summary"]
+
+            # Previous orphan results for stable questions were already seeded
+            # into checked_insights_df above. Do not audit those questions again.
+            if q_id in stable_questions:
+                continue
+
             # Then we get the insights that were initially allocated to that question - as we are checking whether these got allocated
             relevant_ids = theme_map[(theme_map["theme_id"] == t_id) & (theme_map["question_id"] == q_id)]["insight_id"].tolist()
             relevant_insights = self.corpus_state.insights[
