@@ -10976,6 +10976,7 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
+                    "organizing_proposition": row["organizing_proposition"]
                 }])
 
             else:
@@ -10988,6 +10989,7 @@ class Summarize:
                     "theme_label": theme_label,
                     "theme_description": theme_description,
                     "question_text": question_text,
+                    "organizing_proposition": row["organizing_proposition"]
                 }])
 
             updated_summary_df_lst.append(updated_row)
@@ -11017,6 +11019,7 @@ class Summarize:
                     "theme_label",
                     "theme_description",
                     "question_text",
+                    "organizing_proposition"
                 ]]
                 .copy()
             )
