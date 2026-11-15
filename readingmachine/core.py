@@ -7110,14 +7110,54 @@ class Summarize:
 
     def _check_stable_questions(self):
         """
-        Return question_ids whose current mappings can be reused.
+        Return question_ids eligible for reuse under the current schema.
 
-        A question is stable here only in the mapping sense: the current schema for
-        that question does not require remapping before the next population pass.
+        Repair-produced questions qualify only when their most recent
+        completed orphan-handling pass contains no failed-batch markers.
+
+        Population appends a new populated-theme pass before orphan handling.
+        Orphan handling updates that pass in place and then commits an orphan
+        entry. List lengths therefore identify which populated pass contains
+        completed orphan-handling results.
         """
 
         stable_questions = []
         current_schema_df = self.summary_state.theme_schema_list[-1]
+
+        populated_passes = self.summary_state.populated_theme_list
+        orphan_passes = self.summary_state.orphan_list
+
+        populated_count = len(populated_passes)
+        orphan_count = len(orphan_passes)
+
+        # Select the most recent COMPLETED orphan-handling output.
+        #
+        # Equal lengths:
+        #   The latest populated pass has completed orphan handling.
+        #
+        # Population one ahead:
+        #   The latest populated pass is awaiting orphan handling.
+        #   Its predecessor contains the previous completed results.
+        #
+        # No completed passes:
+        #   There is no prior integration result from which to infer success.
+        if populated_count == orphan_count:
+            completed_populated_df = (
+                populated_passes[-1] if populated_count > 0 else None
+            )
+
+        elif populated_count == orphan_count + 1:
+            completed_populated_df = (
+                populated_passes[-2] if orphan_count > 0 else None
+            )
+
+        else:
+            raise ValueError(
+                "Cannot determine the latest completed orphan-handling pass: "
+                f"{populated_count} populated passes and "
+                f"{orphan_count} orphan passes. Expected equal lengths "
+                "or population to be exactly one pass ahead."
+            )
 
         for _, row in self.corpus_state.questions.iterrows():
             question_id = row["question_id"]
@@ -7131,58 +7171,65 @@ class Summarize:
                     f"No schema rows found for question_id={question_id}."
                 )
 
-            schema_sources = schema_rq_df["schema_produced_by"].dropna().unique()
+            schema_sources = (
+                schema_rq_df["schema_produced_by"].dropna().unique()
+            )
 
             if len(schema_sources) != 1:
                 raise ValueError(
-                    f"Expected exactly one schema_produced_by value for question_id={question_id}, "
+                    "Expected exactly one schema_produced_by value for "
+                    f"question_id={question_id}, "
                     f"but found {schema_sources.tolist()}."
                 )
 
             schema_produced_by = schema_sources[0]
 
-            # Cluster schemas have never been mapped/populated, so no previous
-            # mapping can be reused.
+            # Initial cluster schemas have no prior mapping/population
+            # result eligible for reuse.
             if schema_produced_by == "initial_cluster_schema":
                 continue
 
-            # Repair-produced schemas can reuse mappings only after the latest
-            # population pass shows that the repaired question has no failed themes.
             if schema_produced_by == "repair_plan":
-                if not self.summary_state.populated_theme_list:
-                    raise ValueError(
-                        "Cannot check repair-produced schema stability because no populated themes exist."
-                    )
+                # Fresh population without failure markers is not evidence
+                # of successful orphan integration. Inspect only a completed
+                # pass selected above.
+                if completed_populated_df is None:
+                    continue
 
-                latest_populated_df = self.summary_state.populated_theme_list[-1]
-
-                populated_theme_rq_df = latest_populated_df[
-                    latest_populated_df["question_id"] == question_id
+                populated_theme_rq_df = completed_populated_df[
+                    completed_populated_df["question_id"] == question_id
                 ].copy()
 
                 if populated_theme_rq_df.empty:
                     raise ValueError(
-                        f"No populated theme rows found for question_id={question_id}."
+                        "No completed populated theme rows found for "
+                        f"question_id={question_id}."
                     )
 
                 has_failures = (
                     populated_theme_rq_df["thematic_summary"]
-                    .str.contains("--- FAILED BATCH SUMMARIES ---", na=False)
+                    .str.contains(
+                        "--- FAILED BATCH SUMMARIES ---",
+                        regex=False,
+                        na=False,
+                    )
                     .any()
                 )
 
+                # Questions that passed the previous completed integration
+                # can be carried forward. Failed questions must be processed.
                 if not has_failures:
                     stable_questions.append(question_id)
 
                 continue
 
-            # Optimizer-produced schemas are reusable only when the optimizer
-            # explicitly cleared the current question schema by returning no_change.
+            # Preserve the optimizer's existing reuse rule: it must have
+            # explicitly cleared the question schema by returning no_change.
             if schema_produced_by == "optimize_plan":
                 if "optimizer_clear" not in schema_rq_df.columns:
                     raise ValueError(
-                        f"Schema for question_id={question_id} was produced by optimize_plan "
-                        "but has no optimizer_clear column."
+                        f"Schema for question_id={question_id} was produced "
+                        "by optimize_plan but has no optimizer_clear column."
                     )
 
                 optimizer_clear_values = (
@@ -7194,7 +7241,8 @@ class Summarize:
 
                 if len(optimizer_clear_values) != 1:
                     raise ValueError(
-                        f"Expected exactly one optimizer_clear value for question_id={question_id}, "
+                        "Expected exactly one optimizer_clear value for "
+                        f"question_id={question_id}, "
                         f"but found {optimizer_clear_values.tolist()}."
                     )
 
@@ -7204,8 +7252,8 @@ class Summarize:
                 continue
 
             raise ValueError(
-                f"Unknown schema_produced_by value for question_id={question_id}: "
-                f"{schema_produced_by!r}."
+                f"Unknown schema_produced_by value for "
+                f"question_id={question_id}: {schema_produced_by!r}."
             )
 
         return stable_questions
