@@ -325,13 +325,27 @@ insights_generator.check_insights()
 # Clustering groups semantically similar insights across documents.
 # Clusters act as organizational scaffolding for theme generation.
 
+#Load the data from the all lit run
+from readingmachine import state
+latest_corpus_state = state.CorpusState.load(filepath = r'C:\Users\jmorrissey\Documents\python_projects\future_of_aid_consolidated\q_set1_crit_gender_papers\ReadingMachine\data\runs\08_insights')
+
+# Now filter everything for crit gender
+latest_corpus_state_crit_gender = latest_corpus_state
+latest_corpus_state_crit_gender.insights = latest_corpus_state_crit_gender.insights[latest_corpus_state_crit_gender.insights["filename_stub"].str.contains("namalie", case = False)].copy()
+crit_gender_paper_ids = list(latest_corpus_state_crit_gender.insights["paper_id"].unique())
+latest_corpus_state_crit_gender.chunks = latest_corpus_state_crit_gender.chunks[latest_corpus_state_crit_gender.chunks["paper_id"].isin(crit_gender_paper_ids)].copy()
+latest_corpus_state_crit_gender.full_text = latest_corpus_state_crit_gender.full_text[latest_corpus_state_crit_gender.full_text["paper_id"].isin(crit_gender_paper_ids)].copy()
+
+cluster = core.Clustering(corpus_state = latest_corpus_state_crit_gender, llm_client=llm_client, embedding_model='text-embedding-3-small')
+
+
 cluster = core.Clustering(
     corpus_state=insights_generator.corpus_state,
     llm_client=llm_client,
     embedding_model="text-embedding-3-small"
 )
 
-# Convert insights to vector embeddings
+# Convert insights to vector embeddings - this should load from the pickle which i copied over from the all lit run
 cluster.embed_insights()
 
 # ----------------------------------------------------------
@@ -354,8 +368,8 @@ cluster.tune_umap_params(
 # Reduce dimensions using chosen parameters
 cluster.reduce_dimensions(
     n_neighbors=5,
-    min_dist=0.0,
-    n_components=20,
+    min_dist=0.5,
+    n_components=10,
     metric="euclidean",
     random_state=config.seed
 )
@@ -377,31 +391,32 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 # Apply clustering
 cluster.generate_clusters({
-    # Q0: 55 clusters, DB 0.443 (tightest), 25.4% outliers
+    # Q0 (Row 25): 8 clusters, DB 0.895, 13.2% outliers (132 pts - absolute minimum)
     "question_0": {
-        "min_cluster_size": 20,
-        "metric": "manhattan",
-        "cluster_selection_method": "eom",
-        "min_samples": 10
-    },
-
-    # Q1: 42 clusters, DB 0.440 (near-tightest), 17.7% outliers (near-lowest)
-    "question_1": {
-        "min_cluster_size": 20,
-        "metric": "manhattan",
-        "cluster_selection_method": "eom",
-        "min_samples": 10
-    },
-
-    # Q2: 79 clusters (lowest count), DB 0.502, 23.5% outliers
-    "question_2": {
-        "min_cluster_size": 20,
+        "min_cluster_size": 15,
         "metric": "euclidean",
         "cluster_selection_method": "eom",
-        "min_samples": 10
+        "min_samples": 4
     },
 
-    # Q3: 43 clusters, DB 0.512, 15.2% outliers (near-lowest)
+    # Q1 (Row 61): 5 clusters, DB 0.731, 16.5% outliers (79 pts)
+    "question_1": {
+        "min_cluster_size": 15,
+        "metric": "euclidean",
+        "cluster_selection_method": "eom",
+        "min_samples": 4
+    },
+
+    # Q2 (Row 9): 2 clusters, DB 1.302, 4.3% outliers (49 pts - absolute minimum)
+    # Alternative if tighter DB is preferred (Row 6): size=15, euclidean, min_samples=8 (12 clusters, DB 0.797, 28.9% outliers)
+    "question_2": {
+        "min_cluster_size": 15,
+        "metric": "manhattan",
+        "cluster_selection_method": "eom",
+        "min_samples": 8
+    },
+
+    # Q3 (Row 45): 2 clusters, DB 0.837, 15.9% outliers (77 pts - absolute minimum)
     "question_3": {
         "min_cluster_size": 15,
         "metric": "manhattan",
