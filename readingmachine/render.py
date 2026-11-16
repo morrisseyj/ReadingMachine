@@ -873,18 +873,26 @@ class Render:
                         "additionalProperties": False
                     }
                 }
-                response = utils.call_chat_completion(
+                response, error = utils.call_chat_completion(
                     sys_prompt=sys_prompt,
                     user_prompt=user_prompt,
                     llm_client=self.llm_client,
                     ai_model=self.ai_model,
                     return_json=True,
                     json_schema=json_schema,
-                    fall_back=fall_back
+                    fall_back=fall_back,
+                    return_with_error=True,
                 )
 
-                # Get the data, transform to df
+                # Stop at the underlying failure rather than recording an empty rewrite.
+                if error is not None or response is None:
+                    raise ValueError(
+                        f"Stylistic rewrite failed for question {qid}, "
+                        f"theme {theme_id}. Error: {error}; response: {response!r}"
+                    )
+
                 stylized_content = response["refined_summary"]
+                
                 stylized_content_df = pd.DataFrame({
                     "stylized_text": [stylized_content],
                     "question_id": [qid],
