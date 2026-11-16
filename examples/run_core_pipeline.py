@@ -1,17 +1,5 @@
-import importlib
-
-def reload():
-    from readingmachine import core, utils, state, render, config, prompts
-
-    importlib.reload(config)
-    importlib.reload(utils)
-    importlib.reload(state)
-    importlib.reload(core)
-    importlib.reload(prompts)
-
-    return(None)
-
-reload()
+%load_ext autoreload
+%autoreload 2
 
 """
 ReadingMachine Example Pipeline
@@ -75,22 +63,106 @@ llm_client = OpenAI(api_key=OPENAI_API_KEY)
 # All extracted insights will be associated with one or more of these questions.
 
 questions = [
-    "What effects does remote work have on worker productivity?",
-    "How does remote work affect worker satisfaction and retention?",
-    "What organizational practices enable successful remote work?",
-    "What constraints limit the adoption of remote work?",
-    "How has the role of remote work changed over time?"
+    "What underlying structural features (the conceptual framings, and the institutional arrangements through which they are operationalized) of "
+    "the US foreign assistance system limited or undermined poverty reduction, reduced suffering, accountable governance, gender equality, "
+    "or local leadership, and how did they shape or relate to the distribution of decision-making authority, control over resources, and "
+    "agenda-setting power in ways that contributed to these outcomes?",
+
+    "What underlying structural features (the conceptual framings, and the institutional arrangements through which they are operationalized) of "
+    "the US foreign assistance system enabled or strengthened efforts at poverty reduction, reduced suffering, accountable governance, "
+    "gender equality, or local leadership, and how did they shape or relate to the distribution of decision-making authority, control over "
+    "resources, and agenda-setting power in ways that supported these outcomes?",
+
+    "How were have the dominant structural features (conceptual framings, and operational and institutional forms) been embedded in, transmitted "
+    "through, or transformed by wider aid institutions, and with what consequences for the distribution of decision-making authority, control "
+    "over resources, and agenda-setting power, as well as for system outcomes?",
+
+    "How and why has political economy of the US foreign assistance system changed over the following overlapping historical periods:\n "
+     "1) post world war II reconstruction, development and decolonization\n "
+     "2) Cold war developmentism\n "
+     "3) Structural adjustment and the debt crisis\n "
+     "4) post 1990 liberal internationalism and governance\n "
+     "5) post 9/11 securitization\n "
+     "6) post 2015 sustainable development\n\n"
+     "Political economy should be understood broadly to include a wide range of political concerns and economic interests such that the motivations for the structure of the aid system are the object of analysis.\n\n"
 ]
 
 
 # Context helps the LLM interpret the purpose of the corpus
 paper_context = (
-    "This literature review examines the growth of remote and hybrid work arrangements "
-    "and their implications for productivity, worker well-being, and organizational structure. "
-    "The goal of the review is to synthesize empirical findings about when remote work "
-    "improves or reduces productivity, how it affects job satisfaction and retention, "
-    "and what organizational practices enable successful implementation."
-)
+    "This review is motivated by a desire to understand the structural features of US foreign assistance that have either "
+    "enabled or undermined the goals of the foreign assistance system. The intention behind the review is to inform the "
+    "structural architecture of a future foreign assistance system by identifying and advancing those structures that "
+    "most effectively supported the goals of foreign assistance, while avoiding those that undermined them.\n\n"
+
+    "We recognize that the goals of foreign assistance have shifted over time, and this review is not concerned with "
+    "all goals historically pursued by the aid system. Rather, it focuses on goals that remain normatively important "
+    "today: poverty reduction, reduced human suffering, accountable governance, gender equality, and local leadership. "
+    "Other goals or imperatives — such as securitization, geopolitical competition, market expansion, or stabilization — are "
+    "relevant where they shaped, constrained, or undermined pursuit of those normative goals that remain important today.\n\n"
+
+    "This review understands the US foreign assistance system as an institutional architecture composed of underlying conceptual "
+    "framings and assumptions about development and humanitarian action. These framings structure and shape the design and "
+    "operation of institutional forms—including organizational practices, governance structures, accountability systems, "
+    "financing arrangements, knowledge systems, and partnership models—through which they are enacted in practice.  "
+    "These institutional forms shape the distribution of decision-making authority, control over resources, and agenda-setting "
+    "power within the system. The analysis therefore focuses on how structural features give rise to these distributions of power, "
+    "and how those distributions, in turn, affect the system's ability to achieve its stated goals.\n\n"
+
+    "The analytic framework for this work is as follows:\n"
+    "- 'Structural features' are manifest at multiple levels.\n" 
+    "- The primary level is conceptual framings and assumptions about development and humanitarian action (e.g., racialized, gendered, colonial, "
+    "geopolitical, economic, technocratic, etc.).\n"
+    "- These framings shape subsequent levels via the design and operation of institutional forms, including (non-exhaustively) governance "
+    "structures, financing arrangements, accountability systems, knowledge systems, partnership models, and organizational practices.\n"
+    "- These institutional forms give rise to further structural levels that shape the distribution of power within the system, expressed as "
+    "(non-exhaustively) decision-making authority, control over resources, and agenda-setting capacity.\n"
+    "- Similar distributions of power may persist across different historical periods even when institutional forms change, "
+    "where underlying structural framings remain stable.\n\n"
+
+    "We expect the articulation of different levels of structures to appear independently in the text. Not every structural level will be "
+    "described in relation to those above and below it. Different authors and different passages will independently talk about 'structures' and invoke different levels.\n\n"
+
+    "Insight extraction should adopt this conceptual framing when determining whether any claim in the corpus is relevant to the questions posed below.\n\n"
+
+    "The examples used above are illustrative and non-exhaustive, they should not prefigure or bias insight extraction.\n\n"
+
+    "HISTORICAL PERIOD REQUIREMENT:\n"
+    "Every insight you extract must be attached to at least one historical period. "
+    "If no defensible period can be attached to an insight, do not extract it.\n\n"
+
+    "Periods are analytical categories, not simple date ranges. They may overlap in time and are not mutually exclusive. "
+    "The text may not use the exact period labels, so assign periods based on the specific insight and the evidence "
+    "in the text you are given, not on the overall topic of the paper.\n\n"
+
+    "The predefined periods are:\n"
+    "- post WWII reconstruction, development, and decolonization\n"
+    "- cold war developmentism\n"
+    "- structural adjustment and the debt crisis\n"
+    "- post 1990 liberal internationalism and governance\n"
+    "- post 9/11 securitization\n"
+    "- post 2015 sustainable development\n\n"
+
+    "Rules for assigning periods:\n"
+    "- An insight may belong to several periods. If several apply, include all of them.\n"
+    "- If an insight refers to a distinct historical framework, initiative, era, administration, program, or aid regime "
+    "that the predefined periods do not adequately represent (for example the MDGs, PEPFAR, the Alliance for Progress, "
+    "or the Green Revolution), use its name in place of, or alongside, a predefined period.\n"
+    "- Use a period when it is explicitly stated in the text, or when it can reasonably be inferred from the content of "
+    "the specific insight and the surrounding text.\n"
+    "- The publication date is the weakest evidence. Use it only when the insight is clearly about the author's "
+    "contemporary present (framed as current, present-day, recent, ongoing, or equivalent) and nothing stronger exists. "
+    "Never assign a period merely because the paper has a publication date. If an insight is general, theoretical, or "
+    "historical without clear temporal anchoring, do not infer a period from the date, and do not extract it.\n\n"
+
+    "Required format:\n"
+    "Begin every insight with its period(s), written in plain words with spaces and never underscores, followed by a colon "
+    "and then the insight text. The period prefix is the only permitted addition to the source wording.\n"
+    "- One period: 'During <period>: <insight>'\n"
+    "- Two periods: 'During <period A> and <period B>: <insight>'\n"
+    "- Three or more: 'During <period A>, <period B>, and <period C>: <insight>'\n"
+    "Use this exact pattern for every insight, with no variations in wording, punctuation, or capitalisation of 'During'.\n\n"
+    )
 
 
 # ==========================================================
@@ -133,7 +205,7 @@ ingestor = core.Ingestor(
     questions=questions_df,
     papers=insights_df,
     llm_client=llm_client,
-    ai_model="gpt-4o"
+    ai_model="gpt-6-sol"
 )
 
 # Read PDF/HTML files and extract text
@@ -142,6 +214,28 @@ ingestor.ingest_papers()
 # Validate metadata against the text (title, author, year)
 # Metadata is treated as a first-class object in the pipeline
 ingestor.update_metadata()
+
+#---------------
+# Pull the metadata from the zotero lib
+zot_meta = pd.read_csv(r"C:\Users\jmorrissey\Documents\python_projects\future_of_aid_consolidated\q_set1_all_papers\ReadingMachine\data\corpus\foreign_assistance_readingmachine_sources.csv")
+
+ingestor.corpus_state.insights = (
+    zot_meta
+    .rename(columns = {
+        "Publication Year": "paper_date",
+        "Call Number": "paper_id",
+        "Author": "paper_author",
+        "Title": "paper_title"
+    })
+    .filter(items = ["paper_date", "paper_id", "paper_author", "paper_title"])
+    .merge(
+        ingestor.corpus_state.insights.drop(columns = ["paper_author", "paper_title", "paper_date"]), 
+        on = "paper_id", 
+        how = "left"
+    )
+)
+#-------------
+
 
 # Drop duplicate files to make sure each paper only enters the pipeline once. This is a two-step process:
 # 1) Drop exact duplicates based on exact hash of the full text
@@ -162,6 +256,8 @@ ingestor.drop_duplicates()
 # It can also be useful to manually update any missing metadata fields at this stage. Data might be missing due to the import format.
 #
 # After editing the CSV files run:
+# Have to drop some front and back matter content that does not have an author - write to csv and then update the state
+ingestor.corpus_state.insights.dropna(subset =["paper_author", "paper_title", "paper_date"]).to_csv(r"C:\Users\jmorrissey\Documents\python_projects\future_of_aid_consolidated\q_set1_all_papers\ReadingMachine\data\fuzzy_checks\ingest\duplicate_check.csv")
 
 ingestor.update_state("duplicate_check.csv")
 
@@ -201,7 +297,7 @@ ingestor.chunk_sanity_check()
 insights_generator = core.Insights(
     corpus_state=ingestor.corpus_state,
     llm_client=llm_client,
-    ai_model="gpt-4o",
+    ai_model="gpt-6-sol",
     paper_context=paper_context
 )
 
@@ -211,9 +307,17 @@ insights_generator = core.Insights(
 insights_generator.get_chunk_insights()
 
 # Extract higher-level arguments spanning entire documents
+# Two papers ingested empty, we have to get rid of these to make the meta insights work
+# Get the bad papers
+bad_papers = set(insights_generator.corpus_state.full_text["paper_id"]) - set(insights_generator.corpus_state.insights["paper_id"])
+# Remove them
+insights_generator.corpus_state.full_text = insights_generator.corpus_state.full_text[
+    ~insights_generator.corpus_state.full_text["paper_id"].isin(bad_papers)
+].reset_index(drop=True)
+
 insights_generator.get_meta_insights()
 
-
+insights_generator.check_insights()
 # ==========================================================
 # 3. CLUSTER INSIGHTS
 # ==========================================================
@@ -249,10 +353,10 @@ cluster.tune_umap_params(
 
 # Reduce dimensions using chosen parameters
 cluster.reduce_dimensions(
-    n_neighbors=100,
-    min_dist=0.5,
-    n_components=10,
-    metric="cosine",
+    n_neighbors=5,
+    min_dist=0.0,
+    n_components=20,
+    metric="euclidean",
     random_state=config.seed
 )
 
@@ -273,13 +377,38 @@ cluster.hdbscan_tuning_results.to_html("hdbscan_tuning_results.html")
 
 # Apply clustering
 cluster.generate_clusters({
-    "question_0": {"min_cluster_size": 15, "metric": "manhattan", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_1": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_2": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_3": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2},
-    "question_4": {"min_cluster_size": 5, "metric": "euclidean", "cluster_selection_method": "eom", "min_samples": 2}
-})
+    # Q0: 55 clusters, DB 0.443 (tightest), 25.4% outliers
+    "question_0": {
+        "min_cluster_size": 20,
+        "metric": "manhattan",
+        "cluster_selection_method": "eom",
+        "min_samples": 10
+    },
 
+    # Q1: 42 clusters, DB 0.440 (near-tightest), 17.7% outliers (near-lowest)
+    "question_1": {
+        "min_cluster_size": 20,
+        "metric": "manhattan",
+        "cluster_selection_method": "eom",
+        "min_samples": 10
+    },
+
+    # Q2: 79 clusters (lowest count), DB 0.502, 23.5% outliers
+    "question_2": {
+        "min_cluster_size": 20,
+        "metric": "euclidean",
+        "cluster_selection_method": "eom",
+        "min_samples": 10
+    },
+
+    # Q3: 43 clusters, DB 0.512, 15.2% outliers (near-lowest)
+    "question_3": {
+        "min_cluster_size": 15,
+        "metric": "manhattan",
+        "cluster_selection_method": "eom",
+        "min_samples": 8
+    }
+})
 # ==========================================================
 # 4. SYNTHESIZE THEMES
 # ==========================================================
@@ -294,9 +423,9 @@ summarize = core.Summarize(corpus_state=latest_corpus_state, llm_client=llm_clie
 summarize = core.Summarize(
     corpus_state=cluster.corpus_state,
     llm_client=llm_client,
-    ai_model="gpt-4o",
-    paper_output_length=3000, 
-    use_organizing_proposition=True
+    ai_model="gpt-6-sol",
+    paper_output_length=10000, 
+    analytical_framework=paper_context
 )
 
 # ----------------------------------------------------------
@@ -341,6 +470,7 @@ summarize.populate_themes()
 # Identify and reinsert missing insights ("orphans")
 summarize.address_orphans()
 
+
 # ----------------------------------------------------------
 # Iterative refinement
 # ----------------------------------------------------------
@@ -364,7 +494,7 @@ renderer = render.Render(
     summary_state=summarize.summary_state,
     corpus_state=summarize.corpus_state,
     llm_client=llm_client,
-    ai_model="gpt-4o"
+    ai_model="gpt-6-sol"
 )
 
 # Optional cosmetic passes
