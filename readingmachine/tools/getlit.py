@@ -101,6 +101,7 @@ import requests
 import pickle
 import numpy as np
 import re
+import httpx2
 
 
 
@@ -136,9 +137,9 @@ class ScholarSearchString:
         self,
         questions: List[str],
         llm_client: Any,
+        llm_model: str,
         num_prompts: int = 10,
         search_engine: str = "Semantic Scholar",
-        llm_model: str = "gpt-4.1",
         corpus_state: Optional[CorpusState] = None,
         messages: Optional[List[List[Dict[str, str]]]] = None,
     ) -> None:
@@ -488,6 +489,8 @@ class AcademicLit:
         """
         # Must be a full email address
         mailto = os.getenv("EMAIL_DOMAIN")
+        if not mailto or "@" not in mailto:
+            raise ValueError(f"EMAIL_DOMAIN env var must be a full email address, got: {mailto!r}")
         cr = Crossref(mailto=mailto)
 
         output: Dict[str, List] = {
@@ -498,14 +501,15 @@ class AcademicLit:
             "doi": []
         }
 
-        for search_string in self.corpus_state.insights["search_string"]:
-            # one request; optionally retry once on 503/429
-            for attempt in (1, 2):
+        for idx, search_string in enumerate(self.corpus_state.insights["search_string"]):
+            if idx > 0:
+                time.sleep(0.5)  # Stay under Polite pool's 3 list-queries/sec limit
+            for attempt in (1, 2, 3):
                 try:
                     res = cr.works(query=search_string, limit=num_results)
                     break
-                except HTTPError as e:
-                    code = getattr(e.response, "status_code", None)
+                except httpx2.HTTPStatusError as e:
+                    code = e.response.status_code
                     if code in (503, 429) and attempt == 1:
                         delay = 5 + random.random() * 5
                         print(f"Crossref {code}; retrying in {delay:.1f}s…")
@@ -736,7 +740,7 @@ class GreyLiterature:
         corpus_state: Optional["CorpusState"] = None,  # Current research corpus_state (can be injected)
         questions: Optional[List[str]] = None,    # User-defined research questions
         ai_reasoning_model: str = "o3-deep-research",       # LLM model to use
-        ai_chat_completion_model: str = "gpt-4o",  # Chat completion model for JSON cleaning
+        ai_chat_completion_model: str = "gpt-6-sol",  # Chat completion model for JSON cleaning
         grey_lit_pickle_folder: str = os.path.join(os.getcwd(), "data", "pickles") # The pickle location for the valid processed json response from the LLM
         
         #GREY_LIT_PICKLE_FILE: str = os.path.join(os.getcwd(), "data", "pickles", "grey_lit.pkl"), # The pickle location for the valid processed json response from the LLM
@@ -802,7 +806,11 @@ class GreyLiterature:
         #self.GREY_LIT_RAW_PICKLE_FILE = os.path.join(self.grey_lit_pickle_folder, "grey_lit_raw.pkl")
 
 
-     def get_grey_lit(self, example_grey_literature_sources) -> Optional[pd.DataFrame]:
+    def get_grey_lit(
+            self,
+            ai_model,
+            example_grey_literature_sources
+        ) -> Optional[pd.DataFrame]:
         """
         Retrieve grey literature relevant to the research questions.
 
@@ -875,12 +883,60 @@ class GreyLiterature:
         prompt: str = Prompts().grey_lit_retrieve(questions=question_strings, 
                                                   example_grey_literature_sources=example_grey_literature_sources)
 
+        json_schema = {
+            "name": "paper_extraction_results",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question_id": {
+                                    "type": "string"
+                                },
+                                "paper_title": {
+                                    "type": "string"
+                                },
+                                "paper_author": {
+                                    "type": "string"
+                                },
+                                "paper_date": {
+                                    "type": "string"
+                                },
+                                "doi": {
+                                    "type": ["string", "null"]
+                                }
+                            },
+                            "required": [
+                                "question_id",
+                                "paper_title",
+                                "paper_author",
+                                "paper_date",
+                                "doi"
+                            ],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": ["results"],
+                "additionalProperties": False
+            }
+        }
+
 
         # Call the LLM
-        response_dict = utils.call_reasoning_model(prompt=prompt,
-                                        llm_client=self.llm_client,
-                                        ai_model=self.ai_reasoning_model,                                            
-                                        )
+        response_dict = utils.call_reasoning_model(
+            input=prompt,
+            instructions = "",
+            llm_client=self.llm_client,
+            ai_model=ai_model,
+            tools="web_search",
+            reasoning_effort="medium", 
+            json_schema=json_schema                                      
+            )
         
         
         if response_dict["status"] == "success":
@@ -891,26 +947,24 @@ class GreyLiterature:
             return response_dict["response"]
 
         # Have a chat completion model clean the json
-        # First create the fall back reflecting the json structure i am asking for back from the LLM
-        fallback = {
-            "results": [
-                {
-                    "question_id": "",
-                    "paper_title": "",
-                    "paper_author": "",
-                    "paper_date": "",
-                    "doi": None
-                }
-            ]
-        }
+        
         print("Passing the result of the AI assisted search to an LLM for cleaning....")
         # Now call the chat completion model to clean the JSON
-        clean_response = utils.call_chat_completion(ai_model=self.ai_chat_completion_model, 
-                                              llm_client=self.llm_client,
-                                              sys_prompt=Prompts().grey_literature_format_check(),
-                                              user_prompt=response,
-                                              return_json=True,
-                                              fall_back=fallback)
+        clean_response, error = utils.call_chat_completion(
+            ai_model=self.ai_chat_completion_model, 
+            llm_client=self.llm_client,
+            sys_prompt=Prompts().grey_literature_format_check(),
+            user_prompt=json.dumps(response),
+            return_json=True,
+            json_schema=json_schema,
+            return_with_error=True,
+            fall_back=None
+            )
+
+        if clean_response is None:
+            raise RuntimeError(
+                f"Grey literature cleaning failed: {error}"
+                )
         
         self.clean_grey_lit_response = clean_response
         
@@ -1192,8 +1246,8 @@ class AiLiteratureCheck:
     def __init__(
         self,
         llm_client: Any,
-        ai_reasoning_model: str = "o3-deep-research",
-        ai_chat_completion_model: str = "gpt-4o",
+        ai_reasoning_model: str = "gpt-6-sol",
+        ai_chat_completion_model: str = "gpt-6-sol",
         corpus_state: Optional["CorpusState"] = None,
         papers: Optional[pd.DataFrame] = None, 
     ) -> None:
@@ -1345,12 +1399,49 @@ class AiLiteratureCheck:
             questions_papers_json=self.json_for_prompt_insertion
         )
 
+        json_schema = {
+            "name": "grey_literature_results",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question_id": {"type": "string"},
+                                "paper_title": {"type": "string"},
+                                "paper_author": {"type": "string"},
+                                "paper_date": {"type": "string"},
+                                "doi": {"type": ["string", "null"]},
+                            },
+                            "required": [
+                                "question_id",
+                                "paper_title",
+                                "paper_author",
+                                "paper_date",
+                                "doi",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["results"],
+                "additionalProperties": False,
+            },
+        }
+
          # Call the LLM
-        response_dict = utils.call_reasoning_model(prompt=prompt,
-                                        llm_client=self.llm_client,
-                                        ai_model=self.ai_reasoning_model                                      
-                                        )
-        
+        response_dict = utils.call_reasoning_model(
+            input=prompt,
+            instructions = "",
+            llm_client=self.llm_client,
+            ai_model=self.ai_reasoning_model, 
+            json_schema=json_schema, 
+            reasoning_effort="medium", 
+            tools = "web_search",                          
+            )
         
         if response_dict["status"] == "success":
             response = response_dict["response"]
@@ -1361,25 +1452,24 @@ class AiLiteratureCheck:
 
         # Have a chat completion model clean the json
         # First create the fall back reflecting the json structure i am asking for back from the LLM
-        fallback = {
-            "results": [
-                {
-                    "question_id": "",
-                    "paper_title": "",
-                    "paper_author": "",
-                    "paper_date": "",
-                    "doi": None
-                }
-            ]
-        }
+        
         print("Passing the result of the AI assisted search to an LLM for cleaning....")
         # Now call the chat completion model to clean the JSON
-        clean_response = utils.call_chat_completion(ai_model=self.ai_chat_completion_model, 
-                                              llm_client=self.llm_client,
-                                              sys_prompt=Prompts().ai_literature_format_check(),
-                                              user_prompt=response,
-                                              return_json=True,
-                                              fall_back=fallback)
+        clean_response, error = utils.call_chat_completion(
+            ai_model=self.ai_chat_completion_model, 
+            llm_client=self.llm_client,
+            sys_prompt=Prompts().ai_literature_format_check(),
+            user_prompt=json.dumps(response),
+            return_json=True,
+            json_schema=json_schema,
+            fall_back=None, 
+            return_with_error=True
+            )
+
+        if clean_response is None:
+            raise RuntimeError(
+                f"Ai check cleaning failed. Error: {error}"
+            )
         
         self.clean_ai_lit_check = clean_response
         
